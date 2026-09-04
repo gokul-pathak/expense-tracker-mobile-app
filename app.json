@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Expense Tracker",
+    "slug": "personal-expense-tracker",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "expensetracker",
+    "userInterfaceStyle": "automatic",
+    "plugins": ["expo-router"],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "predictiveBackGestureEnabled": true
+    }
+  }
+}
