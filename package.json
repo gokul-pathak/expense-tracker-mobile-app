@@ -10,13 +10,18 @@
     "lint": "expo lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "babel-plugin-inline-import": "^3.0.0",
+    "babel-preset-expo": "~57.0.0",
+    "drizzle-orm": "^1.0.0-rc.4",
     "expo": "~57.0.20",
     "expo-constants": "~57.0.8",
     "expo-linking": "~57.0.4",
     "expo-router": "~57.0.19",
+    "expo-sqlite": "~57.0.2",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -27,6 +32,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "drizzle-kit": "^1.0.0-rc.4",
     "eslint": "^9.18.0",
     "eslint-config-expo": "~57.0.1",
     "eslint-config-prettier": "^10.1.8",
