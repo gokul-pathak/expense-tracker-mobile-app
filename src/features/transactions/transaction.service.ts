@@ -7,14 +7,16 @@ import * as repository from './transaction.repository';
 import type {
   CreateExpenseInput,
   CreateIncomeInput,
+  CreateTransferInput,
   CreateTransactionRecord,
   Transaction,
   UpdateExpenseInput,
   UpdateIncomeInput,
+  UpdateTransferInput,
   UpdateTransactionRecord,
 } from './transaction.types';
 
-type SupportedTransactionType = 'expense' | 'income';
+type CategorizedTransactionType = 'expense' | 'income';
 
 export function createExpense(input: CreateExpenseInput) {
   return createTransaction('expense', input);
@@ -22,6 +24,29 @@ export function createExpense(input: CreateExpenseInput) {
 
 export function createIncome(input: CreateIncomeInput) {
   return createTransaction('income', input);
+}
+
+export function createTransfer(input: CreateTransferInput) {
+  const sourceAccount = getActiveAccount(input.sourceAccountId);
+  const destinationAccount = getActiveAccount(input.destinationAccountId);
+  validateTransferAccounts(sourceAccount, destinationAccount);
+
+  const now = new Date();
+  return repository.createTransaction({
+    type: 'transfer',
+    amountMinor: normalizeAmount(input.amountMinor),
+    currency: sourceAccount.currency,
+    categoryId: null,
+    personId: null,
+    sourceAccountId: sourceAccount.id,
+    destinationAccountId: destinationAccount.id,
+    paymentMode: null,
+    transactionDate: normalizeTransactionDate(input.transactionDate),
+    title: 'Transfer',
+    note: normalizeOptionalText(input.note, 'Note') ?? null,
+    createdAt: now,
+    updatedAt: now,
+  });
 }
 
 export function getTransaction(id: number) {
@@ -48,13 +73,47 @@ export function updateIncome(id: number, input: UpdateIncomeInput) {
   return updateTransaction(id, 'income', input);
 }
 
+export function updateTransfer(id: number, input: UpdateTransferInput) {
+  const current = getTransaction(id);
+  if (current.type !== 'transfer') {
+    throw new ValidationError(`Transaction ${id} is not a transfer.`);
+  }
+  if (Object.keys(input).length === 0) {
+    throw new ValidationError('Provide at least one transaction field to update.');
+  }
+
+  const data: Omit<UpdateTransactionRecord, 'updatedAt'> = {};
+  if (input.amountMinor !== undefined) data.amountMinor = normalizeAmount(input.amountMinor);
+  if (input.transactionDate !== undefined) {
+    data.transactionDate = normalizeTransactionDate(input.transactionDate);
+  }
+  if (input.note !== undefined) data.note = normalizeOptionalText(input.note, 'Note');
+
+  if (input.sourceAccountId !== undefined || input.destinationAccountId !== undefined) {
+    const sourceAccount =
+      input.sourceAccountId !== undefined
+        ? getActiveAccount(input.sourceAccountId)
+        : getAccount(requireTransferAccountId(current.sourceAccountId, 'source'));
+    const destinationAccount =
+      input.destinationAccountId !== undefined
+        ? getActiveAccount(input.destinationAccountId)
+        : getAccount(requireTransferAccountId(current.destinationAccountId, 'destination'));
+    validateTransferAccounts(sourceAccount, destinationAccount);
+    data.sourceAccountId = sourceAccount.id;
+    data.destinationAccountId = destinationAccount.id;
+    data.currency = sourceAccount.currency;
+  }
+
+  return repository.updateTransaction(id, { ...data, updatedAt: new Date() }) ?? notFound(id);
+}
+
 export function deleteTransaction(id: number) {
   assertSupported(repository.getTransactionById(id) ?? notFound(id));
   return repository.deleteTransaction(id) ?? notFound(id);
 }
 
 function createTransaction(
-  type: SupportedTransactionType,
+  type: CategorizedTransactionType,
   input: CreateExpenseInput | CreateIncomeInput,
 ) {
   const account = getActiveAccount(input.accountId);
@@ -80,7 +139,7 @@ function createTransaction(
 
 function updateTransaction(
   id: number,
-  type: SupportedTransactionType,
+  type: CategorizedTransactionType,
   input: UpdateExpenseInput | UpdateIncomeInput,
 ) {
   const current = getTransaction(id);
@@ -130,10 +189,30 @@ function normalizeCreateCommon(input: CreateExpenseInput | CreateIncomeInput, cu
 }
 
 function getActiveAccount(id: number) {
-  const account = getAccountById(id) ?? accountNotFound(id);
-  if (account.isArchived)
-    throw new ValidationError('Archived accounts cannot be used for new transactions.');
+  const account = getAccount(id);
+  if (account.isArchived) throw new ValidationError('Choose an active account.');
   return account;
+}
+
+function getAccount(id: number) {
+  return getAccountById(id) ?? accountNotFound(id);
+}
+
+function requireTransferAccountId(value: number | null, role: 'source' | 'destination') {
+  if (value === null) throw new ValidationError(`Transfer ${role} account is required.`);
+  return value;
+}
+
+function validateTransferAccounts(
+  sourceAccount: ReturnType<typeof getAccount>,
+  destinationAccount: ReturnType<typeof getAccount>,
+) {
+  if (sourceAccount.id === destinationAccount.id) {
+    throw new ValidationError('Source and destination accounts must be different.');
+  }
+  if (sourceAccount.currency !== destinationAccount.currency) {
+    throw new ValidationError('Transfers between different currencies are not supported yet.');
+  }
 }
 
 function normalizeAmount(value: unknown) {
@@ -171,8 +250,12 @@ function normalizePaymentMode(value: unknown): PaymentMode | null | undefined {
 }
 
 function assertSupported(transaction: Transaction) {
-  if (transaction.type !== 'income' && transaction.type !== 'expense') {
-    throw new ValidationError(`Transaction type "${transaction.type}" is not supported in M2A.`);
+  if (
+    transaction.type !== 'income' &&
+    transaction.type !== 'expense' &&
+    transaction.type !== 'transfer'
+  ) {
+    throw new ValidationError(`Transaction type "${transaction.type}" is not supported.`);
   }
   return transaction;
 }

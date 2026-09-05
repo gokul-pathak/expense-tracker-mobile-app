@@ -10,7 +10,14 @@ export function getAccountBalance(accountId: number) {
 
   const incomeMinor = transactionRepository.getAccountIncomeTotal(accountId);
   const expenseMinor = transactionRepository.getAccountExpenseTotal(accountId);
-  const balance = account.openingBalanceMinor + incomeMinor - expenseMinor;
+  const transferReceivedMinor = transactionRepository.getAccountTransferReceivedTotal(accountId);
+  const transferSentMinor = transactionRepository.getAccountTransferSentTotal(accountId);
+  const balance =
+    account.openingBalanceMinor +
+    incomeMinor -
+    expenseMinor +
+    transferReceivedMinor -
+    transferSentMinor;
 
   if (!Number.isSafeInteger(balance)) {
     throw new ValidationError('Account balance exceeds supported integer minor-unit precision.');

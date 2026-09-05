@@ -42,6 +42,14 @@ export function getActiveAccountExpenseTotal() {
   return result?.total ?? 0;
 }
 
+export function getActiveAccountTransferReceivedTotal() {
+  return getActiveAccountTransactionTotal('transfer', transactions.destinationAccountId);
+}
+
+export function getActiveAccountTransferSentTotal() {
+  return getActiveAccountTransactionTotal('transfer', transactions.sourceAccountId);
+}
+
 export function getIncomeForRange(range: DateRange) {
   return getTransactionTotalForRange('income', range);
 }
@@ -84,6 +92,20 @@ function getAccountTotal(column: typeof accounts.openingBalanceMinor) {
     .select({ total: sql<number>`coalesce(sum(${column}), 0)` })
     .from(accounts)
     .where(eq(accounts.isArchived, false))
+    .get();
+
+  return result?.total ?? 0;
+}
+
+function getActiveAccountTransactionTotal(
+  type: 'income' | 'expense' | 'transfer',
+  accountColumn: typeof transactions.sourceAccountId,
+) {
+  const result = db
+    .select({ total: totalAmount })
+    .from(transactions)
+    .innerJoin(accounts, and(eq(accountColumn, accounts.id), eq(accounts.isArchived, false)))
+    .where(eq(transactions.type, type))
     .get();
 
   return result?.total ?? 0;

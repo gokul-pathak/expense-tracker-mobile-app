@@ -107,6 +107,14 @@ export function getAccountExpenseTotal(accountId: number) {
   return getAccountTotal('expense', transactions.sourceAccountId, accountId);
 }
 
+export function getAccountTransferReceivedTotal(accountId: number) {
+  return getAccountTotal('transfer', transactions.destinationAccountId, accountId);
+}
+
+export function getAccountTransferSentTotal(accountId: number) {
+  return getAccountTotal('transfer', transactions.sourceAccountId, accountId);
+}
+
 export function getIncomeTotal() {
   return getTransactionTotal('income');
 }

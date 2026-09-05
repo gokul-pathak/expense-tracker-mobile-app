@@ -48,9 +48,21 @@ export function getTotalBalance() {
     repository.getActiveAccountExpenseTotal(),
     'Active account expense total',
   );
+  const transferReceivedMinor = assertSafeInteger(
+    repository.getActiveAccountTransferReceivedTotal(),
+    'Active account transfer received total',
+  );
+  const transferSentMinor = assertSafeInteger(
+    repository.getActiveAccountTransferSentTotal(),
+    'Active account transfer sent total',
+  );
   return subtract(
-    add(openingBalanceMinor, incomeMinor, 'Total balance'),
-    expenseMinor,
+    add(
+      add(openingBalanceMinor, incomeMinor, 'Total balance'),
+      transferReceivedMinor,
+      'Total balance',
+    ),
+    add(expenseMinor, transferSentMinor, 'Total balance'),
     'Total balance',
   );
 }
