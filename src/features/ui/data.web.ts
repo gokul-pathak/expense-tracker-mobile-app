@@ -26,3 +26,5 @@ export const archivePerson = unavailable;
 export const unarchivePerson = unavailable;
 export const getAppSettings = unavailable;
 export const updateDefaultCurrency = unavailable;
+export const createExpense = unavailable;
+export const createIncome = unavailable;

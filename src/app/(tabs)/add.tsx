@@ -1,14 +1,8 @@
+import { router } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
 import { AppButton, AppText, Card, Screen } from '@/components/ui';
 import { colors, spacing } from '@/constants/theme';
-
-const actions = [
-  ['Add Expense', 'Milestone 2'],
-  ['Add Income', 'Milestone 2'],
-  ['Transfer', 'Milestone 4'],
-  ['Lend / Borrow', 'Milestone 4'],
-] as const;
 
 export default function AddScreen() {
   return (
@@ -17,20 +11,31 @@ export default function AddScreen() {
         <AppText variant="title" weight="700">
           Quick Add
         </AppText>
-        <AppText color={colors.textMuted}>
-          This establishes the intended entry point without implementing financial records yet.
-        </AppText>
+        <AppText color={colors.textMuted}>Record money in or out in a few steps.</AppText>
       </View>
 
       <Card style={styles.card}>
-        {actions.map(([label, milestone]) => (
-          <View key={label} style={styles.action}>
-            <AppButton label={label} disabled />
-            <AppText variant="caption" color={colors.textMuted}>
-              {milestone}
-            </AppText>
-          </View>
-        ))}
+        <AppButton
+          label="Add Expense"
+          onPress={() => router.push('/transaction/expense/new' as never)}
+        />
+        <AppButton
+          label="Add Income"
+          variant="secondary"
+          onPress={() => router.push('/transaction/income/new' as never)}
+        />
+        <View style={styles.action}>
+          <AppButton label="Transfer" disabled />
+          <AppText variant="caption" color={colors.textMuted}>
+            Coming in Milestone 4
+          </AppText>
+        </View>
+        <View style={styles.action}>
+          <AppButton label="Lend / Borrow" disabled />
+          <AppText variant="caption" color={colors.textMuted}>
+            Coming in Milestone 4
+          </AppText>
+        </View>
       </Card>
     </Screen>
   );
