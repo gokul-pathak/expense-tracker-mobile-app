@@ -42,6 +42,14 @@ export function getTransactionViews() {
     .map(toView);
 }
 
+export function getRecentTransactionViews(limit: number) {
+  return getTransactionViewQuery()
+    .orderBy(...transactionOrder)
+    .limit(limit)
+    .all()
+    .map(toView);
+}
+
 export function getTransactionViewById(id: number) {
   const result = getTransactionViewQuery(id).get();
   return result ? toView(result) : null;
