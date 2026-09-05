@@ -3,8 +3,11 @@ import { useFocusEffect, router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { AppButton, AppText, Card, NativeDataNotice, Screen, ScreenState } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
+import { formatMinorUnits } from '@/utils/money';
 import type { Person } from '@/features/people/person.types';
+import type { PersonFinancialSummary } from '@/features/transactions/transaction.types';
 import {
+  getPeopleFinancialSummary,
   isLocalFinanceDataAvailable,
   listActivePeople,
   listArchivedPeople,
@@ -12,6 +15,9 @@ import {
 export default function PeopleScreen() {
   const [archived, setArchived] = useState(false);
   const [people, setPeople] = useState<Person[]>([]);
+  const [summaries, setSummaries] = useState<PersonFinancialSummary[]>([]);
+  const [totalReceivableMinor, setTotalReceivableMinor] = useState(0);
+  const [totalLiabilityMinor, setTotalLiabilityMinor] = useState(0);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const load = useCallback(() => {
@@ -20,6 +26,10 @@ export default function PeopleScreen() {
     setFailed(false);
     try {
       setPeople(archived ? listArchivedPeople() : listActivePeople());
+      const financialSummary = getPeopleFinancialSummary();
+      setSummaries(financialSummary.people);
+      setTotalReceivableMinor(financialSummary.totalReceivableMinor);
+      setTotalLiabilityMinor(financialSummary.totalLiabilityMinor);
     } catch {
       setFailed(true);
     } finally {
@@ -58,6 +68,25 @@ export default function PeopleScreen() {
         <Tab label="Active" selected={!archived} onPress={() => setArchived(false)} />
         <Tab label="Archived" selected={archived} onPress={() => setArchived(true)} />
       </View>
+      {!archived ? (
+        <View style={styles.summary}>
+          <Card style={styles.summaryCard}>
+            <AppText variant="caption" color={colors.textMuted}>
+              You Will Receive
+            </AppText>
+            <AppText weight="700">{formatMinorUnits(totalReceivableMinor, 'NPR')}</AppText>
+          </Card>
+          <Card style={styles.summaryCard}>
+            <AppText variant="caption" color={colors.textMuted}>
+              You Need To Pay
+            </AppText>
+            <AppText weight="700">{formatMinorUnits(totalLiabilityMinor, 'NPR')}</AppText>
+          </Card>
+        </View>
+      ) : null}
+      {!archived && people.length > 0 && totalReceivableMinor === 0 && totalLiabilityMinor === 0 ? (
+        <AppText color={colors.textMuted}>No outstanding money with people yet.</AppText>
+      ) : null}
       {people.length === 0 ? (
         <ScreenState
           title={archived ? 'No archived people.' : 'No people added yet.'}
@@ -68,30 +97,58 @@ export default function PeopleScreen() {
           }
         />
       ) : (
-        people.map((person) => (
-          <Pressable
-            key={person.id}
-            accessibilityRole="button"
-            accessibilityLabel={`Edit ${person.name}`}
-            onPress={() => router.push(`/people/${person.id}` as never)}
-          >
-            <Card style={styles.row}>
-              <View>
-                <AppText weight="700">{person.name}</AppText>
-                {person.note ? (
-                  <AppText variant="caption" color={colors.textMuted}>
-                    {person.note}
-                  </AppText>
-                ) : null}
-              </View>
-              <AppText color={colors.textMuted}>›</AppText>
-            </Card>
-          </Pressable>
-        ))
+        people.map((person) => {
+          const summary = summaries.find((item) => item.personId === person.id);
+          return (
+            <Pressable
+              key={person.id}
+              accessibilityRole="button"
+              accessibilityLabel={personAccessibilityLabel(person, summary)}
+              onPress={() => router.push(`/people/${person.id}` as never)}
+            >
+              <Card style={styles.row}>
+                <View>
+                  <AppText weight="700">{person.name}</AppText>
+                  {summary && (summary.receivableMinor > 0 || summary.liabilityMinor > 0) ? (
+                    <FinancialState summary={summary} />
+                  ) : person.note ? (
+                    <AppText variant="caption" color={colors.textMuted}>
+                      {person.note}
+                    </AppText>
+                  ) : null}
+                </View>
+                <AppText color={colors.textMuted}>›</AppText>
+              </Card>
+            </Pressable>
+          );
+        })
       )}
       <AppButton label="+ Add Person" onPress={() => router.push('/people/new' as never)} />
     </Screen>
   );
+}
+function FinancialState({ summary }: { summary: PersonFinancialSummary }) {
+  return (
+    <View>
+      {summary.receivableMinor > 0 ? (
+        <AppText variant="caption" color={colors.textMuted}>
+          You will receive {formatMinorUnits(summary.receivableMinor, 'NPR')}
+        </AppText>
+      ) : null}
+      {summary.liabilityMinor > 0 ? (
+        <AppText variant="caption" color={colors.textMuted}>
+          You need to pay {formatMinorUnits(summary.liabilityMinor, 'NPR')}
+        </AppText>
+      ) : null}
+    </View>
+  );
+}
+function personAccessibilityLabel(person: Person, summary?: PersonFinancialSummary) {
+  if (summary?.receivableMinor)
+    return `${person.name} owes you ${summary.receivableMinor} minor units`;
+  if (summary?.liabilityMinor)
+    return `You owe ${person.name} ${summary.liabilityMinor} minor units`;
+  return `${person.name}, settled`;
 }
 function Tab({
   label,
@@ -132,4 +189,6 @@ const styles = StyleSheet.create({
   },
   selected: { backgroundColor: colors.primary },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  summary: { flexDirection: 'row', gap: spacing.sm },
+  summaryCard: { flex: 1, gap: spacing.xs },
 });

@@ -74,10 +74,13 @@ export type PersonTransactionItem = {
 export type TransactionView = Transaction & {
   categoryName: string | null;
   categoryIcon: string | null;
+  personName: string | null;
   accountId: number | null;
   accountName: string | null;
   accountIcon: string | null;
   accountType: string | null;
+  sourceAccountName: string | null;
+  destinationAccountName: string | null;
 };
 
 export type CreateTransactionRecord = Pick<

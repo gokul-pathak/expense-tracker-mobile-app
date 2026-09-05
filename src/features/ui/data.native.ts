@@ -31,12 +31,25 @@ export { getDashboardSummary } from '@/features/dashboard/dashboard.service';
 export {
   createExpense,
   createIncome,
+  createTransfer,
+  createLend,
+  createBorrow,
+  createRepaymentReceived,
+  createRepaymentPaid,
   deleteTransaction,
   getTransaction,
   getTransactionView,
   listTransactionViews,
   updateExpense,
   updateIncome,
+  updateTransfer,
+  updateLend,
+  updateBorrow,
+  updateRepaymentReceived,
+  updateRepaymentPaid,
+  getPersonFinancialSummary,
+  getPeopleFinancialSummary,
+  getPersonTransactionHistory,
 } from '@/features/transactions/transaction.service';
 
 export const isLocalFinanceDataAvailable = true;

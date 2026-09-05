@@ -277,6 +277,7 @@ function getTransactionViewQuery(id?: number) {
       transaction: transactions,
       categoryName: categories.name,
       categoryIcon: categories.icon,
+      personName: people.name,
       sourceAccountId: sourceAccount.id,
       sourceAccountName: sourceAccount.name,
       sourceAccountIcon: sourceAccount.icon,
@@ -288,11 +289,20 @@ function getTransactionViewQuery(id?: number) {
     })
     .from(transactions)
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
+    .leftJoin(people, eq(transactions.personId, people.id))
     .leftJoin(sourceAccount, eq(transactions.sourceAccountId, sourceAccount.id))
     .leftJoin(destinationAccount, eq(transactions.destinationAccountId, destinationAccount.id))
     .where(
       and(
-        inArray(transactions.type, ['expense', 'income']),
+        inArray(transactions.type, [
+          'expense',
+          'income',
+          'transfer',
+          'lend',
+          'borrow',
+          'repayment_received',
+          'repayment_paid',
+        ]),
         id ? eq(transactions.id, id) : undefined,
       ),
     );
@@ -302,7 +312,10 @@ function toView(
   result: ReturnType<typeof getTransactionViewQuery>['_']['result'][number],
 ): TransactionView {
   const account =
-    result.transaction.type === 'expense'
+    result.transaction.type === 'expense' ||
+    result.transaction.type === 'lend' ||
+    result.transaction.type === 'repayment_paid' ||
+    result.transaction.type === 'transfer'
       ? {
           id: result.sourceAccountId,
           name: result.sourceAccountName,
@@ -319,9 +332,12 @@ function toView(
     ...result.transaction,
     categoryName: result.categoryName,
     categoryIcon: result.categoryIcon,
+    personName: result.personName,
     accountId: account.id,
     accountName: account.name,
     accountIcon: account.icon,
     accountType: account.type,
+    sourceAccountName: result.sourceAccountName,
+    destinationAccountName: result.destinationAccountName,
   };
 }

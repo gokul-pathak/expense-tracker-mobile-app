@@ -1,7 +1,15 @@
 import type { TransactionView } from './transaction.types';
 
 export function getTransactionLabel(transaction: TransactionView) {
-  return transaction.categoryName ?? 'Unknown category';
+  if (transaction.type === 'expense' || transaction.type === 'income') {
+    return transaction.categoryName ?? 'Uncategorized';
+  }
+  if (transaction.type === 'transfer') return 'Transfer';
+  if (transaction.type === 'lend') return 'Money Given';
+  if (transaction.type === 'borrow') return 'Money Taken';
+  if (transaction.type === 'repayment_received') return 'Payment Received';
+  if (transaction.type === 'repayment_paid') return 'Repayment';
+  return transaction.title;
 }
 
 export function getTransactionAccountLabel(transaction: TransactionView) {
@@ -9,6 +17,15 @@ export function getTransactionAccountLabel(transaction: TransactionView) {
 }
 
 export function getTransactionDescription(transaction: TransactionView) {
+  if (transaction.type === 'transfer') {
+    return `${transaction.sourceAccountName ?? 'Unknown account'} -> ${transaction.destinationAccountName ?? 'Unknown account'}`;
+  }
+  if (transaction.type === 'lend' || transaction.type === 'borrow')
+    return transaction.personName ?? 'Person';
+  if (transaction.type === 'repayment_received')
+    return transaction.personName ? `${transaction.personName} paid` : 'Payment received';
+  if (transaction.type === 'repayment_paid')
+    return transaction.personName ? `You paid ${transaction.personName}` : 'Repayment paid';
   return (
     transaction.title || transaction.note || (transaction.type === 'expense' ? 'Expense' : 'Income')
   );

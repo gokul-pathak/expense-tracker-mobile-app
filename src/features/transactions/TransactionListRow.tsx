@@ -14,10 +14,11 @@ import { formatMinorUnits } from '@/utils/money';
 
 export function TransactionListRow({ transaction }: { transaction: TransactionView }) {
   const expense = transaction.type === 'expense';
+  const income = transaction.type === 'income';
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${getTransactionLabel(transaction)} ${expense ? 'expense' : 'income'}, ${formatMinorUnits(transaction.amountMinor, transaction.currency)}, ${getTransactionAccountLabel(transaction)}, ${formatTransactionDateSection(transaction.transactionDate)}`}
+      accessibilityLabel={`${getTransactionLabel(transaction)}, ${formatMinorUnits(transaction.amountMinor, transaction.currency)}, ${getTransactionDescription(transaction)}, ${formatTransactionDateSection(transaction.transactionDate)}`}
       onPress={() => router.push(`/transaction/${transaction.id}` as never)}
     >
       <Card style={styles.row}>
@@ -30,8 +31,12 @@ export function TransactionListRow({ transaction }: { transaction: TransactionVi
             {getTransactionAccountLabel(transaction)}
           </AppText>
         </View>
-        <AppText weight="700" color={expense ? colors.danger : colors.success}>
-          {expense ? '-' : '+'} {formatMinorUnits(transaction.amountMinor, transaction.currency)}
+        <AppText
+          weight="700"
+          color={expense ? colors.danger : income ? colors.success : colors.text}
+        >
+          {expense ? '- ' : income ? '+ ' : ''}
+          {formatMinorUnits(transaction.amountMinor, transaction.currency)}
         </AppText>
       </Card>
     </Pressable>

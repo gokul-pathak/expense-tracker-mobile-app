@@ -24,18 +24,16 @@ export default function AddScreen() {
           variant="secondary"
           onPress={() => router.push('/transaction/income/new' as never)}
         />
-        <View style={styles.action}>
-          <AppButton label="Transfer" disabled />
-          <AppText variant="caption" color={colors.textMuted}>
-            Coming in Milestone 4
-          </AppText>
-        </View>
-        <View style={styles.action}>
-          <AppButton label="Lend / Borrow" disabled />
-          <AppText variant="caption" color={colors.textMuted}>
-            Coming in Milestone 4
-          </AppText>
-        </View>
+        <AppButton
+          label="Transfer"
+          variant="secondary"
+          onPress={() => router.push('/transaction/transfer/new' as never)}
+        />
+        <AppButton
+          label="Lend / Borrow"
+          variant="secondary"
+          onPress={() => router.push('/transaction/people' as never)}
+        />
       </Card>
     </Screen>
   );
@@ -48,8 +46,5 @@ const styles = StyleSheet.create({
   },
   card: {
     gap: spacing.lg,
-  },
-  action: {
-    gap: spacing.xs,
   },
 });

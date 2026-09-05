@@ -86,32 +86,59 @@ export default function TransactionDetailScreen() {
 
   const transactionId = transaction.id;
   const expense = transaction.type === 'expense';
+  const income = transaction.type === 'income';
+  const title = getTransactionLabel(transaction);
   return (
-    <FormScreen title="Transaction">
+    <FormScreen title={title}>
       <View style={styles.content}>
         {error ? <AppText color={colors.danger}>{error}</AppText> : null}
         <View style={styles.amount}>
-          <AppText color={expense ? colors.danger : colors.success} weight="700">
-            {expense ? 'Expense' : 'Income'}
+          <AppText
+            color={expense ? colors.danger : income ? colors.success : colors.text}
+            weight="700"
+          >
+            {title}
           </AppText>
           <AppText variant="title" weight="700">
-            {expense ? '-' : '+'} {formatMinorUnits(transaction.amountMinor, transaction.currency)}
+            {expense ? '- ' : income ? '+ ' : ''}
+            {formatMinorUnits(transaction.amountMinor, transaction.currency)}
           </AppText>
         </View>
-        <DetailRow
-          label={expense ? 'Category' : 'Source'}
-          value={getTransactionLabel(transaction)}
-        />
-        <DetailRow label="Account" value={getTransactionAccountLabel(transaction)} />
+        {transaction.type === 'expense' || transaction.type === 'income' ? (
+          <DetailRow
+            label={expense ? 'Category' : 'Source'}
+            value={getTransactionLabel(transaction)}
+          />
+        ) : null}
+        {transaction.type === 'transfer' ? (
+          <>
+            <DetailRow label="From" value={transaction.sourceAccountName ?? 'Unknown account'} />
+            <DetailRow label="To" value={transaction.destinationAccountName ?? 'Unknown account'} />
+          </>
+        ) : null}
+        {transaction.type === 'lend' || transaction.type === 'repayment_paid' ? (
+          <DetailRow label="From" value={transaction.sourceAccountName ?? 'Unknown account'} />
+        ) : null}
+        {transaction.type === 'borrow' || transaction.type === 'repayment_received' ? (
+          <DetailRow label="To" value={transaction.destinationAccountName ?? 'Unknown account'} />
+        ) : null}
+        {transaction.personName ? (
+          <DetailRow label="Person" value={transaction.personName} />
+        ) : null}
+        {transaction.type === 'expense' || transaction.type === 'income' ? (
+          <DetailRow label="Account" value={getTransactionAccountLabel(transaction)} />
+        ) : null}
         <DetailRow label="Date" value={formatTransactionDate(transaction.transactionDate)} />
         {transaction.note ? <DetailRow label="Note" value={transaction.note} /> : null}
         {transaction.paymentMode ? (
           <DetailRow label="Payment Mode" value={paymentModeLabels[transaction.paymentMode]} />
         ) : null}
-        <AppButton
-          label="Edit"
-          onPress={() => router.push(`/transaction/${transaction.id}/edit` as never)}
-        />
+        {transaction.type === 'expense' || transaction.type === 'income' ? (
+          <AppButton
+            label="Edit"
+            onPress={() => router.push(`/transaction/${transaction.id}/edit` as never)}
+          />
+        ) : null}
         <AppButton
           label={deleting ? 'Deleting...' : 'Delete'}
           disabled={deleting}
@@ -137,7 +164,12 @@ export default function TransactionDetailScreen() {
             router.back();
           } catch (caught) {
             console.error('Could not delete transaction.', caught);
-            setError(getUserErrorMessage(caught));
+            const message = getUserErrorMessage(caught);
+            setError(
+              message.includes('cannot exceed money')
+                ? "This lending or borrowing record can't be deleted while repayment history exists. Delete the repayment records first."
+                : message,
+            );
           } finally {
             setDeleting(false);
           }
