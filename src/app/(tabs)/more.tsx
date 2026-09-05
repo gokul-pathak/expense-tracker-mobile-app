@@ -1,13 +1,14 @@
-import { StyleSheet, View } from 'react-native';
+import { router } from 'expo-router';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText, Card, Screen } from '@/components/ui';
 import { colors, spacing } from '@/constants/theme';
 
 const items = [
-  ['Accounts', 'M1'],
-  ['People', 'M4'],
-  ['Categories', 'M1'],
-  ['Settings', 'M1'],
+  ['▣', 'Accounts', '/accounts'],
+  ['◉', 'People', '/people'],
+  ['◇', 'Categories', '/categories'],
+  ['⚙', 'Settings', '/settings'],
 ] as const;
 
 export default function MoreScreen() {
@@ -17,19 +18,30 @@ export default function MoreScreen() {
         <AppText variant="title" weight="700">
           More
         </AppText>
-        <AppText color={colors.textMuted}>
-          Secondary features stay out of the bottom navigation.
-        </AppText>
+        <AppText color={colors.textMuted}>Manage the essentials of your finance setup.</AppText>
       </View>
 
       <Card style={styles.list}>
-        {items.map(([label, milestone], index) => (
-          <View key={label} style={[styles.row, index !== items.length - 1 && styles.divider]}>
-            <AppText weight="600">{label}</AppText>
-            <AppText variant="caption" color={colors.textMuted}>
-              {milestone}
-            </AppText>
-          </View>
+        {items.map(([icon, label, href], index) => (
+          <Pressable
+            key={label}
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${label}`}
+            onPress={() => router.push(href as never)}
+            style={({ pressed }) => [
+              styles.row,
+              index !== items.length - 1 && styles.divider,
+              pressed && styles.pressed,
+            ]}
+          >
+            <View style={styles.rowLabel}>
+              <AppText variant="subheading" color={colors.primary}>
+                {icon}
+              </AppText>
+              <AppText weight="600">{label}</AppText>
+            </View>
+            <AppText color={colors.textMuted}>›</AppText>
+          </Pressable>
         ))}
       </Card>
     </Screen>
@@ -50,6 +62,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  rowLabel: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  pressed: { backgroundColor: colors.surfaceMuted },
   divider: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,

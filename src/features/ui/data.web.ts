@@ -1,0 +1,28 @@
+const unavailable = () => {
+  throw new Error('Local finance data is only available in the Android/iOS app.');
+};
+
+export const isLocalFinanceDataAvailable = false;
+export const listAccounts = unavailable;
+export const listActiveAccounts = unavailable;
+export const listArchivedAccounts = unavailable;
+export const getAccount = unavailable;
+export const createAccount = unavailable;
+export const updateAccount = unavailable;
+export const archiveAccount = unavailable;
+export const unarchiveAccount = unavailable;
+export const listCategories = unavailable;
+export const listExpenseCategories = unavailable;
+export const listIncomeCategories = unavailable;
+export const getCategory = unavailable;
+export const createCategory = unavailable;
+export const updateCategory = unavailable;
+export const listPeople = unavailable;
+export const listActivePeople = unavailable;
+export const getPerson = unavailable;
+export const createPerson = unavailable;
+export const updatePerson = unavailable;
+export const archivePerson = unavailable;
+export const unarchivePerson = unavailable;
+export const getAppSettings = unavailable;
+export const updateDefaultCurrency = unavailable;
