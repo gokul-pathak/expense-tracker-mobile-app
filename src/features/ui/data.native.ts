@@ -27,6 +27,7 @@ export {
   unarchivePerson,
 } from '@/features/people/person.service';
 export { getAppSettings, updateDefaultCurrency } from '@/features/settings/settings.service';
+export { getDashboardSummary } from '@/features/dashboard/dashboard.service';
 export {
   createExpense,
   createIncome,

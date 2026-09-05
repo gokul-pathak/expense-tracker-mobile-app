@@ -2,18 +2,17 @@ import { useCallback, useState } from 'react';
 import { useFocusEffect, router } from 'expo-router';
 import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
-import { AppButton, AppText, Card, NativeDataNotice, Screen, ScreenState } from '@/components/ui';
+import { AppButton, AppText, NativeDataNotice, Screen, ScreenState } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
 import {
   formatTransactionDateSection,
   getTransactionAccountLabel,
-  getTransactionDescription,
   getTransactionLabel,
 } from '@/features/transactions/transaction-presentation';
+import { TransactionListRow } from '@/features/transactions/TransactionListRow';
 import { filterTransactionViews } from '@/features/transactions/transaction-list-filter';
 import type { TransactionView } from '@/features/transactions/transaction.types';
 import { isLocalFinanceDataAvailable, listTransactionViews } from '@/features/ui/data';
-import { formatMinorUnits } from '@/utils/money';
 
 type TypeFilter = 'all' | 'expense' | 'income';
 type DateFilter = 'all' | 'today' | 'week' | 'month';
@@ -155,7 +154,7 @@ export default function TransactionsScreen() {
                     {formatTransactionDateSection(transaction.transactionDate)}
                   </AppText>
                 ) : null}
-                <TransactionRow transaction={transaction} />
+                <TransactionListRow transaction={transaction} />
               </View>
             );
           })}
@@ -252,32 +251,6 @@ export default function TransactionsScreen() {
   }
 }
 
-function TransactionRow({ transaction }: { transaction: TransactionView }) {
-  const expense = transaction.type === 'expense';
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${getTransactionLabel(transaction)} ${expense ? 'expense' : 'income'}, ${formatMinorUnits(transaction.amountMinor, transaction.currency)}, ${getTransactionAccountLabel(transaction)}, ${formatTransactionDateSection(transaction.transactionDate)}`}
-      onPress={() => router.push(`/transaction/${transaction.id}` as never)}
-    >
-      <Card style={styles.row}>
-        <View style={styles.rowText}>
-          <AppText weight="700">{getTransactionLabel(transaction)}</AppText>
-          <AppText variant="caption" color={colors.textMuted}>
-            {getTransactionDescription(transaction)}
-          </AppText>
-          <AppText variant="caption" color={colors.textMuted}>
-            {getTransactionAccountLabel(transaction)}
-          </AppText>
-        </View>
-        <AppText weight="700" color={expense ? colors.danger : colors.success}>
-          {expense ? '-' : '+'} {formatMinorUnits(transaction.amountMinor, transaction.currency)}
-        </AppText>
-      </Card>
-    </Pressable>
-  );
-}
-
 function FilterChip({
   label,
   selected,
@@ -352,13 +325,6 @@ const styles = StyleSheet.create({
   chipSelected: { backgroundColor: colors.primary },
   list: { gap: spacing.md },
   itemWrap: { gap: spacing.sm },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-  },
-  rowText: { flex: 1, gap: spacing.xs },
   modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0, 0, 0, 0.32)' },
   modal: {
     maxHeight: '80%',
