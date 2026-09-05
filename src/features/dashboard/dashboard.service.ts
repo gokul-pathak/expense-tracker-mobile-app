@@ -56,13 +56,37 @@ export function getTotalBalance() {
     repository.getActiveAccountTransferSentTotal(),
     'Active account transfer sent total',
   );
+  const lentMinor = assertSafeInteger(
+    repository.getActiveAccountLendTotal(),
+    'Active account lend total',
+  );
+  const borrowedMinor = assertSafeInteger(
+    repository.getActiveAccountBorrowTotal(),
+    'Active account borrow total',
+  );
+  const repaymentsReceivedMinor = assertSafeInteger(
+    repository.getActiveAccountRepaymentReceivedTotal(),
+    'Active account repayments received total',
+  );
+  const repaymentsPaidMinor = assertSafeInteger(
+    repository.getActiveAccountRepaymentPaidTotal(),
+    'Active account repayments paid total',
+  );
   return subtract(
     add(
-      add(openingBalanceMinor, incomeMinor, 'Total balance'),
-      transferReceivedMinor,
+      add(
+        add(openingBalanceMinor, incomeMinor, 'Total balance'),
+        transferReceivedMinor,
+        'Total balance',
+      ),
+      add(borrowedMinor, repaymentsReceivedMinor, 'Total balance'),
       'Total balance',
     ),
-    add(expenseMinor, transferSentMinor, 'Total balance'),
+    add(
+      add(expenseMinor, transferSentMinor, 'Total balance'),
+      add(lentMinor, repaymentsPaidMinor, 'Total balance'),
+      'Total balance',
+    ),
     'Total balance',
   );
 }

@@ -1,22 +1,37 @@
 import { PAYMENT_MODES, type PaymentMode } from '@/db/constants';
 import { getAccountById } from '@/features/accounts/account.repository';
 import { getCategoryById } from '@/features/categories/category.repository';
+import { getPerson as getPersonById } from '@/features/people/person.service';
 import { NotFoundError, ValidationError } from '@/features/shared/errors';
 
 import * as repository from './transaction.repository';
 import type {
+  CreateBorrowInput,
   CreateExpenseInput,
   CreateIncomeInput,
+  CreateLendInput,
+  CreateRepaymentPaidInput,
+  CreateRepaymentReceivedInput,
   CreateTransferInput,
   CreateTransactionRecord,
+  PersonFinancialSummary,
   Transaction,
+  UpdateBorrowInput,
   UpdateExpenseInput,
   UpdateIncomeInput,
+  UpdateLendInput,
+  UpdateRepaymentPaidInput,
+  UpdateRepaymentReceivedInput,
   UpdateTransferInput,
   UpdateTransactionRecord,
 } from './transaction.types';
 
 type CategorizedTransactionType = 'expense' | 'income';
+type DebtTransactionType = 'lend' | 'borrow' | 'repayment_received' | 'repayment_paid';
+type DebtInput =
+  CreateLendInput | CreateBorrowInput | CreateRepaymentReceivedInput | CreateRepaymentPaidInput;
+type DebtUpdateInput =
+  UpdateLendInput | UpdateBorrowInput | UpdateRepaymentReceivedInput | UpdateRepaymentPaidInput;
 
 export function createExpense(input: CreateExpenseInput) {
   return createTransaction('expense', input);
@@ -47,6 +62,22 @@ export function createTransfer(input: CreateTransferInput) {
     createdAt: now,
     updatedAt: now,
   });
+}
+
+export function createLend(input: CreateLendInput) {
+  return createDebtTransaction('lend', input);
+}
+
+export function createBorrow(input: CreateBorrowInput) {
+  return createDebtTransaction('borrow', input);
+}
+
+export function createRepaymentReceived(input: CreateRepaymentReceivedInput) {
+  return createDebtTransaction('repayment_received', input);
+}
+
+export function createRepaymentPaid(input: CreateRepaymentPaidInput) {
+  return createDebtTransaction('repayment_paid', input);
 }
 
 export function getTransaction(id: number) {
@@ -107,9 +138,55 @@ export function updateTransfer(id: number, input: UpdateTransferInput) {
   return repository.updateTransaction(id, { ...data, updatedAt: new Date() }) ?? notFound(id);
 }
 
+export function updateLend(id: number, input: UpdateLendInput) {
+  return updateDebtTransaction(id, 'lend', input);
+}
+
+export function updateBorrow(id: number, input: UpdateBorrowInput) {
+  return updateDebtTransaction(id, 'borrow', input);
+}
+
+export function updateRepaymentReceived(id: number, input: UpdateRepaymentReceivedInput) {
+  return updateDebtTransaction(id, 'repayment_received', input);
+}
+
+export function updateRepaymentPaid(id: number, input: UpdateRepaymentPaidInput) {
+  return updateDebtTransaction(id, 'repayment_paid', input);
+}
+
 export function deleteTransaction(id: number) {
-  assertSupported(repository.getTransactionById(id) ?? notFound(id));
+  const transaction = assertSupported(repository.getTransactionById(id) ?? notFound(id));
+  if (isDebtTransaction(transaction.type)) {
+    const personId = requirePersonId(transaction.personId);
+    assertDebtInvariants(personId, transaction.type, undefined, id);
+  }
   return repository.deleteTransaction(id) ?? notFound(id);
+}
+
+export function getPersonFinancialSummary(personId: number): PersonFinancialSummary {
+  getPersonById(personId);
+  return toPersonFinancialSummary(personId, repository.getPersonDebtTotals(personId));
+}
+
+export function getPeopleFinancialSummary() {
+  const people = repository
+    .getPeopleDebtTotals()
+    .map((person) => toPersonFinancialSummary(person.personId, person));
+  people.sort((left, right) => {
+    const leftOutstanding = left.receivableMinor + left.liabilityMinor;
+    const rightOutstanding = right.receivableMinor + right.liabilityMinor;
+    return rightOutstanding - leftOutstanding || left.personId - right.personId;
+  });
+  return {
+    totalReceivableMinor: people.reduce((total, person) => total + person.receivableMinor, 0),
+    totalLiabilityMinor: people.reduce((total, person) => total + person.liabilityMinor, 0),
+    people,
+  };
+}
+
+export function getPersonTransactionHistory(personId: number) {
+  getPersonById(personId);
+  return repository.getPersonTransactionItems(personId);
 }
 
 function createTransaction(
@@ -135,6 +212,31 @@ function createTransaction(
     updatedAt: now,
   };
   return repository.createTransaction(record);
+}
+
+function createDebtTransaction(type: DebtTransactionType, input: DebtInput) {
+  const person = getActivePerson(input.personId);
+  const account = getActiveAccount(input.accountId);
+  const amountMinor = normalizeAmount(input.amountMinor);
+  assertDebtCurrency(person.id, account.currency);
+  assertDebtInvariants(person.id, type, amountMinor);
+
+  const now = new Date();
+  return repository.createTransaction({
+    type,
+    amountMinor,
+    currency: account.currency,
+    categoryId: null,
+    personId: person.id,
+    sourceAccountId: type === 'lend' || type === 'repayment_paid' ? account.id : null,
+    destinationAccountId: type === 'borrow' || type === 'repayment_received' ? account.id : null,
+    paymentMode: null,
+    transactionDate: normalizeTransactionDate(input.transactionDate),
+    title: debtTitle(type),
+    note: normalizeOptionalText(input.note, 'Note') ?? null,
+    createdAt: now,
+    updatedAt: now,
+  });
 }
 
 function updateTransaction(
@@ -177,6 +279,45 @@ function updateTransaction(
   return repository.updateTransaction(id, { ...data, updatedAt: new Date() }) ?? notFound(id);
 }
 
+function updateDebtTransaction(id: number, type: DebtTransactionType, input: DebtUpdateInput) {
+  const current = getTransaction(id);
+  if (current.type !== type) throw new ValidationError(`Transaction ${id} is not a ${type}.`);
+  if (Object.keys(input).length === 0) {
+    throw new ValidationError('Provide at least one transaction field to update.');
+  }
+
+  const currentPersonId = requirePersonId(current.personId);
+  const person =
+    input.personId === undefined ? getPersonById(currentPersonId) : getActivePerson(input.personId);
+  const accountId =
+    type === 'lend' || type === 'repayment_paid'
+      ? requireDebtAccountId(current.sourceAccountId)
+      : requireDebtAccountId(current.destinationAccountId);
+  const account =
+    input.accountId === undefined ? getAccount(accountId) : getActiveAccount(input.accountId);
+  const amountMinor =
+    input.amountMinor === undefined ? current.amountMinor : normalizeAmount(input.amountMinor);
+
+  // Removing a transaction from its current person must not leave their repayments unsupported.
+  if (person.id !== currentPersonId) {
+    assertDebtInvariants(currentPersonId, type, undefined, id);
+  }
+  assertDebtCurrency(person.id, account.currency, id);
+  assertDebtInvariants(person.id, type, amountMinor, id);
+
+  const data: Omit<UpdateTransactionRecord, 'updatedAt'> = {
+    amountMinor,
+    personId: person.id,
+    currency: account.currency,
+    sourceAccountId: type === 'lend' || type === 'repayment_paid' ? account.id : null,
+    destinationAccountId: type === 'borrow' || type === 'repayment_received' ? account.id : null,
+  };
+  if (input.transactionDate !== undefined)
+    data.transactionDate = normalizeTransactionDate(input.transactionDate);
+  if (input.note !== undefined) data.note = normalizeOptionalText(input.note, 'Note');
+  return repository.updateTransaction(id, { ...data, updatedAt: new Date() }) ?? notFound(id);
+}
+
 function normalizeCreateCommon(input: CreateExpenseInput | CreateIncomeInput, currency: string) {
   return {
     amountMinor: normalizeAmount(input.amountMinor),
@@ -194,12 +335,28 @@ function getActiveAccount(id: number) {
   return account;
 }
 
+function getActivePerson(id: number) {
+  const person = getPersonById(id);
+  if (person.isArchived) throw new ValidationError('Choose an active person.');
+  return person;
+}
+
 function getAccount(id: number) {
   return getAccountById(id) ?? accountNotFound(id);
 }
 
 function requireTransferAccountId(value: number | null, role: 'source' | 'destination') {
   if (value === null) throw new ValidationError(`Transfer ${role} account is required.`);
+  return value;
+}
+
+function requireDebtAccountId(value: number | null) {
+  if (value === null) throw new ValidationError('Debt transaction account is required.');
+  return value;
+}
+
+function requirePersonId(value: number | null) {
+  if (value === null) throw new ValidationError('Debt transaction person is required.');
   return value;
 }
 
@@ -253,11 +410,86 @@ function assertSupported(transaction: Transaction) {
   if (
     transaction.type !== 'income' &&
     transaction.type !== 'expense' &&
-    transaction.type !== 'transfer'
+    transaction.type !== 'transfer' &&
+    !isDebtTransaction(transaction.type)
   ) {
     throw new ValidationError(`Transaction type "${transaction.type}" is not supported.`);
   }
   return transaction;
+}
+
+function isDebtTransaction(type: Transaction['type']): type is DebtTransactionType {
+  return (
+    type === 'lend' ||
+    type === 'borrow' ||
+    type === 'repayment_received' ||
+    type === 'repayment_paid'
+  );
+}
+
+function assertDebtCurrency(personId: number, currency: string, excludeTransactionId?: number) {
+  const currencies = repository.getPersonDebtCurrencies(personId, excludeTransactionId);
+  if (currencies.some((existingCurrency) => existingCurrency !== currency)) {
+    throw new ValidationError('Multiple currencies for one person are not supported yet.');
+  }
+}
+
+function assertDebtInvariants(
+  personId: number,
+  type: DebtTransactionType,
+  candidateAmountMinor: number | undefined,
+  excludeTransactionId?: number,
+) {
+  const totals = repository.getPersonDebtTotals(personId, excludeTransactionId);
+  const lentMinor = totals.lentMinor + (type === 'lend' ? (candidateAmountMinor ?? 0) : 0);
+  const borrowedMinor =
+    totals.borrowedMinor + (type === 'borrow' ? (candidateAmountMinor ?? 0) : 0);
+  const repaymentsReceivedMinor =
+    totals.repaymentsReceivedMinor +
+    (type === 'repayment_received' ? (candidateAmountMinor ?? 0) : 0);
+  const repaymentsPaidMinor =
+    totals.repaymentsPaidMinor + (type === 'repayment_paid' ? (candidateAmountMinor ?? 0) : 0);
+
+  if (repaymentsReceivedMinor > lentMinor) {
+    throw new ValidationError('Repayments received cannot exceed money lent to this person.');
+  }
+  if (repaymentsPaidMinor > borrowedMinor) {
+    throw new ValidationError('Repayments paid cannot exceed money borrowed from this person.');
+  }
+}
+
+function toPersonFinancialSummary(
+  personId: number,
+  totals: ReturnType<typeof repository.getPersonDebtTotals>,
+): PersonFinancialSummary {
+  const receivableMinor = totals.lentMinor - totals.repaymentsReceivedMinor;
+  const liabilityMinor = totals.borrowedMinor - totals.repaymentsPaidMinor;
+  const hasRepayment = totals.repaymentsReceivedMinor > 0 || totals.repaymentsPaidMinor > 0;
+  return {
+    personId,
+    receivableMinor,
+    liabilityMinor,
+    netMinor: receivableMinor - liabilityMinor,
+    status:
+      receivableMinor === 0 && liabilityMinor === 0
+        ? 'settled'
+        : hasRepayment
+          ? 'partially_paid'
+          : 'pending',
+  };
+}
+
+function debtTitle(type: DebtTransactionType) {
+  switch (type) {
+    case 'lend':
+      return 'Lend';
+    case 'borrow':
+      return 'Borrow';
+    case 'repayment_received':
+      return 'Repayment received';
+    case 'repayment_paid':
+      return 'Repayment paid';
+  }
 }
 
 function capitalize(value: string) {

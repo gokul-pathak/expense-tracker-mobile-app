@@ -1,14 +1,16 @@
 import { alias } from 'drizzle-orm/sqlite-core';
-import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne, or, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
 import type { TransactionType } from '@/db/constants';
 import { accounts } from '@/db/schema/accounts';
 import { categories } from '@/db/schema/categories';
+import { people } from '@/db/schema/people';
 import { transactions } from '@/db/schema/transactions';
 
 import type {
   CreateTransactionRecord,
+  PersonTransactionItem,
   TransactionView,
   UpdateTransactionRecord,
 } from './transaction.types';
@@ -21,6 +23,7 @@ const transactionOrder = [
 
 const sourceAccount = alias(accounts, 'source_account');
 const destinationAccount = alias(accounts, 'destination_account');
+const debtTypes = ['lend', 'borrow', 'repayment_received', 'repayment_paid'] as const;
 
 export function getTransactions() {
   return db
@@ -123,6 +126,123 @@ export function getExpenseTotal() {
   return getTransactionTotal('expense');
 }
 
+export function getAccountLendTotal(accountId: number) {
+  return getAccountTotal('lend', transactions.sourceAccountId, accountId);
+}
+
+export function getAccountBorrowTotal(accountId: number) {
+  return getAccountTotal('borrow', transactions.destinationAccountId, accountId);
+}
+
+export function getAccountRepaymentReceivedTotal(accountId: number) {
+  return getAccountTotal('repayment_received', transactions.destinationAccountId, accountId);
+}
+
+export function getAccountRepaymentPaidTotal(accountId: number) {
+  return getAccountTotal('repayment_paid', transactions.sourceAccountId, accountId);
+}
+
+export function getLendTotal() {
+  return getTransactionTotal('lend');
+}
+
+export function getBorrowTotal() {
+  return getTransactionTotal('borrow');
+}
+
+export function getRepaymentReceivedTotal() {
+  return getTransactionTotal('repayment_received');
+}
+
+export function getRepaymentPaidTotal() {
+  return getTransactionTotal('repayment_paid');
+}
+
+export function getPersonDebtTotals(personId: number, excludeTransactionId?: number) {
+  const result = db
+    .select({
+      lentMinor: conditionalTotal('lend'),
+      borrowedMinor: conditionalTotal('borrow'),
+      repaymentsReceivedMinor: conditionalTotal('repayment_received'),
+      repaymentsPaidMinor: conditionalTotal('repayment_paid'),
+    })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.personId, personId),
+        inArray(transactions.type, debtTypes),
+        excludeTransactionId === undefined ? undefined : ne(transactions.id, excludeTransactionId),
+      ),
+    )
+    .get();
+
+  return {
+    lentMinor: result?.lentMinor ?? 0,
+    borrowedMinor: result?.borrowedMinor ?? 0,
+    repaymentsReceivedMinor: result?.repaymentsReceivedMinor ?? 0,
+    repaymentsPaidMinor: result?.repaymentsPaidMinor ?? 0,
+  };
+}
+
+export function getPersonDebtCurrencies(personId: number, excludeTransactionId?: number) {
+  return db
+    .selectDistinct({ currency: transactions.currency })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.personId, personId),
+        inArray(transactions.type, debtTypes),
+        excludeTransactionId === undefined ? undefined : ne(transactions.id, excludeTransactionId),
+      ),
+    )
+    .all()
+    .map((result) => result.currency);
+}
+
+export function getPeopleDebtTotals() {
+  return db
+    .select({
+      personId: people.id,
+      lentMinor: conditionalTotal('lend'),
+      borrowedMinor: conditionalTotal('borrow'),
+      repaymentsReceivedMinor: conditionalTotal('repayment_received'),
+      repaymentsPaidMinor: conditionalTotal('repayment_paid'),
+    })
+    .from(people)
+    .leftJoin(
+      transactions,
+      and(eq(transactions.personId, people.id), inArray(transactions.type, debtTypes)),
+    )
+    .groupBy(people.id)
+    .all();
+}
+
+export function getPersonTransactionItems(personId: number): PersonTransactionItem[] {
+  const account = alias(accounts, 'person_transaction_account');
+  return db
+    .select({
+      id: transactions.id,
+      type: transactions.type,
+      amountMinor: transactions.amountMinor,
+      accountId: account.id,
+      accountName: account.name,
+      accountIcon: account.icon,
+      transactionDate: transactions.transactionDate,
+      note: transactions.note,
+    })
+    .from(transactions)
+    .innerJoin(
+      account,
+      or(
+        eq(transactions.sourceAccountId, account.id),
+        eq(transactions.destinationAccountId, account.id),
+      ),
+    )
+    .where(and(eq(transactions.personId, personId), inArray(transactions.type, debtTypes)))
+    .orderBy(...transactionOrder)
+    .all() as PersonTransactionItem[];
+}
+
 function getAccountTotal(
   type: TransactionType,
   accountColumn: typeof transactions.sourceAccountId,
@@ -145,6 +265,10 @@ function getTransactionTotal(type: TransactionType) {
     .get();
 
   return result?.total ?? 0;
+}
+
+function conditionalTotal(type: (typeof debtTypes)[number]) {
+  return sql<number>`coalesce(sum(case when ${transactions.type} = ${type} then ${transactions.amountMinor} else 0 end), 0)`;
 }
 
 function getTransactionViewQuery(id?: number) {

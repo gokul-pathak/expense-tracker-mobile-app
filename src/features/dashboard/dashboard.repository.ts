@@ -50,6 +50,22 @@ export function getActiveAccountTransferSentTotal() {
   return getActiveAccountTransactionTotal('transfer', transactions.sourceAccountId);
 }
 
+export function getActiveAccountLendTotal() {
+  return getActiveAccountTransactionTotal('lend', transactions.sourceAccountId);
+}
+
+export function getActiveAccountBorrowTotal() {
+  return getActiveAccountTransactionTotal('borrow', transactions.destinationAccountId);
+}
+
+export function getActiveAccountRepaymentReceivedTotal() {
+  return getActiveAccountTransactionTotal('repayment_received', transactions.destinationAccountId);
+}
+
+export function getActiveAccountRepaymentPaidTotal() {
+  return getActiveAccountTransactionTotal('repayment_paid', transactions.sourceAccountId);
+}
+
 export function getIncomeForRange(range: DateRange) {
   return getTransactionTotalForRange('income', range);
 }
@@ -98,7 +114,8 @@ function getAccountTotal(column: typeof accounts.openingBalanceMinor) {
 }
 
 function getActiveAccountTransactionTotal(
-  type: 'income' | 'expense' | 'transfer',
+  type:
+    'income' | 'expense' | 'transfer' | 'lend' | 'borrow' | 'repayment_received' | 'repayment_paid',
   accountColumn: typeof transactions.sourceAccountId,
 ) {
   const result = db

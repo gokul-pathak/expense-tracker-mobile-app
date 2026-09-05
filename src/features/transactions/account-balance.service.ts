@@ -12,12 +12,20 @@ export function getAccountBalance(accountId: number) {
   const expenseMinor = transactionRepository.getAccountExpenseTotal(accountId);
   const transferReceivedMinor = transactionRepository.getAccountTransferReceivedTotal(accountId);
   const transferSentMinor = transactionRepository.getAccountTransferSentTotal(accountId);
+  const lentMinor = transactionRepository.getAccountLendTotal(accountId);
+  const borrowedMinor = transactionRepository.getAccountBorrowTotal(accountId);
+  const repaymentsReceivedMinor = transactionRepository.getAccountRepaymentReceivedTotal(accountId);
+  const repaymentsPaidMinor = transactionRepository.getAccountRepaymentPaidTotal(accountId);
   const balance =
     account.openingBalanceMinor +
     incomeMinor -
     expenseMinor +
     transferReceivedMinor -
-    transferSentMinor;
+    transferSentMinor -
+    lentMinor +
+    borrowedMinor +
+    repaymentsReceivedMinor -
+    repaymentsPaidMinor;
 
   if (!Number.isSafeInteger(balance)) {
     throw new ValidationError('Account balance exceeds supported integer minor-unit precision.');
@@ -32,7 +40,11 @@ export function getTotalBalance() {
   const total =
     openingBalanceMinor +
     transactionRepository.getIncomeTotal() -
-    transactionRepository.getExpenseTotal();
+    transactionRepository.getExpenseTotal() -
+    transactionRepository.getLendTotal() +
+    transactionRepository.getBorrowTotal() +
+    transactionRepository.getRepaymentReceivedTotal() -
+    transactionRepository.getRepaymentPaidTotal();
   if (!Number.isSafeInteger(total)) {
     throw new ValidationError('Total balance exceeds supported integer minor-unit precision.');
   }
