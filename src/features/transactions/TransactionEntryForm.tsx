@@ -11,13 +11,17 @@ import { colors, radii, spacing, typography } from '@/constants/theme';
 import { PAYMENT_MODES, type PaymentMode } from '@/db/constants';
 import type { Account } from '@/features/accounts/account.types';
 import type { Category } from '@/features/categories/category.types';
+import type { Transaction, UpdateExpenseInput } from '@/features/transactions/transaction.types';
 import { getUserErrorMessage } from '@/features/ui/error-message';
 import {
   createExpense,
   createIncome,
+  getAccount,
   listActiveAccounts,
   listExpenseCategories,
   listIncomeCategories,
+  updateExpense,
+  updateIncome,
 } from '@/features/ui/data';
 import { parseMoneyToMinorUnits } from '@/utils/money';
 
@@ -55,7 +59,13 @@ type FormValues = z.infer<typeof formSchema>;
 type EntryType = 'expense' | 'income';
 type Selector = 'category' | 'account' | 'paymentMode' | null;
 
-export function TransactionEntryForm({ type }: { type: EntryType }) {
+export function TransactionEntryForm({
+  type,
+  transaction,
+}: {
+  type: EntryType;
+  transaction?: Transaction;
+}) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,6 +77,7 @@ export function TransactionEntryForm({ type }: { type: EntryType }) {
   const [selectedAccountId, setSelectedAccountId] = useState<number>();
   const [selectedCategoryId, setSelectedCategoryId] = useState<number>();
   const [selectedPaymentMode, setSelectedPaymentMode] = useState<PaymentMode | null>(null);
+  const [initialAccount, setInitialAccount] = useState<Account>();
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const submitting = useRef(false);
@@ -75,6 +86,7 @@ export function TransactionEntryForm({ type }: { type: EntryType }) {
     handleSubmit,
     setValue,
     setError,
+    reset,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -86,9 +98,14 @@ export function TransactionEntryForm({ type }: { type: EntryType }) {
     },
   });
 
-  const selectedAccount = accounts.find((account) => account.id === selectedAccountId);
+  const selectedAccount =
+    accounts.find((account) => account.id === selectedAccountId) ?? initialAccount;
   const selectedCategory = categories.find((category) => category.id === selectedCategoryId);
-  const title = type === 'expense' ? 'Add Expense' : 'Add Income';
+  const title = transaction
+    ? `Edit ${type === 'expense' ? 'Expense' : 'Income'}`
+    : type === 'expense'
+      ? 'Add Expense'
+      : 'Add Income';
   const categoryLabel = type === 'expense' ? 'Category' : 'Source';
 
   const load = useCallback(() => {
@@ -98,7 +115,26 @@ export function TransactionEntryForm({ type }: { type: EntryType }) {
       const nextAccounts = listActiveAccounts();
       setAccounts(nextAccounts);
       setCategories(type === 'expense' ? listExpenseCategories() : listIncomeCategories());
-      if (nextAccounts.length === 1 && nextAccounts[0]) {
+      if (transaction) {
+        const accountId =
+          transaction.type === 'expense'
+            ? transaction.sourceAccountId
+            : transaction.destinationAccountId;
+        const account = accountId === null ? undefined : getAccount(accountId);
+        setInitialAccount(account);
+        setSelectedAccountId(accountId ?? undefined);
+        setSelectedCategoryId(transaction.categoryId ?? undefined);
+        setSelectedPaymentMode(transaction.paymentMode ?? null);
+        setSelectedDate(transaction.transactionDate);
+        reset({
+          amount: formatAmountInput(transaction.amountMinor),
+          accountId: accountId ?? undefined,
+          categoryId: transaction.categoryId ?? undefined,
+          transactionDate: formatDate(transaction.transactionDate),
+          note: transaction.note ?? '',
+          paymentMode: transaction.paymentMode ?? null,
+        });
+      } else if (nextAccounts.length === 1 && nextAccounts[0]) {
         setValue('accountId', nextAccounts[0].id);
         setSelectedAccountId(nextAccounts[0].id);
       }
@@ -108,7 +144,7 @@ export function TransactionEntryForm({ type }: { type: EntryType }) {
     } finally {
       setLoading(false);
     }
-  }, [setValue, type]);
+  }, [reset, setValue, transaction, type]);
   useFocusEffect(load);
 
   if (loading) {
@@ -249,7 +285,13 @@ export function TransactionEntryForm({ type }: { type: EntryType }) {
         ) : null}
 
         <AppButton
-          label={saving ? 'Saving...' : `Save ${type === 'expense' ? 'Expense' : 'Income'}`}
+          label={
+            saving
+              ? 'Saving...'
+              : transaction
+                ? `Save ${type === 'expense' ? 'Expense' : 'Income'}`
+                : `Save ${type === 'expense' ? 'Expense' : 'Income'}`
+          }
           disabled={saving}
           onPress={handleSubmit(save)}
         />
@@ -347,8 +389,33 @@ export function TransactionEntryForm({ type }: { type: EntryType }) {
         note: values.note.trim() || null,
         paymentMode: values.paymentMode,
       };
-      if (type === 'expense') createExpense(input);
-      else createIncome(input);
+      if (!transaction) {
+        if (type === 'expense') createExpense(input);
+        else createIncome(input);
+      } else {
+        const updates: UpdateExpenseInput = {};
+        const existingAccountId =
+          transaction.type === 'expense'
+            ? transaction.sourceAccountId
+            : transaction.destinationAccountId;
+        if (amountMinor !== transaction.amountMinor) updates.amountMinor = amountMinor;
+        if (values.categoryId !== transaction.categoryId) updates.categoryId = values.categoryId;
+        if (values.accountId !== existingAccountId) updates.accountId = values.accountId;
+        if (values.transactionDate !== formatDate(transaction.transactionDate)) {
+          updates.transactionDate = transactionDate;
+        }
+        if (values.note.trim() !== (transaction.note ?? ''))
+          updates.note = values.note.trim() || null;
+        if (values.paymentMode !== (transaction.paymentMode ?? null)) {
+          updates.paymentMode = values.paymentMode;
+        }
+        if (Object.keys(updates).length === 0) {
+          router.back();
+          return;
+        }
+        if (type === 'expense') updateExpense(transaction.id, updates);
+        else updateIncome(transaction.id, updates);
+      }
       router.back();
     } catch (error) {
       console.error(`Could not create ${type}.`, error);
@@ -515,6 +582,12 @@ function SelectionRow({
 
 function formatDate(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function formatAmountInput(minorUnits: number) {
+  const whole = Math.floor(minorUnits / 100);
+  const fraction = String(minorUnits % 100).padStart(2, '0');
+  return `${whole}.${fraction}`;
 }
 
 function parseDate(value: string) {

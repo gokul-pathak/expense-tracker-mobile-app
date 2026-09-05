@@ -32,6 +32,14 @@ export function listTransactions() {
   return repository.getTransactions().map(assertSupported);
 }
 
+export function listTransactionViews() {
+  return repository.getTransactionViews();
+}
+
+export function getTransactionView(id: number) {
+  return repository.getTransactionViewById(id) ?? notFound(id);
+}
+
 export function updateExpense(id: number, input: UpdateExpenseInput) {
   return updateTransaction(id, 'expense', input);
 }

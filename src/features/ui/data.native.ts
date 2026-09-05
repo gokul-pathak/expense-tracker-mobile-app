@@ -27,6 +27,15 @@ export {
   unarchivePerson,
 } from '@/features/people/person.service';
 export { getAppSettings, updateDefaultCurrency } from '@/features/settings/settings.service';
-export { createExpense, createIncome } from '@/features/transactions/transaction.service';
+export {
+  createExpense,
+  createIncome,
+  deleteTransaction,
+  getTransaction,
+  getTransactionView,
+  listTransactionViews,
+  updateExpense,
+  updateIncome,
+} from '@/features/transactions/transaction.service';
 
 export const isLocalFinanceDataAvailable = true;

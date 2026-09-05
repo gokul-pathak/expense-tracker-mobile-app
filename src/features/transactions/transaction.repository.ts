@@ -1,16 +1,26 @@
-import { and, desc, eq, or, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/sqlite-core';
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
 import type { TransactionType } from '@/db/constants';
+import { accounts } from '@/db/schema/accounts';
+import { categories } from '@/db/schema/categories';
 import { transactions } from '@/db/schema/transactions';
 
-import type { CreateTransactionRecord, UpdateTransactionRecord } from './transaction.types';
+import type {
+  CreateTransactionRecord,
+  TransactionView,
+  UpdateTransactionRecord,
+} from './transaction.types';
 
 const transactionOrder = [
   desc(transactions.transactionDate),
   desc(transactions.createdAt),
   desc(transactions.id),
 ] as const;
+
+const sourceAccount = alias(accounts, 'source_account');
+const destinationAccount = alias(accounts, 'destination_account');
 
 export function getTransactions() {
   return db
@@ -22,6 +32,19 @@ export function getTransactions() {
 
 export function getTransactionById(id: number) {
   return db.select().from(transactions).where(eq(transactions.id, id)).get() ?? null;
+}
+
+export function getTransactionViews() {
+  return getTransactionViewQuery()
+    .orderBy(...transactionOrder)
+    .limit(500)
+    .all()
+    .map(toView);
+}
+
+export function getTransactionViewById(id: number) {
+  const result = getTransactionViewQuery(id).get();
+  return result ? toView(result) : null;
 }
 
 export function getTransactionsByAccount(accountId: number) {
@@ -106,4 +129,59 @@ function getTransactionTotal(type: TransactionType) {
     .get();
 
   return result?.total ?? 0;
+}
+
+function getTransactionViewQuery(id?: number) {
+  return db
+    .select({
+      transaction: transactions,
+      categoryName: categories.name,
+      categoryIcon: categories.icon,
+      sourceAccountId: sourceAccount.id,
+      sourceAccountName: sourceAccount.name,
+      sourceAccountIcon: sourceAccount.icon,
+      sourceAccountType: sourceAccount.type,
+      destinationAccountId: destinationAccount.id,
+      destinationAccountName: destinationAccount.name,
+      destinationAccountIcon: destinationAccount.icon,
+      destinationAccountType: destinationAccount.type,
+    })
+    .from(transactions)
+    .leftJoin(categories, eq(transactions.categoryId, categories.id))
+    .leftJoin(sourceAccount, eq(transactions.sourceAccountId, sourceAccount.id))
+    .leftJoin(destinationAccount, eq(transactions.destinationAccountId, destinationAccount.id))
+    .where(
+      and(
+        inArray(transactions.type, ['expense', 'income']),
+        id ? eq(transactions.id, id) : undefined,
+      ),
+    );
+}
+
+function toView(
+  result: ReturnType<typeof getTransactionViewQuery>['_']['result'][number],
+): TransactionView {
+  const account =
+    result.transaction.type === 'expense'
+      ? {
+          id: result.sourceAccountId,
+          name: result.sourceAccountName,
+          icon: result.sourceAccountIcon,
+          type: result.sourceAccountType,
+        }
+      : {
+          id: result.destinationAccountId,
+          name: result.destinationAccountName,
+          icon: result.destinationAccountIcon,
+          type: result.destinationAccountType,
+        };
+  return {
+    ...result.transaction,
+    categoryName: result.categoryName,
+    categoryIcon: result.categoryIcon,
+    accountId: account.id,
+    accountName: account.name,
+    accountIcon: account.icon,
+    accountType: account.type,
+  };
 }

@@ -17,6 +17,15 @@ export type CreateIncomeInput = CreateExpenseInput;
 export type UpdateExpenseInput = Partial<CreateExpenseInput>;
 export type UpdateIncomeInput = Partial<CreateIncomeInput>;
 
+export type TransactionView = Transaction & {
+  categoryName: string | null;
+  categoryIcon: string | null;
+  accountId: number | null;
+  accountName: string | null;
+  accountIcon: string | null;
+  accountType: string | null;
+};
+
 export type CreateTransactionRecord = Pick<
   NewTransaction,
   | 'type'
