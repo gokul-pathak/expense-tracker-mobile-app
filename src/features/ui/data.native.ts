@@ -29,6 +29,15 @@ export {
 export { getAppSettings, updateDefaultCurrency } from '@/features/settings/settings.service';
 export { getDashboardSummary } from '@/features/dashboard/dashboard.service';
 export {
+  getCustomRange,
+  getExpenseCategoryBreakdown,
+  getIncomeExpenseTrend,
+  getRecommendedGranularity,
+  getReportRange,
+  getReportSummary,
+  getSimpleInsights,
+} from '@/features/reports/reports.service';
+export {
   createExpense,
   createIncome,
   createTransfer,
