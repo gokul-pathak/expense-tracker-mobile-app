@@ -1,7 +1,8 @@
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, or } from 'drizzle-orm';
 
 import { db } from '@/db';
 import { accounts } from '@/db/schema/accounts';
+import { transactions } from '@/db/schema/transactions';
 
 import type { CreateAccountRecord, UpdateAccountRecord } from './account.types';
 
@@ -29,6 +30,17 @@ export function getArchivedAccounts() {
 
 export function getAccountById(id: number) {
   return db.select().from(accounts).where(eq(accounts.id, id)).get() ?? null;
+}
+
+export function hasFinancialHistory(id: number) {
+  return (
+    db
+      .select({ id: transactions.id })
+      .from(transactions)
+      .where(or(eq(transactions.sourceAccountId, id), eq(transactions.destinationAccountId, id)))
+      .limit(1)
+      .get() !== undefined
+  );
 }
 
 export function createAccount(data: CreateAccountRecord) {

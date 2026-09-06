@@ -44,9 +44,7 @@ export async function runSeed(): Promise<void> {
     .where(sql`${appMetadata.key} = ${SEED_VERSION_KEY}`)
     .get();
 
-  if (versionRow?.value === SEED_VERSION) {
-    return;
-  }
+  if (versionRow?.value === SEED_VERSION) return;
 
   const now = new Date();
 
@@ -62,6 +60,7 @@ export async function runSeed(): Promise<void> {
           createdAt: now,
           updatedAt: now,
         })
+        .onConflictDoNothing({ target: categories.systemKey })
         .run();
     }
 
@@ -76,6 +75,7 @@ export async function runSeed(): Promise<void> {
           createdAt: now,
           updatedAt: now,
         })
+        .onConflictDoNothing({ target: categories.systemKey })
         .run();
     }
 
@@ -86,9 +86,16 @@ export async function runSeed(): Promise<void> {
         createdAt: now,
         updatedAt: now,
       })
+      .onConflictDoNothing({ target: settings.id })
       .run();
 
-    tx.insert(appMetadata).values({ key: SEED_VERSION_KEY, value: SEED_VERSION }).run();
+    tx.insert(appMetadata)
+      .values({ key: SEED_VERSION_KEY, value: SEED_VERSION })
+      .onConflictDoUpdate({
+        target: appMetadata.key,
+        set: { value: SEED_VERSION },
+      })
+      .run();
   });
 }
 

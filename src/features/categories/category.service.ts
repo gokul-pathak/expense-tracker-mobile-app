@@ -34,6 +34,9 @@ export function createCategory(input: CreateCategoryInput) {
 
 export function updateCategory(id: number, input: UpdateCategoryInput) {
   const current = getCategory(id);
+  if (current.isDefault) {
+    throw new ValidationError('Built-in categories cannot be modified.');
+  }
   const data = normalizeUpdate(input);
   assertNoDuplicate(data.name ?? current.name, data.type ?? current.type, id);
   return repository.updateCategory(id, { ...data, updatedAt: new Date() }) ?? notFound(id);

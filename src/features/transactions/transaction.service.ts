@@ -196,7 +196,7 @@ function createTransaction(
   const account = getActiveAccount(input.accountId);
   const category = getCategoryById(input.categoryId) ?? categoryNotFound(input.categoryId);
   if (category.type !== type) {
-    throw new ValidationError(`${capitalize(type)} transactions require a ${type} category.`);
+    throw new ValidationError(`${capitalize(type)} transactions require an ${type} category.`);
   }
 
   const now = new Date();
@@ -257,7 +257,7 @@ function updateTransaction(
   if (input.categoryId !== undefined) {
     const category = getCategoryById(input.categoryId) ?? categoryNotFound(input.categoryId);
     if (category.type !== type) {
-      throw new ValidationError(`${capitalize(type)} transactions require a ${type} category.`);
+      throw new ValidationError(`${capitalize(type)} transactions require an ${type} category.`);
     }
     data.categoryId = category.id;
   }

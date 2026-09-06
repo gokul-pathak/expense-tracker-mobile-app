@@ -31,7 +31,15 @@ export function createAccount(input: CreateAccountInput) {
 }
 
 export function updateAccount(id: number, input: UpdateAccountInput) {
+  const current = getAccount(id);
   const data = normalizeUpdate(input);
+  if (
+    data.currency !== undefined &&
+    data.currency !== current.currency &&
+    repository.hasFinancialHistory(id)
+  ) {
+    throw new ValidationError('Account currency cannot change after financial history exists.');
+  }
   return repository.updateAccount(id, { ...data, updatedAt: new Date() }) ?? notFound(id);
 }
 
@@ -84,8 +92,8 @@ function normalizeAccountType(value: unknown): AccountType {
 }
 
 function normalizeOpeningBalance(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isInteger(value)) {
-    throw new ValidationError('Opening balance must be an integer number of minor units.');
+  if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
+    throw new ValidationError('Opening balance must be a safe integer number of minor units.');
   }
   return value;
 }
