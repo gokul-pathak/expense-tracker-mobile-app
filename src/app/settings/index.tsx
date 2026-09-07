@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { AppButton, AppText, Card, NativeDataNotice, Screen, ScreenState } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
@@ -18,6 +18,16 @@ import {
 } from '@/features/ui/data';
 import type { BackupPreview } from '@/features/backup/backup.types';
 import { getUserErrorMessage } from '@/features/ui/error-message';
+import { AUTO_LOCK_OPTIONS, type LockConfig } from '@/features/security/app-lock.types';
+import {
+  changePin,
+  disableAppLock,
+  disableBiometrics,
+  enableAppLock,
+  enableBiometrics,
+  getLockConfig,
+  setAutoLockMs,
+} from '@/features/security/app-lock.service';
 
 const currencies = ['NPR', 'USD', 'INR'] as const;
 
@@ -28,6 +38,12 @@ export default function SettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [dataOperation, setDataOperation] = useState('');
   const [error, setError] = useState('');
+  const [lockConfig, setLockConfig] = useState<LockConfig>();
+  const [securityMode, setSecurityMode] = useState<'enable' | 'change' | 'disable'>();
+  const [currentPin, setCurrentPin] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [securityBusy, setSecurityBusy] = useState(false);
   const load = useCallback(() => {
     if (!isLocalFinanceDataAvailable) return;
     setLoading(true);
@@ -35,6 +51,9 @@ export default function SettingsScreen() {
     try {
       setCurrency(getAppSettings().defaultCurrency);
       setHasAccounts(listAccounts().length > 0);
+      getLockConfig()
+        .then(setLockConfig)
+        .catch(() => setLockConfig(undefined));
     } catch (caught) {
       setError(getUserErrorMessage(caught));
     } finally {
@@ -90,6 +109,73 @@ export default function SettingsScreen() {
             </Pressable>
           ))}
         </View>
+      </Card>
+      <Card style={styles.card}>
+        <AppText weight="700">Privacy & Security</AppText>
+        {!lockConfig?.enabled ? (
+          <>
+            <AppText color={colors.textMuted}>
+              Set a 4 to 8 digit PIN to protect app access.
+            </AppText>
+            {securityMode === 'enable' ? (
+              securityForm('Create App Lock', 'Enable App Lock')
+            ) : (
+              <AppButton
+                label="Enable App Lock"
+                disabled={securityBusy || Boolean(dataOperation)}
+                onPress={() => beginSecurity('enable')}
+              />
+            )}
+          </>
+        ) : (
+          <>
+            <AppText color={colors.textMuted}>
+              App Lock is on. It protects app access, not the SQLite file itself.
+            </AppText>
+            <AppText weight="600">Auto-Lock</AppText>
+            <View style={styles.options}>
+              {AUTO_LOCK_OPTIONS.map((timeout) => (
+                <Pressable
+                  key={timeout}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: lockConfig.autoLockMs === timeout }}
+                  onPress={() => updateAutoLock(timeout)}
+                  style={[styles.option, lockConfig.autoLockMs === timeout && styles.selected]}
+                >
+                  <AppText
+                    weight="600"
+                    color={lockConfig.autoLockMs === timeout ? colors.surface : colors.text}
+                  >
+                    {timeout === 0 ? 'Immediately' : `${timeout / 60_000} min`}
+                  </AppText>
+                </Pressable>
+              ))}
+            </View>
+            <AppButton
+              label={lockConfig.biometricEnabled ? 'Disable Biometrics' : 'Enable Biometrics'}
+              disabled={securityBusy}
+              onPress={toggleBiometrics}
+            />
+            {securityMode === 'change' ? (
+              securityForm('Change PIN', 'Save New PIN')
+            ) : (
+              <AppButton
+                label="Change PIN"
+                disabled={securityBusy}
+                onPress={() => beginSecurity('change')}
+              />
+            )}
+            {securityMode === 'disable' ? (
+              securityForm('Disable App Lock', 'Disable App Lock')
+            ) : (
+              <AppButton
+                label="Disable App Lock"
+                disabled={securityBusy}
+                onPress={() => beginSecurity('disable')}
+              />
+            )}
+          </>
+        )}
       </Card>
       {hasAccounts ? (
         <AppText color={colors.textMuted}>
@@ -151,6 +237,139 @@ export default function SettingsScreen() {
       setError(getUserErrorMessage(caught));
     } finally {
       setSaving(false);
+    }
+  }
+  function beginSecurity(mode: 'enable' | 'change' | 'disable') {
+    setSecurityMode(mode);
+    setCurrentPin('');
+    setNewPin('');
+    setConfirmPin('');
+    setError('');
+  }
+  function securityForm(title: string, submitLabel: string) {
+    const needsCurrent = securityMode === 'change' || securityMode === 'disable';
+    return (
+      <View style={styles.securityForm}>
+        <AppText weight="600">{title}</AppText>
+        {needsCurrent ? (
+          <TextInput
+            value={currentPin}
+            onChangeText={setCurrentPin}
+            secureTextEntry
+            keyboardType="number-pad"
+            maxLength={8}
+            autoComplete="off"
+            placeholder="Current PIN"
+            style={styles.pinInput}
+          />
+        ) : null}
+        {securityMode !== 'disable' ? (
+          <>
+            <TextInput
+              value={newPin}
+              onChangeText={setNewPin}
+              secureTextEntry
+              keyboardType="number-pad"
+              maxLength={8}
+              autoComplete="off"
+              placeholder="New PIN"
+              style={styles.pinInput}
+            />
+            <TextInput
+              value={confirmPin}
+              onChangeText={setConfirmPin}
+              secureTextEntry
+              keyboardType="number-pad"
+              maxLength={8}
+              autoComplete="off"
+              placeholder="Confirm PIN"
+              style={styles.pinInput}
+            />
+          </>
+        ) : null}
+        <AppButton
+          label={securityBusy ? 'Saving...' : submitLabel}
+          disabled={securityBusy}
+          onPress={submitSecurity}
+        />
+        <AppButton
+          label="Cancel"
+          disabled={securityBusy}
+          onPress={() => setSecurityMode(undefined)}
+        />
+      </View>
+    );
+  }
+  async function submitSecurity() {
+    if (!securityMode) return;
+    if (securityMode !== 'disable' && newPin !== confirmPin) {
+      setError('PIN entries do not match.');
+      return;
+    }
+    setSecurityBusy(true);
+    setError('');
+    try {
+      if (securityMode === 'enable') await enableAppLock(newPin);
+      else if (securityMode === 'change') {
+        const result = await changePin(currentPin, newPin);
+        if (result.status !== 'success')
+          throw new Error(
+            result.status === 'rate_limited'
+              ? `Try again in ${Math.ceil(result.retryAfterMs / 1000)} seconds.`
+              : 'Current PIN is incorrect.',
+          );
+      } else {
+        const result = await disableAppLock(currentPin);
+        if (result.status !== 'success')
+          throw new Error(
+            result.status === 'rate_limited'
+              ? `Try again in ${Math.ceil(result.retryAfterMs / 1000)} seconds.`
+              : 'Current PIN is incorrect.',
+          );
+      }
+      setLockConfig(await getLockConfig());
+      setSecurityMode(undefined);
+      setCurrentPin('');
+      setNewPin('');
+      setConfirmPin('');
+    } catch (caught) {
+      setError(getUserErrorMessage(caught));
+    } finally {
+      setSecurityBusy(false);
+    }
+  }
+  async function toggleBiometrics() {
+    if (!lockConfig) return;
+    setSecurityBusy(true);
+    setError('');
+    try {
+      if (lockConfig.biometricEnabled) await disableBiometrics();
+      else {
+        const result = await enableBiometrics();
+        if (result.status !== 'success')
+          throw new Error(
+            result.status === 'cancelled'
+              ? 'Biometric authentication was cancelled.'
+              : 'Biometrics are unavailable.',
+          );
+      }
+      setLockConfig(await getLockConfig());
+    } catch (caught) {
+      setError(getUserErrorMessage(caught));
+    } finally {
+      setSecurityBusy(false);
+    }
+  }
+  async function updateAutoLock(timeout: (typeof AUTO_LOCK_OPTIONS)[number]) {
+    if (securityBusy) return;
+    setSecurityBusy(true);
+    try {
+      await setAutoLockMs(timeout);
+      setLockConfig(await getLockConfig());
+    } catch (caught) {
+      setError(getUserErrorMessage(caught));
+    } finally {
+      setSecurityBusy(false);
     }
   }
   async function run(name: string, operation: () => Promise<unknown>) {
@@ -227,4 +446,13 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
   },
   selected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  securityForm: { gap: spacing.sm },
+  pinInput: {
+    minHeight: 44,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    color: colors.text,
+  },
 });

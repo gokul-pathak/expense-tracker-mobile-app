@@ -152,4 +152,9 @@ describe('backup validation', () => {
     backup.data.accounts[0]!.currency = 'npr';
     expect(() => validateBackup(backup)).toThrow('invalid');
   });
+  it('rejects security credentials in the portable backup envelope', () => {
+    const backup = fixture() as BackupEnvelope & { pinVerifier?: string };
+    backup.pinVerifier = 'never-exported';
+    expect(() => validateBackup(backup)).toThrow('invalid');
+  });
 });
