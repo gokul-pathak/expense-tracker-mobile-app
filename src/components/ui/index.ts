@@ -1,4 +1,5 @@
 export * from './AppButton';
+export * from './AppErrorBoundary';
 export * from './AppText';
 export * from './Card';
 export * from './FormField';

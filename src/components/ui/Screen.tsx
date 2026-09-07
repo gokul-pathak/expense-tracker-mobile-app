@@ -16,6 +16,8 @@ export function Screen({ children, scroll = false, contentStyle }: Props) {
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <ScrollView
           contentContainerStyle={[styles.content, contentStyle]}
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets
           showsVerticalScrollIndicator={false}
         >
           {children}

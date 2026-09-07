@@ -262,7 +262,7 @@ function FilterChip({
 }) {
   return (
     <Pressable
-      accessibilityRole="button"
+      accessibilityRole="radio"
       accessibilityState={{ selected }}
       onPress={onPress}
       style={[styles.chip, selected && styles.chipSelected]}
@@ -285,7 +285,7 @@ function FilterOption({
 }) {
   return (
     <Pressable
-      accessibilityRole="button"
+      accessibilityRole="radio"
       accessibilityState={{ selected }}
       onPress={onPress}
       style={styles.option}
@@ -297,9 +297,13 @@ function FilterOption({
 }
 
 function uniqueBy<T>(items: T[], key: (item: T) => number | null) {
-  return items.filter(
-    (item, index) => items.findIndex((candidate) => key(candidate) === key(item)) === index,
-  );
+  const seen = new Set<number | null>();
+  return items.filter((item) => {
+    const value = key(item);
+    if (seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  });
 }
 
 const styles = StyleSheet.create({

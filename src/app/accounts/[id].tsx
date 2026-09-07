@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { useFocusEffect, useLocalSearchParams, router } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Alert } from 'react-native';
 import {
   AppButton,
@@ -21,19 +21,26 @@ import {
 import { getUserErrorMessage } from '@/features/ui/error-message';
 import { colors } from '@/constants/theme';
 import { parseMoneyToMinorUnits } from '@/utils/money';
+import { parseRouteId } from '@/utils/route-id';
 export default function AccountDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [account, setAccount] = useState<Account>();
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const routeId = parseRouteId(id);
   const load = useCallback(() => {
-    if (!isLocalFinanceDataAvailable) return;
+    if (!isLocalFinanceDataAvailable || routeId === null) {
+      setAccount(undefined);
+      setError('This link is invalid.');
+      return;
+    }
+    setError('');
     try {
-      setAccount(getAccount(Number(id)));
+      setAccount(getAccount(routeId));
     } catch (caught) {
       setError(getUserErrorMessage(caught));
     }
-  }, [id]);
+  }, [routeId]);
   useFocusEffect(load);
   if (!isLocalFinanceDataAvailable)
     return (
@@ -44,11 +51,7 @@ export default function AccountDetailScreen() {
   if (error && !account)
     return (
       <Screen>
-        <ScreenState
-          title="Could not load account"
-          description={error}
-          retry={() => router.back()}
-        />
+        <ScreenState title="Could not load account" description={error} retry={load} />
       </Screen>
     );
   if (!account)

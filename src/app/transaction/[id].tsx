@@ -24,6 +24,7 @@ import {
 } from '@/features/ui/data';
 import { getUserErrorMessage } from '@/features/ui/error-message';
 import { formatMinorUnits } from '@/utils/money';
+import { parseRouteId } from '@/utils/route-id';
 
 const paymentModeLabels = {
   cash: 'Cash',
@@ -43,19 +44,24 @@ export default function TransactionDetailScreen() {
   const [failed, setFailed] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
+  const routeId = parseRouteId(id);
   const load = useCallback(() => {
-    if (!isLocalFinanceDataAvailable || !id) return;
+    if (!isLocalFinanceDataAvailable || routeId === null) {
+      setLoading(false);
+      setFailed(true);
+      return;
+    }
     setLoading(true);
     setFailed(false);
     try {
-      setTransaction(getTransactionView(Number(id)));
+      setTransaction(getTransactionView(routeId));
     } catch (caught) {
       console.error('Could not load transaction.', caught);
       setFailed(true);
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [routeId]);
   useFocusEffect(load);
 
   if (!isLocalFinanceDataAvailable)
@@ -78,7 +84,9 @@ export default function TransactionDetailScreen() {
       <FormScreen title="Transaction">
         <ScreenState
           title="Transaction unavailable"
-          description="This transaction may have been deleted."
+          description={
+            routeId === null ? 'This link is invalid.' : 'This transaction may have been deleted.'
+          }
           retry={load}
         />
       </FormScreen>

@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { initializeDatabase } from '@/db/migrations';
 import { AppLockGate } from '@/features/security/AppLockGate';
+import { AppErrorBoundary } from '@/components/ui';
 
 export default function RootLayout() {
   const [migrationError, setMigrationError] = useState<Error>();
@@ -56,10 +57,12 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <AppLockGate>
-        <StatusBar style="dark" />
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(tabs)" />
-        </Stack>
+        <AppErrorBoundary>
+          <StatusBar style="dark" />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(tabs)" />
+          </Stack>
+        </AppErrorBoundary>
       </AppLockGate>
     </SafeAreaProvider>
   );
