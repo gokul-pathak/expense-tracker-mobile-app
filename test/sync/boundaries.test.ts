@@ -30,9 +30,17 @@ const localWritePaths = [
   'src/features/transactions/transaction.service.ts',
   'src/features/backup/backup.service.ts',
   'src/features/sync/sync.repository.ts',
+  'src/features/sync/sync-source.repository.ts',
   'src/features/sync/remote-apply.repository.ts',
   'src/features/sync/sync.types.ts',
   'src/features/sync/uuid.ts',
+  'src/features/sync/mapping/local-to-remote.ts',
+];
+
+/** The one module allowed to reach the cloud, and the orchestration above it. */
+const pushPaths = [
+  'src/features/sync/push-sync.service.ts',
+  'src/features/sync/push-sync.types.ts',
 ];
 
 function read(path: string) {
@@ -49,10 +57,30 @@ describe('M7C boundaries', () => {
     }
   });
 
-  it('adds no push, pull, realtime, or automatic sync trigger', () => {
+  it('keeps local write paths free of push orchestration', () => {
     for (const path of localWritePaths) {
       const source = read(path);
-      expect(source, path).not.toMatch(/syncNow|pushSync|pullSync|realtime|subscribe\(/i);
+      expect(source, path).not.toMatch(/pushPendingChanges|realtime|subscribe\(/i);
+    }
+  });
+
+  it('confines cloud data access to the Supabase sync repository', () => {
+    for (const path of pushPaths) {
+      const source = read(path);
+      // Orchestration may name the adapter but must not speak PostgREST itself.
+      expect(source, path).not.toMatch(/\.from\(|\.schema\(/);
+    }
+    const adapter = read('src/features/sync/remote/supabase-sync.repository.ts');
+    expect(adapter).toMatch(/\.schema\(REMOTE_SCHEMA\)/);
+    // Push writes only: downloading cloud rows belongs to Pull Sync.
+    expect(adapter).not.toMatch(/\.select\(|\.eq\(/);
+  });
+
+  it('adds no pull sync, realtime, or background scheduler', () => {
+    for (const path of [...pushPaths, 'src/features/sync/remote/supabase-sync.repository.ts']) {
+      const source = read(path);
+      expect(source, path).not.toMatch(/applyRemote|pullCursor|realtime|channel\(/i);
+      expect(source, path).not.toMatch(/setInterval|setTimeout|BackgroundFetch|TaskManager/);
     }
   });
 
@@ -87,6 +115,8 @@ describe('M7C boundaries', () => {
         'created_at',
         'attempt_count',
         'last_error',
+        'revision',
+        'last_attempt_at',
       ]);
       const rows = rawClient().prepare('SELECT * FROM sync_outbox').all();
       expect(JSON.stringify(rows)).not.toContain('123456');
@@ -111,6 +141,7 @@ describe('M7C boundaries', () => {
         'pull_cursor',
         'last_successful_sync_at',
         'last_sync_error',
+        'last_successful_push_at',
       ]);
     });
   });

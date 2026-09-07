@@ -1,8 +1,9 @@
-# Sync foundation (M7C)
+# Sync (M7C foundation + M7D push)
 
-Local synchronization primitives only. There is no Push Sync, no Pull Sync, no Realtime, and no
-network call anywhere in this folder. SQLite stays authoritative and the app remains fully
-local-first; every module here can be exercised offline, signed out, or with Supabase unconfigured.
+Local synchronization primitives and outgoing push. There is no Pull Sync, no Realtime and no
+background scheduling. SQLite stays authoritative and the app remains fully local-first: every
+local write works offline, signed out, or with Supabase unconfigured, and no screen ever reads
+cloud data.
 
 ## Identity
 
@@ -24,6 +25,9 @@ Origin is expressed by which function you call, not by a global flag:
 | `remote`    | `remote-apply.repository.ts` (`applyRemote*`) | no                |
 | `migration` | migration SQL, `seed.ts`, `restoreBackup`     | no                |
 
+Push is a fourth kind of write and queues nothing either: it uploads and then removes queue
+entries, and never writes a domain value.
+
 A remote apply that queued an upload would push the same record straight back, so the remote path
 has no access to `enqueueSyncMutation` at all. A later local edit of a remotely applied record does
 queue normally.
@@ -36,6 +40,10 @@ centralized in `src/db/schema/sync.constants.ts`.
 
 Every user mutation writes its domain row and its outbox row in one SQLite transaction. If either
 half fails, neither is committed.
+
+Each entry carries a `revision`, bumped whenever a newer local mutation coalesces onto it. Push
+snapshots the revision before uploading and removes the entry only if it still matches, so an edit
+made while a push is in flight is never acknowledged away.
 
 Coalescing keeps one pending logical operation per `(entity_type, entity_sync_id)`:
 
@@ -78,3 +86,33 @@ Backup format version 2 carries `syncId` so restoring keeps cloud identity. Vers
 restore fine and receive fresh stable identities. Outbox rows, the pull cursor, attempt counters and
 any session material are never part of a backup. Restore replaces the local dataset, so it clears
 the queue and resets the cursor: restored data waits for the explicit cloud reconciliation M7F adds.
+
+## Push (M7D)
+
+`pushPendingChanges()` drains the outbox into Supabase:
+
+```text
+pending entry -> current local row -> map -> validate -> cloud upsert -> acknowledge
+```
+
+It runs only when an authenticated user id equals `sync_state.linked_user_id`. Signing in is not
+enough: without that link, signing into any account would publish an existing local database.
+Linking is M7F's job, so in this milestone only tests make a database eligible.
+
+`remote/supabase-sync.repository.ts` is the only module that speaks to the cloud, always through the
+user's own session so row level security applies. There is no service-role path. A deletion is an
+upsert carrying `deleted_at`, so tombstones stay visible to other devices; archiving is an ordinary
+update and never becomes a cloud deletion.
+
+Uploads run in dependency-safe phases — parents, then transactions, then parent tombstones — so a
+cloud foreign key never sees a child before its parent. `mapping/local-to-remote.ts` resolves local
+integer foreign keys to global sync identities with one lookup per relation per batch; a local
+integer never leaves the device, and derived figures are never uploaded at all.
+
+An entry is removed only after the cloud confirms exactly that work. Everything else — network
+failure, RLS rejection, a constraint violation, a crash before acknowledgement — leaves it queued
+with compact attempt metadata. Repeating an upload is safe because upserts are keyed by identity;
+losing a queued change would not be.
+
+`last_successful_push_at` records push progress only. It is not a synced state, and no user-facing
+screen may claim one until pull exists.

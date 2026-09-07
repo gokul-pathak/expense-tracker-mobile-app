@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { db } from '@/db';
 import { SYNC_ENTITY_TYPES, syncOutbox, type SyncEntityType } from '@/db/schema';
 
+import { isPushRunning } from './push-sync.service';
 import {
   countPendingSyncMutations,
   getSyncState,
@@ -15,6 +16,10 @@ export type SyncFoundationReport = {
   linkedUserId: string | null;
   pullCursor: number | null;
   lastSuccessfulSyncAt: Date | null;
+  /** Push progress only. Pull does not exist, so this is not a "synced" marker. */
+  lastSuccessfulPushAt: Date | null;
+  lastSyncError: string | null;
+  pushRunning: boolean;
 };
 
 /**
@@ -40,6 +45,9 @@ export function verifySyncFoundation(): SyncFoundationReport {
     linkedUserId: state?.linkedUserId ?? null,
     pullCursor: state?.pullCursor ?? null,
     lastSuccessfulSyncAt: state?.lastSuccessfulSyncAt ?? null,
+    lastSuccessfulPushAt: state?.lastSuccessfulPushAt ?? null,
+    lastSyncError: state?.lastSyncError ?? null,
+    pushRunning: isPushRunning(),
   };
 }
 

@@ -1,8 +1,8 @@
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
 import { syncOutbox, syncState } from '@/db/schema';
-import type { SyncEntityType, SyncOutboxEntry } from '@/db/schema';
+import type { SyncEntityType, SyncOperation, SyncOutboxEntry } from '@/db/schema';
 
 import type { SyncMutation, SyncWriter } from './sync.types';
 import { requireSyncId } from './uuid';
@@ -32,10 +32,18 @@ export function enqueueSyncMutation(writer: SyncWriter, mutation: SyncMutation):
   }
 
   if (pending) {
-    // Coalesce onto the existing entry and keep its queue position stable.
+    // Coalesce onto the existing entry, keeping its queue position stable. The
+    // revision bump tells an in-flight push that this entry is newer than what
+    // it uploaded, so acknowledgement will leave the new intent pending.
     writer
       .update(syncOutbox)
-      .set({ operation: mutation.operation, attemptCount: 0, lastError: null })
+      .set({
+        operation: mutation.operation,
+        revision: sql`${syncOutbox.revision} + 1`,
+        attemptCount: 0,
+        lastAttemptAt: null,
+        lastError: null,
+      })
       .where(eq(syncOutbox.id, pending.id))
       .run();
     return;
@@ -48,9 +56,57 @@ export function enqueueSyncMutation(writer: SyncWriter, mutation: SyncMutation):
       entitySyncId,
       operation: mutation.operation,
       createdAt: mutation.createdAt ?? new Date(),
+      revision: 1,
       attemptCount: 0,
     })
     .run();
+}
+
+/**
+ * Pending work for one push phase, in queue order.
+ *
+ * `excludeIds` skips entries that already failed in the current push run so a
+ * run cannot loop forever on the same blocked operation.
+ */
+export function listPendingSyncMutationsForPush(filter: {
+  entityTypes: readonly SyncEntityType[];
+  operations: readonly SyncOperation[];
+  limit: number;
+  excludeIds?: readonly number[];
+}): SyncOutboxEntry[] {
+  if (filter.entityTypes.length === 0 || filter.operations.length === 0) return [];
+  return db
+    .select()
+    .from(syncOutbox)
+    .where(
+      and(
+        inArray(syncOutbox.entityType, [...filter.entityTypes]),
+        inArray(syncOutbox.operation, [...filter.operations]),
+        filter.excludeIds === undefined || filter.excludeIds.length === 0
+          ? undefined
+          : notInArray(syncOutbox.id, [...filter.excludeIds]),
+      ),
+    )
+    .orderBy(asc(syncOutbox.createdAt), asc(syncOutbox.id))
+    .limit(filter.limit)
+    .all();
+}
+
+/**
+ * Removes one entry after the cloud confirmed exactly this work.
+ *
+ * The revision guard is the reason a local edit made while a push was in flight
+ * is never lost: a coalesced entry has a newer revision and stays pending.
+ * Returns whether the entry was removed.
+ */
+export function acknowledgeSyncMutation(id: number, revision: number): boolean {
+  return (
+    db
+      .delete(syncOutbox)
+      .where(and(eq(syncOutbox.id, id), eq(syncOutbox.revision, revision)))
+      .returning({ id: syncOutbox.id })
+      .get() !== undefined
+  );
 }
 
 /** Pending operations in deterministic push order. */
@@ -78,14 +134,28 @@ export function getPendingSyncMutation(
   return readPending(db, entityType, entitySyncId);
 }
 
-/** Records a failed push attempt. M7D calls this; M7C only defines it. */
-export function markSyncAttempt(id: number, errorCode?: string | null): void {
+/**
+ * Records a failed push attempt.
+ *
+ * The revision guard keeps this from overwriting a newer local mutation that
+ * coalesced onto the entry while the attempt was in flight.
+ */
+export function markSyncAttempt(
+  id: number,
+  errorCode?: string | null,
+  options: { revision?: number; attemptedAt?: Date } = {},
+): void {
   db.update(syncOutbox)
     .set({
       attemptCount: sql`${syncOutbox.attemptCount} + 1`,
+      lastAttemptAt: options.attemptedAt ?? new Date(),
       lastError: normalizeErrorCode(errorCode),
     })
-    .where(eq(syncOutbox.id, id))
+    .where(
+      options.revision === undefined
+        ? eq(syncOutbox.id, id)
+        : and(eq(syncOutbox.id, id), eq(syncOutbox.revision, options.revision)),
+    )
     .run();
 }
 
@@ -108,6 +178,7 @@ export function updateSyncState(
     linkedUserId: string | null;
     pullCursor: number | null;
     lastSuccessfulSyncAt: Date | null;
+    lastSuccessfulPushAt: Date | null;
     lastSyncError: string | null;
   }>,
   writer: SyncWriter = db,

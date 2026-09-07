@@ -169,14 +169,22 @@ describe('backup with sync identity', () => {
 
     await setupDatabase();
     makeAccount('Local only');
-    updateSyncState({ pullCursor: 17, lastSuccessfulSyncAt: new Date() });
+    updateSyncState({
+      pullCursor: 17,
+      lastSuccessfulSyncAt: new Date(),
+      lastSuccessfulPushAt: new Date(),
+    });
     expect(countPendingSyncMutations()).toBe(1);
 
     restoreBackup(backup);
 
     // Restore is not a user mutation and the previous queue no longer applies.
     expect(countPendingSyncMutations()).toBe(0);
-    expect(getSyncState()).toMatchObject({ pullCursor: null, lastSuccessfulSyncAt: null });
+    expect(getSyncState()).toMatchObject({
+      pullCursor: null,
+      lastSuccessfulSyncAt: null,
+      lastSuccessfulPushAt: null,
+    });
   });
 
   it('restores a pre-M7C backup by assigning fresh stable identities', async () => {

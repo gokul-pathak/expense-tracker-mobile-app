@@ -17,7 +17,14 @@ export const syncOutbox = sqliteTable(
     entitySyncId: text('entity_sync_id').notNull(),
     operation: text('operation').notNull().$type<SyncOperation>(),
     createdAt: int('created_at', { mode: 'timestamp_ms' }).notNull(),
+    /**
+     * Bumped every time a newer local mutation coalesces onto this entry.
+     * Push snapshots it and acknowledges only the exact work it uploaded, so a
+     * user edit made mid-push can never be acknowledged away.
+     */
+    revision: int('revision').notNull().default(1),
     attemptCount: int('attempt_count').notNull().default(0),
+    lastAttemptAt: int('last_attempt_at', { mode: 'timestamp_ms' }),
     // Compact technical failure code only. Never a remote response body.
     lastError: text('last_error'),
   },
@@ -36,6 +43,8 @@ export const syncState = sqliteTable(
     linkedUserId: text('linked_user_id'),
     pullCursor: int('pull_cursor'),
     lastSuccessfulSyncAt: int('last_successful_sync_at', { mode: 'timestamp_ms' }),
+    // Push-only marker. A full sync timestamp needs pull, which does not exist yet.
+    lastSuccessfulPushAt: int('last_successful_push_at', { mode: 'timestamp_ms' }),
     lastSyncError: text('last_sync_error'),
   },
   (t) => [check('single_sync_state_row', sql`${t.singletonId} = 1`)],

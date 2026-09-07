@@ -181,7 +181,15 @@ export function restoreBackup(backup: AnyBackupEnvelope): void {
     for (const item of valid.data.appMetadata) tx.insert(appMetadata).values(item).run();
     // Queued work referred to the replaced dataset, and pull position no longer applies.
     clearSyncOutbox(tx);
-    updateSyncState({ pullCursor: null, lastSuccessfulSyncAt: null, lastSyncError: null }, tx);
+    updateSyncState(
+      {
+        pullCursor: null,
+        lastSuccessfulSyncAt: null,
+        lastSuccessfulPushAt: null,
+        lastSyncError: null,
+      },
+      tx,
+    );
   });
 }
 
