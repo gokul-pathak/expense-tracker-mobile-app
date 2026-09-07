@@ -5,6 +5,8 @@ export const settings = sqliteTable('settings', {
   defaultCurrency: text('default_currency').notNull(),
   createdAt: int('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: int('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  syncId: text('sync_id'),
+  deletedAt: int('deleted_at', { mode: 'timestamp_ms' }),
 });
 
 export type Setting = typeof settings.$inferSelect;

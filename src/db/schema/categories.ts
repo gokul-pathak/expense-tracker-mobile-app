@@ -16,6 +16,8 @@ export const categories = sqliteTable(
     isDefault: int('is_default', { mode: 'boolean' }).notNull().default(false),
     createdAt: int('created_at', { mode: 'timestamp_ms' }).notNull(),
     updatedAt: int('updated_at', { mode: 'timestamp_ms' }).notNull(),
+    syncId: text('sync_id'),
+    deletedAt: int('deleted_at', { mode: 'timestamp_ms' }),
   },
   (t) => [
     check('valid_category_type', sql`\`type\` IN (${sql.raw(categoryTypeList)})`),

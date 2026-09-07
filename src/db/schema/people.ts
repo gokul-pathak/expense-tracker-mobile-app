@@ -7,6 +7,8 @@ export const people = sqliteTable('people', {
   isArchived: int('is_archived', { mode: 'boolean' }).notNull().default(false),
   createdAt: int('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: int('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  syncId: text('sync_id'),
+  deletedAt: int('deleted_at', { mode: 'timestamp_ms' }),
 });
 
 export type Person = typeof people.$inferSelect;

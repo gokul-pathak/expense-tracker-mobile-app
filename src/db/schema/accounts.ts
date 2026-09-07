@@ -17,6 +17,8 @@ export const accounts = sqliteTable(
     isArchived: int('is_archived', { mode: 'boolean' }).notNull().default(false),
     createdAt: int('created_at', { mode: 'timestamp_ms' }).notNull(),
     updatedAt: int('updated_at', { mode: 'timestamp_ms' }).notNull(),
+    syncId: text('sync_id'),
+    deletedAt: int('deleted_at', { mode: 'timestamp_ms' }),
   },
   (t) => [check('valid_account_type', sql`\`type\` IN (${sql.raw(accountTypeList)})`)],
 );

@@ -26,6 +26,8 @@ export const transactions = sqliteTable(
     note: text('note'),
     createdAt: int('created_at', { mode: 'timestamp_ms' }).notNull(),
     updatedAt: int('updated_at', { mode: 'timestamp_ms' }).notNull(),
+    syncId: text('sync_id'),
+    deletedAt: int('deleted_at', { mode: 'timestamp_ms' }),
   },
   (t) => [
     check('valid_transaction_type', sql`\`type\` IN (${sql.raw(txTypeList)})`),
