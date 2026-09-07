@@ -16,14 +16,14 @@ Out of scope: Realtime, OS background work, automatic production upload, Budgets
 
 The SQLite migration history is `drizzle/20260904095006_third_titania/migration.sql` and `drizzle/20260904151616_damp_raider/migration.sql`. The current schema is:
 
-| Table | Primary key | Relevant fields | Sync classification |
-| --- | --- | --- | --- |
-| `accounts` | `id INTEGER PRIMARY KEY AUTOINCREMENT` | name, type, opening balance minor units, currency, icon, `is_archived`, created/updated timestamps | Syncable domain data |
-| `categories` | `id INTEGER PRIMARY KEY AUTOINCREMENT` | name, income/expense type, icon, nullable unique `system_key`, `is_default`, timestamps | Syncable domain data |
-| `people` | `id INTEGER PRIMARY KEY AUTOINCREMENT` | name, note, `is_archived`, timestamps | Syncable domain data |
-| `transactions` | `id INTEGER PRIMARY KEY AUTOINCREMENT` | type, amount minor units, currency, category/account/person integer FKs, payment mode, financial date, title, note, timestamps | Syncable domain data |
-| `settings` | `id INTEGER PRIMARY KEY` | seeded singleton `id = 1`, default currency, timestamps | Syncable user-global domain preference |
-| `app_metadata` | `key TEXT PRIMARY KEY` | `value TEXT`; currently seed-version bookkeeping | Local-only |
+| Table          | Primary key                            | Relevant fields                                                                                                                | Sync classification                    |
+| -------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------- |
+| `accounts`     | `id INTEGER PRIMARY KEY AUTOINCREMENT` | name, type, opening balance minor units, currency, icon, `is_archived`, created/updated timestamps                             | Syncable domain data                   |
+| `categories`   | `id INTEGER PRIMARY KEY AUTOINCREMENT` | name, income/expense type, icon, nullable unique `system_key`, `is_default`, timestamps                                        | Syncable domain data                   |
+| `people`       | `id INTEGER PRIMARY KEY AUTOINCREMENT` | name, note, `is_archived`, timestamps                                                                                          | Syncable domain data                   |
+| `transactions` | `id INTEGER PRIMARY KEY AUTOINCREMENT` | type, amount minor units, currency, category/account/person integer FKs, payment mode, financial date, title, note, timestamps | Syncable domain data                   |
+| `settings`     | `id INTEGER PRIMARY KEY`               | seeded singleton `id = 1`, default currency, timestamps                                                                        | Syncable user-global domain preference |
+| `app_metadata` | `key TEXT PRIMARY KEY`                 | `value TEXT`; currently seed-version bookkeeping                                                                               | Local-only                             |
 
 `created_at`, `updated_at`, and `transaction_date` are SQLite integer epoch milliseconds, mapped to `Date` in Drizzle. `transaction_date` is a financial date, never a sync ordering value. No table has a global identifier today. All financial foreign keys currently use local integer IDs. Local IDs must not leave the device as cross-device references.
 
@@ -86,7 +86,7 @@ Built-in categories retain `system_key` as their stable semantic identity. Each 
 
 ## Cloud schema contract
 
-`supabase/migrations/20260907000000_m7a_cloud_sync_draft.sql` is a draft, not applied or referenced by the app. It creates `accounts`, `categories`, `people`, `transactions`, `settings`, and server-generated `sync_changes` in a dedicated `sync` schema.
+`supabase/migrations/20260907000000_cloud_sync.sql` is the M7B migration source of truth, not yet referenced by the mobile financial data path. It creates `accounts`, `categories`, `people`, `transactions`, `settings`, and server-generated `sync_changes` in a dedicated `sync` schema. Auth-user deletion is restrictive; cloud account deletion is out of scope.
 
 Each domain row has global `sync_id UUID`, `user_id UUID REFERENCES auth.users`, domain fields, `created_at` and `updated_at` preserving the domain history, `deleted_at` for tombstones, `server_updated_at`, and `server_revision`. Transaction references are UUID sync IDs, never SQLite IDs. Composite foreign keys include `user_id` to prevent cross-user relationships. Domain data uses `BIGINT` for all minor monetary units and integer epoch milliseconds for financial/domain timestamps. JavaScript must validate every received or sent integer with `Number.isSafeInteger`; values outside `Number.MIN_SAFE_INTEGER..MAX_SAFE_INTEGER` are rejected even though PostgreSQL `BIGINT` can store more.
 

@@ -1,0 +1,6 @@
+project_id = "personal-expense-tracker"
+
+[api]
+enabled = true
+schemas = ["public", "sync"]
+extra_search_path = ["public", "extensions"]

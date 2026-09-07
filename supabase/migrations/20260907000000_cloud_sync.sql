@@ -1,5 +1,4 @@
--- M7A architecture draft only. This is not applied by the app and does not create a client connection.
--- M7B must review it against the provisioned Supabase/Postgres version before applying.
+-- M7B cloud schema. The mobile app does not yet read or write these financial tables.
 
 create schema if not exists sync;
 revoke all on schema sync from public;
@@ -7,7 +6,7 @@ grant usage on schema sync to authenticated;
 
 create table sync.accounts (
   sync_id uuid primary key,
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete restrict,
   name text not null,
   type text not null check (type in ('cash', 'bank', 'wallet', 'credit_card', 'other')),
   opening_balance_minor bigint not null default 0,
@@ -24,7 +23,7 @@ create table sync.accounts (
 
 create table sync.categories (
   sync_id uuid primary key,
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete restrict,
   name text not null,
   type text not null check (type in ('income', 'expense')),
   icon text,
@@ -42,7 +41,7 @@ create unique index categories_user_system_key_unique
 
 create table sync.people (
   sync_id uuid primary key,
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete restrict,
   name text not null,
   note text,
   is_archived boolean not null default false,
@@ -56,7 +55,7 @@ create table sync.people (
 
 create table sync.settings (
   sync_id uuid primary key,
-  user_id uuid not null unique references auth.users(id) on delete cascade,
+  user_id uuid not null unique references auth.users(id) on delete restrict,
   default_currency text not null,
   created_at bigint not null,
   updated_at bigint not null,
@@ -68,7 +67,7 @@ create table sync.settings (
 
 create table sync.transactions (
   sync_id uuid primary key,
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete restrict,
   type text not null check (type in (
     'income', 'expense', 'transfer', 'lend', 'borrow',
     'repayment_received', 'repayment_paid', 'investment', 'investment_return'
@@ -99,6 +98,16 @@ create table sync.transactions (
   check (
     source_account_sync_id is null or destination_account_sync_id is null
     or source_account_sync_id <> destination_account_sync_id
+  ),
+  check (
+    type not in ('expense', 'income', 'transfer', 'lend', 'borrow', 'repayment_received', 'repayment_paid')
+    or (type = 'expense' and source_account_sync_id is not null and destination_account_sync_id is null and category_sync_id is not null and person_sync_id is null)
+    or (type = 'income' and destination_account_sync_id is not null and source_account_sync_id is null and category_sync_id is not null and person_sync_id is null)
+    or (type = 'transfer' and source_account_sync_id is not null and destination_account_sync_id is not null and category_sync_id is null and person_sync_id is null)
+    or (type = 'lend' and source_account_sync_id is not null and destination_account_sync_id is null and person_sync_id is not null and category_sync_id is null)
+    or (type = 'borrow' and destination_account_sync_id is not null and source_account_sync_id is null and person_sync_id is not null and category_sync_id is null)
+    or (type = 'repayment_received' and destination_account_sync_id is not null and source_account_sync_id is null and person_sync_id is not null and category_sync_id is null)
+    or (type = 'repayment_paid' and source_account_sync_id is not null and destination_account_sync_id is null and person_sync_id is not null and category_sync_id is null)
   )
 );
 
@@ -106,7 +115,7 @@ create table sync.transactions (
 create sequence sync.change_sequence;
 create table sync.sync_changes (
   sequence bigint primary key default nextval('sync.change_sequence'),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete restrict,
   entity_type text not null check (entity_type in ('accounts', 'categories', 'people', 'settings', 'transactions')),
   entity_sync_id uuid not null,
   server_revision bigint not null,
@@ -167,14 +176,15 @@ alter table sync.settings force row level security;
 alter table sync.transactions force row level security;
 alter table sync.sync_changes force row level security;
 
-create policy accounts_owner on sync.accounts for all using (user_id = auth.uid()) with check (user_id = auth.uid());
-create policy categories_owner on sync.categories for all using (user_id = auth.uid()) with check (user_id = auth.uid());
-create policy people_owner on sync.people for all using (user_id = auth.uid()) with check (user_id = auth.uid());
-create policy settings_owner on sync.settings for all using (user_id = auth.uid()) with check (user_id = auth.uid());
-create policy transactions_owner on sync.transactions for all using (user_id = auth.uid()) with check (user_id = auth.uid());
-create policy sync_changes_owner_read on sync.sync_changes for select using (user_id = auth.uid());
+create policy accounts_owner on sync.accounts for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy categories_owner on sync.categories for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy people_owner on sync.people for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy settings_owner on sync.settings for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy transactions_owner on sync.transactions for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy sync_changes_owner_read on sync.sync_changes for select to authenticated using (user_id = auth.uid());
 
 revoke all on all tables in schema sync from anon;
 revoke all on all sequences in schema sync from public, anon, authenticated;
+revoke all on function sync.record_change() from public, anon, authenticated;
 grant select, insert, update, delete on sync.accounts, sync.categories, sync.people, sync.settings, sync.transactions to authenticated;
 grant select on sync.sync_changes to authenticated;

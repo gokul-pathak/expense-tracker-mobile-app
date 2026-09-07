@@ -157,4 +157,9 @@ describe('backup validation', () => {
     backup.pinVerifier = 'never-exported';
     expect(() => validateBackup(backup)).toThrow('invalid');
   });
+  it('rejects cloud authentication sessions in the portable backup envelope', () => {
+    const backup = fixture() as BackupEnvelope & { session?: { access_token: string } };
+    backup.session = { access_token: 'never-exported' };
+    expect(() => validateBackup(backup)).toThrow('invalid');
+  });
 });

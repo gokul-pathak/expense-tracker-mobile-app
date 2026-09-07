@@ -19,6 +19,7 @@
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
     "@react-native-community/datetimepicker": "9.1.0",
+    "@supabase/supabase-js": "^2.115.0",
     "babel-plugin-inline-import": "^3.0.0",
     "babel-preset-expo": "~57.0.0",
     "drizzle-orm": "^1.0.0-rc.4",
@@ -40,6 +41,7 @@
     "react-native": "0.86.3",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
+    "react-native-url-polyfill": "^4.0.0",
     "react-native-web": "^0.21.2",
     "zod": "^4.5.4"
   },

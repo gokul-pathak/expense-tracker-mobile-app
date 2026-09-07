@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { AppButton, AppText, Card, NativeDataNotice, Screen, ScreenState } from '@/components/ui';
@@ -188,6 +188,13 @@ export default function SettingsScreen() {
         disabled={saving || Boolean(dataOperation)}
         onPress={save}
       />
+      <Card style={styles.card}>
+        <AppText weight="700">Cloud Account</AppText>
+        <AppText color={colors.textMuted}>
+          Cloud authentication is optional. Financial sync is not enabled yet.
+        </AppText>
+        <AppButton label="Cloud Account" onPress={() => router.push('/cloud-account' as never)} />
+      </Card>
       <Card style={styles.card}>
         <AppText weight="700">Data</AppText>
         <AppText color={colors.textMuted}>
