@@ -3,7 +3,9 @@ import { sql } from 'drizzle-orm';
 import { db } from '@/db';
 import { SYNC_ENTITY_TYPES, syncOutbox, type SyncEntityType } from '@/db/schema';
 
+import { isPullRunning } from './pull-sync.service';
 import { isPushRunning } from './push-sync.service';
+import { countSyncConflicts } from './sync-baseline.repository';
 import {
   countPendingSyncMutations,
   getSyncState,
@@ -16,10 +18,14 @@ export type SyncFoundationReport = {
   linkedUserId: string | null;
   pullCursor: number | null;
   lastSuccessfulSyncAt: Date | null;
-  /** Push progress only. Pull does not exist, so this is not a "synced" marker. */
+  /** Progress markers for one direction each. Neither is a "synced" state. */
   lastSuccessfulPushAt: Date | null;
+  lastSuccessfulPullAt: Date | null;
   lastSyncError: string | null;
+  conflictCount: number;
+  attentionRequiredCount: number;
   pushRunning: boolean;
+  pullRunning: boolean;
 };
 
 /**
@@ -46,8 +52,12 @@ export function verifySyncFoundation(): SyncFoundationReport {
     pullCursor: state?.pullCursor ?? null,
     lastSuccessfulSyncAt: state?.lastSuccessfulSyncAt ?? null,
     lastSuccessfulPushAt: state?.lastSuccessfulPushAt ?? null,
+    lastSuccessfulPullAt: state?.lastSuccessfulPullAt ?? null,
     lastSyncError: state?.lastSyncError ?? null,
+    conflictCount: countSyncConflicts(),
+    attentionRequiredCount: countSyncConflicts('attention_required'),
     pushRunning: isPushRunning(),
+    pullRunning: isPullRunning(),
   };
 }
 

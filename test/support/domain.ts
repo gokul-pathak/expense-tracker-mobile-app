@@ -3,13 +3,29 @@ import * as accountService from '@/features/accounts/account.service';
 import * as categoryService from '@/features/categories/category.service';
 import * as personService from '@/features/people/person.service';
 
-import { createTestDatabase, type TestDatabaseOptions } from './test-database';
+import {
+  createTestDatabase,
+  createTestDevice,
+  useTestDevice,
+  type TestDatabaseOptions,
+} from './test-database';
 
 /** Fresh migrated database with the default seed applied. */
 export async function setupDatabase(options?: TestDatabaseOptions) {
   createTestDatabase(options);
   await runSeed();
 }
+
+/**
+ * An additional seeded device. Its built-in categories get their own sync
+ * identities, exactly as a second real installation would.
+ */
+export async function setupDevice(name: string, options?: TestDatabaseOptions) {
+  createTestDevice(name, options);
+  await runSeed();
+}
+
+export { useTestDevice as onDevice };
 
 export function makeAccount(name = 'Cash', currency = 'NPR', openingBalanceMinor = 0) {
   return accountService.createAccount({

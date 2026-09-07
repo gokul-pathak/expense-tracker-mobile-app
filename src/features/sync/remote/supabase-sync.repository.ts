@@ -3,18 +3,22 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { SyncEntityType } from '@/db/schema';
 import { getSupabaseClient } from '@/lib/supabase/client';
 
+import type { PullErrorCode } from '../pull-sync.types';
 import type { PushErrorCode } from '../push-sync.types';
 
+import { PULLED_COLUMNS, REMOTE_CHANGE_COLUMNS } from './remote-pull-rows';
 import { REMOTE_SCHEMA, REMOTE_TABLES, type RemoteRow } from './remote-rows';
 
 /**
  * The only module that knows Supabase exists for financial data.
  *
- * It writes through the authenticated user's session, so every statement runs
- * under row level security. There is no service-role path: an authorization
- * failure is a real failure to surface, never something to bypass.
+ * It reads and writes through the authenticated user's session, so every
+ * statement runs under row level security. There is no service-role path: an
+ * authorization failure is a real failure to surface, never something to bypass.
  *
- * Push writes only. Reading cloud financial data belongs to Pull Sync.
+ * Push uploads; pull downloads changes and rows. Neither decides anything about
+ * financial meaning — that belongs to the engines above this layer, which treat
+ * everything returned here as untrusted input.
  */
 
 export class PushRemoteError extends Error {
@@ -28,6 +32,16 @@ export class PushRemoteError extends Error {
   }
 }
 
+export class PullRemoteError extends Error {
+  constructor(
+    readonly code: PullErrorCode,
+    readonly detail?: string,
+  ) {
+    super(`Cloud pull failed: ${code}${detail === undefined ? '' : ` (${detail})`}`);
+    this.name = 'PullRemoteError';
+  }
+}
+
 export type RemoteSyncRepository = {
   /**
    * Idempotent upsert keyed by the cloud table's unique identity, so replaying
@@ -36,6 +50,18 @@ export type RemoteSyncRepository = {
    * visible to other devices.
    */
   upsert(entityType: SyncEntityType, rows: RemoteRow[]): Promise<void>;
+};
+
+export type RemotePullRepository = {
+  /**
+   * Server-ordered change feed after a cursor position. `sync_changes.sequence`
+   * is a single monotonic server sequence, so ordering is total and no two rows
+   * can share a position — a timestamp cursor could skip records that share a
+   * millisecond.
+   */
+  fetchChanges(input: { afterSequence: number; limit: number }): Promise<unknown[]>;
+  /** Current state of the named rows. Pull always applies current state, never a diff. */
+  fetchRows(entityType: SyncEntityType, syncIds: readonly string[]): Promise<unknown[]>;
 };
 
 export function createSupabaseSyncRepository(
@@ -61,6 +87,52 @@ export function createSupabaseSyncRepository(
       }
 
       if (response.error !== null) throw toPushRemoteError(response.error);
+    },
+  };
+}
+
+export function createSupabasePullRepository(
+  client: SupabaseClient | null = getSupabaseClient(),
+): RemotePullRepository | null {
+  if (client === null) return null;
+
+  return {
+    async fetchChanges({ afterSequence, limit }) {
+      let response;
+      try {
+        response = await client
+          .schema(REMOTE_SCHEMA)
+          .from('sync_changes')
+          .select(REMOTE_CHANGE_COLUMNS)
+          .gt('sequence', afterSequence)
+          // Ascending server sequence is the cursor order. Pagination and cursor
+          // comparison use exactly this ordering, so a page boundary cannot
+          // reorder or hide a change.
+          .order('sequence', { ascending: true })
+          .limit(limit);
+      } catch (error) {
+        throw new PullRemoteError(toPullErrorCode(classifyThrownError(error)));
+      }
+      if (response.error !== null) throw toPullRemoteError(response.error);
+      return response.data ?? [];
+    },
+
+    async fetchRows(entityType, syncIds) {
+      if (syncIds.length === 0) return [];
+      const { table } = REMOTE_TABLES[entityType];
+
+      let response;
+      try {
+        response = await client
+          .schema(REMOTE_SCHEMA)
+          .from(table)
+          .select(PULLED_COLUMNS[entityType])
+          .in('sync_id', [...syncIds]);
+      } catch (error) {
+        throw new PullRemoteError(toPullErrorCode(classifyThrownError(error)));
+      }
+      if (response.error !== null) throw toPullRemoteError(response.error);
+      return response.data ?? [];
     },
   };
 }
@@ -100,6 +172,26 @@ export function toPushRemoteError(error: SupabaseErrorShape): PushRemoteError {
     return new PushRemoteError('auth', code === '' ? undefined : code);
   }
   return new PushRemoteError('remote_unknown', code === '' ? undefined : code);
+}
+
+/**
+ * A read cannot violate a constraint or carry malformed local data, so the
+ * write-side categories collapse onto the four a download can produce.
+ */
+export function toPullRemoteError(error: SupabaseErrorShape): PullRemoteError {
+  const classified = toPushRemoteError(error);
+  return new PullRemoteError(toPullErrorCode(classified.code), classified.detail);
+}
+
+function toPullErrorCode(code: PushErrorCode): PullErrorCode {
+  switch (code) {
+    case 'network':
+    case 'auth':
+    case 'authorization':
+      return code;
+    default:
+      return 'remote_unknown';
+  }
 }
 
 function classifyThrownError(error: unknown): PushErrorCode {

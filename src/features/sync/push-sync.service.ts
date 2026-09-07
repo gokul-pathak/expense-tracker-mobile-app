@@ -25,6 +25,7 @@ import {
   PushRemoteError,
   type RemoteSyncRepository,
 } from './remote/supabase-sync.repository';
+import { isSyncEngineRunning, withSyncEngineLock } from './sync-lock';
 import {
   acknowledgeSyncMutation,
   countPendingSyncMutations,
@@ -90,22 +91,22 @@ export type PushSyncOptions = {
   maxOperations?: number;
 };
 
-// Guards concurrent runs inside this process. Durable correctness comes from the
-// outbox and idempotent cloud upserts, not from this flag surviving a restart.
-let running = false;
-
 export function isPushRunning(): boolean {
-  return running;
+  return isSyncEngineRunning('push');
 }
 
+/**
+ * Concurrent runs are prevented by the shared engine lock, so a push cannot
+ * interleave with a pull that is resolving the same queue entries. Durable
+ * correctness comes from the outbox and idempotent cloud upserts, not from a
+ * flag surviving a restart.
+ */
 export async function pushPendingChanges(options: PushSyncOptions = {}): Promise<PushSyncResult> {
-  if (running) return emptyPushResult('pushing', countPendingSyncMutations());
-  running = true;
-  try {
-    return await runPush(options);
-  } finally {
-    running = false;
-  }
+  return withSyncEngineLock(
+    'push',
+    () => runPush(options),
+    () => emptyPushResult('pushing', countPendingSyncMutations()),
+  );
 }
 
 async function runPush(options: PushSyncOptions): Promise<PushSyncResult> {

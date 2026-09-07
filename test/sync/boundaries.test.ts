@@ -31,6 +31,7 @@ const localWritePaths = [
   'src/features/backup/backup.service.ts',
   'src/features/sync/sync.repository.ts',
   'src/features/sync/sync-source.repository.ts',
+  'src/features/sync/sync-baseline.repository.ts',
   'src/features/sync/remote-apply.repository.ts',
   'src/features/sync/sync.types.ts',
   'src/features/sync/uuid.ts',
@@ -41,6 +42,12 @@ const localWritePaths = [
 const pushPaths = [
   'src/features/sync/push-sync.service.ts',
   'src/features/sync/push-sync.types.ts',
+];
+
+const pullPaths = [
+  'src/features/sync/pull-sync.service.ts',
+  'src/features/sync/pull-sync.types.ts',
+  'src/features/sync/pull-plan.ts',
 ];
 
 function read(path: string) {
@@ -65,22 +72,59 @@ describe('M7C boundaries', () => {
   });
 
   it('confines cloud data access to the Supabase sync repository', () => {
-    for (const path of pushPaths) {
+    for (const path of [...pushPaths, ...pullPaths]) {
       const source = read(path);
       // Orchestration may name the adapter but must not speak PostgREST itself.
       expect(source, path).not.toMatch(/\.from\(|\.schema\(/);
     }
     const adapter = read('src/features/sync/remote/supabase-sync.repository.ts');
     expect(adapter).toMatch(/\.schema\(REMOTE_SCHEMA\)/);
-    // Push writes only: downloading cloud rows belongs to Pull Sync.
-    expect(adapter).not.toMatch(/\.select\(|\.eq\(/);
   });
 
-  it('adds no pull sync, realtime, or background scheduler', () => {
-    for (const path of [...pushPaths, 'src/features/sync/remote/supabase-sync.repository.ts']) {
+  it('keeps Pull Sync out of the domain services and the device security state', () => {
+    for (const path of pullPaths) {
       const source = read(path);
-      expect(source, path).not.toMatch(/applyRemote|pullCursor|realtime|channel\(/i);
+      // Downloaded rows go through the remote-apply path, never through the
+      // services that exist to record a user's own intent.
+      expect(source, path).not.toMatch(
+        /features\/(accounts|categories|people|transactions|settings|dashboard|reports)\//,
+      );
+      // Cloud financial sync has no business with the local lock.
+      expect(source, path).not.toMatch(/SecureStore|expo-secure-store|appLock|biometric|PIN/i);
+    }
+  });
+
+  it('keeps Pull Sync read-only against the cloud', () => {
+    for (const path of pullPaths) {
+      const source = read(path);
+      // A conflict the local side wins stays queued for a push; pull never
+      // resolves one by writing to Supabase itself.
+      expect(source, path).not.toMatch(
+        /upsert\(|createSupabaseSyncRepository|RemoteSyncRepository/,
+      );
+    }
+  });
+
+  it('keeps push out of the remote-apply path and pull out of the upload path', () => {
+    const remoteApply = read('src/features/sync/remote-apply.repository.ts');
+    // A remote apply that queued an upload would push the same record straight back.
+    expect(remoteApply).not.toMatch(/enqueueSyncMutation\(/);
+    expect(read('src/features/sync/push-sync.service.ts')).not.toMatch(/applyRemote/);
+  });
+
+  it('adds no realtime, background scheduler, or automatic lifecycle trigger', () => {
+    const syncPaths = [
+      ...pushPaths,
+      ...pullPaths,
+      'src/features/sync/remote/supabase-sync.repository.ts',
+      'src/features/sync/remote/remote-pull-rows.ts',
+      'src/features/sync/sync-lock.ts',
+    ];
+    for (const path of syncPaths) {
+      const source = read(path);
+      expect(source, path).not.toMatch(/realtime|channel\(|\.on\(/i);
       expect(source, path).not.toMatch(/setInterval|setTimeout|BackgroundFetch|TaskManager/);
+      expect(source, path).not.toMatch(/AppState|addEventListener/);
     }
   });
 
@@ -117,6 +161,7 @@ describe('M7C boundaries', () => {
         'last_error',
         'revision',
         'last_attempt_at',
+        'base_server_revision',
       ]);
       const rows = rawClient().prepare('SELECT * FROM sync_outbox').all();
       expect(JSON.stringify(rows)).not.toContain('123456');
@@ -142,6 +187,26 @@ describe('M7C boundaries', () => {
         'last_successful_sync_at',
         'last_sync_error',
         'last_successful_push_at',
+        'last_successful_pull_at',
+      ]);
+    });
+
+    it('records conflict metadata without duplicating the financial record', () => {
+      const columns = rawClient()
+        .prepare('PRAGMA table_info(sync_conflicts)')
+        .all()
+        .map((row) => String((row as { name: unknown }).name));
+
+      expect(columns).toEqual([
+        'id',
+        'entity_type',
+        'entity_sync_id',
+        'local_operation',
+        'base_server_revision',
+        'remote_server_revision',
+        'resolution',
+        'detail',
+        'detected_at',
       ]);
     });
   });

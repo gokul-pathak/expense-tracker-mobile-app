@@ -17,8 +17,8 @@ import { requireSyncId } from './uuid';
  * expressed by calling these functions instead of the domain repositories —
  * there is no global "currently syncing" flag that could be left set.
  *
- * M7C provides the local apply primitives and their tests only. No network
- * Pull Sync calls them yet.
+ * M7C provided these primitives; M7E's Pull Sync is what drives them, always
+ * inside one transaction that also moves the cursor.
  */
 
 const SETTINGS_ID = 1;
@@ -170,6 +170,35 @@ export function applyRemoteCategory(row: RemoteCategory, writer: SyncWriter = db
     .values({ ...values, syncId })
     .onConflictDoUpdate({ target: categories.syncId, set: values })
     .run();
+}
+
+/**
+ * Adopts the cloud's identity for an already-seeded built-in category without
+ * touching its values.
+ *
+ * Two devices seed the same built-ins independently, so the same `system_key`
+ * legitimately carries different local identities. The cloud enforces one row
+ * per `(user_id, system_key)`, so the local row must take the cloud identity or
+ * its next upload would collide. When a local edit of that category is still
+ * pending, only the identity is rebound: the pending change decides the values.
+ */
+export function rebindRemoteCategoryIdentity(
+  systemKey: string,
+  syncId: string,
+  writer: SyncWriter = db,
+) {
+  const target = requireSyncId(syncId, 'remote category');
+  writer
+    .update(categories)
+    .set({ syncId: target })
+    .where(eq(categories.systemKey, systemKey))
+    .run();
+}
+
+/** The same identity adoption for the settings singleton, whose cloud identity is the owner. */
+export function rebindRemoteSettingsIdentity(syncId: string, writer: SyncWriter = db) {
+  const target = requireSyncId(syncId, 'remote settings record');
+  writer.update(settings).set({ syncId: target }).where(eq(settings.id, SETTINGS_ID)).run();
 }
 
 export function applyRemotePerson(row: RemotePerson, writer: SyncWriter = db) {

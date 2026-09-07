@@ -1,9 +1,9 @@
-# Sync (M7C foundation + M7D push)
+# Sync (M7C foundation + M7D push + M7E pull)
 
-Local synchronization primitives and outgoing push. There is no Pull Sync, no Realtime and no
-background scheduling. SQLite stays authoritative and the app remains fully local-first: every
-local write works offline, signed out, or with Supabase unconfigured, and no screen ever reads
-cloud data.
+Local synchronization primitives, outgoing push and incoming pull. There is no Realtime, no
+background scheduling and no user-facing synchronization control. SQLite stays authoritative and the
+app remains fully local-first: every local write works offline, signed out, or with Supabase
+unconfigured, and no screen ever reads cloud data.
 
 ## Identity
 
@@ -72,13 +72,24 @@ tombstones, but the app exposes no destructive delete for them.
 
 ## Sync state
 
-`sync_state` is a singleton holding `linked_user_id`, `pull_cursor`, `last_successful_sync_at`, and
-a compact `last_sync_error`. It never stores access or refresh tokens. In M7C `linked_user_id` stays
-`null`: binding a local database to a cloud account is M7F's job and does not follow from being
-signed in. `pull_cursor` is storage for M7E and is unused.
+`sync_state` is a singleton holding `linked_user_id`, `pull_cursor`, the two direction markers
+`last_successful_push_at` and `last_successful_pull_at`, `last_successful_sync_at`, and a compact
+`last_sync_error`. It never stores access or refresh tokens. `linked_user_id` stays `null` until
+M7F: binding a local database to a cloud account does not follow from being signed in, and both
+engines refuse to run without it.
+
+`sync_baselines` holds what this device knows about each record in the cloud — the last
+`server_revision` it accounted for, and whether the cloud holds a tombstone for that identity. It is
+what makes conflict detection real: a queue entry says a local change is waiting, and only the
+baseline says whether the cloud moved on since that change was written. Its `deleted` flag is also
+the tombstone registry, so a delete for a record this device never had cannot be forgotten and later
+resurrected.
+
+`sync_conflicts` records how each conflict was resolved: identity, revisions and the winner, never
+an amount, note or name.
 
 User-facing sync status is derived, never stored. Nothing may display "Synced" until push and pull
-exist.
+are orchestrated together.
 
 ## Backup
 
@@ -116,3 +127,33 @@ losing a queued change would not be.
 
 `last_successful_push_at` records push progress only. It is not a synced state, and no user-facing
 screen may claim one until pull exists.
+
+## Pull (M7E)
+
+`pullRemoteChanges()` downloads cloud changes and applies them to SQLite:
+
+```text
+changes after the cursor -> decode -> resolve conflicts -> apply + advance cursor (one transaction)
+```
+
+It runs under the same cloud binding rule as push, and under the shared engine lock in
+`sync-lock.ts`, so push and pull can never interleave over the same queue entries.
+
+`sync_changes.sequence` is the cursor: one monotonic server sequence across every table, so ordering
+is total and two rows written in the same millisecond cannot hide each other. Pull always applies a
+row's _current_ state rather than a diff, which makes replay idempotent and makes the feed's
+duplicate entries harmless. Batches are bounded, and a run continues until it is caught up.
+
+`pull-plan.ts` decides and never writes: it decodes every row, checks ownership against the linked
+user, re-checks the domain invariants the app enforces locally, resolves conflicts, and orders the
+surviving writes so a child never reaches SQLite before its parent. A batch is applied as a prefix —
+when a record cannot be trusted, everything before it applies and the cursor stops there. A refused
+record is never stepped over, because a cursor past a record it never applied loses it forever.
+
+`pull-sync.service.ts` commits the plan. Domain rows, baselines, conflict records, queue cleanup and
+the cursor are one SQLite transaction, so a crash leaves the device behind, never ahead.
+
+Conflicts follow M7A: a tombstone always wins over a concurrent update, in both directions, and two
+ordinary edits resolve to the local one, which has not reached the server yet and so resolves later.
+The local winner stays queued and propagates on the next push — pull never writes to the cloud, not
+even to resolve a conflict it just decided.

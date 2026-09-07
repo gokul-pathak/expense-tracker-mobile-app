@@ -39,3 +39,25 @@ export function isSyncEntityType(value: unknown): value is SyncEntityType {
 export function isSyncOperation(value: unknown): value is SyncOperation {
   return typeof value === 'string' && SYNC_OPERATIONS.includes(value as SyncOperation);
 }
+
+/**
+ * How Pull Sync resolved one detected conflict. Recorded for diagnostics and a
+ * future "Attention Required" surface; never a copy of the financial record.
+ */
+export const SYNC_CONFLICT_RESOLUTIONS = [
+  'remote_wins',
+  'local_wins',
+  'remote_delete_wins',
+  'local_delete_wins',
+  'converged_delete',
+  'attention_required',
+] as const;
+
+export type SyncConflictResolution = (typeof SYNC_CONFLICT_RESOLUTIONS)[number];
+
+/**
+ * The remote change position a device has safely applied. `sync_changes.sequence`
+ * starts at 1, so zero means "nothing applied yet", which is deliberately not the
+ * same as "up to date".
+ */
+export const PULL_CURSOR_START = 0;

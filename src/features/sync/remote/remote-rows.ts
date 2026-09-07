@@ -12,13 +12,22 @@ import { SYNC_ID_PATTERN, type SyncEntityType } from '@/db/schema';
  * milliseconds, matching the cloud `bigint` columns.
  */
 
-const syncId = z.string().regex(SYNC_ID_PATTERN);
-const userId = z.string().min(1);
+/**
+ * Shared primitives. Pull decoders reuse these so one contract describes the
+ * cloud in both directions.
+ */
+export const syncIdSchema = z.string().regex(SYNC_ID_PATTERN);
+export const userIdSchema = z.string().min(1);
 // PostgreSQL bigint can hold more than JavaScript can represent exactly.
-const safeInteger = z.number().int().safe();
+export const safeIntegerSchema = z.number().int().safe();
+export const currencySchema = z.string().regex(/^[A-Z]{3,16}$/);
+
+const syncId = syncIdSchema;
+const userId = userIdSchema;
+const safeInteger = safeIntegerSchema;
 const timestamp = safeInteger.nonnegative();
 const nullableTimestamp = timestamp.nullable();
-const currency = z.string().regex(/^[A-Z]{3,16}$/);
+const currency = currencySchema;
 const nullableText = z.string().nullable();
 
 export const remoteAccountSchema = z

@@ -4,6 +4,7 @@ import { db } from '@/db';
 import { syncOutbox, syncState } from '@/db/schema';
 import type { SyncEntityType, SyncOperation, SyncOutboxEntry } from '@/db/schema';
 
+import { clearSyncBaselines, readSyncBaseline } from './sync-baseline.repository';
 import type { SyncMutation, SyncWriter } from './sync.types';
 import { requireSyncId } from './uuid';
 
@@ -19,6 +20,11 @@ const MAX_ERROR_CODE_LENGTH = 120;
 export function enqueueSyncMutation(writer: SyncWriter, mutation: SyncMutation): void {
   const entitySyncId = requireSyncId(mutation.entitySyncId, `${mutation.entityType} record`);
   const pending = readPending(writer, mutation.entityType, entitySyncId);
+  // The revision this local change is written on top of. Pull compares the
+  // revision it downloads against this to tell a plain remote update from a
+  // record that genuinely moved on both devices.
+  const baseServerRevision =
+    readSyncBaseline(mutation.entityType, entitySyncId, writer)?.serverRevision ?? null;
 
   if (mutation.operation === 'delete') {
     // A row the cloud has never seen needs no tombstone: cancel the pending work.
@@ -40,6 +46,9 @@ export function enqueueSyncMutation(writer: SyncWriter, mutation: SyncMutation):
       .set({
         operation: mutation.operation,
         revision: sql`${syncOutbox.revision} + 1`,
+        // The local row now incorporates every remote change applied so far, so
+        // the newest baseline is this mutation's base.
+        baseServerRevision,
         attemptCount: 0,
         lastAttemptAt: null,
         lastError: null,
@@ -57,6 +66,7 @@ export function enqueueSyncMutation(writer: SyncWriter, mutation: SyncMutation):
       operation: mutation.operation,
       createdAt: mutation.createdAt ?? new Date(),
       revision: 1,
+      baseServerRevision,
       attemptCount: 0,
     })
     .run();
@@ -99,14 +109,66 @@ export function listPendingSyncMutationsForPush(filter: {
  * is never lost: a coalesced entry has a newer revision and stays pending.
  * Returns whether the entry was removed.
  */
-export function acknowledgeSyncMutation(id: number, revision: number): boolean {
+export function acknowledgeSyncMutation(
+  id: number,
+  revision: number,
+  writer: SyncWriter = db,
+): boolean {
   return (
-    db
+    writer
       .delete(syncOutbox)
       .where(and(eq(syncOutbox.id, id), eq(syncOutbox.revision, revision)))
       .returning({ id: syncOutbox.id })
       .get() !== undefined
   );
+}
+
+/**
+ * Moves a pending mutation's base to a remote revision Pull Sync has accounted
+ * for, so the same remote change is not re-detected as a conflict on every run.
+ * The revision guard keeps a newer local edit untouched.
+ */
+export function setPendingSyncMutationBase(
+  id: number,
+  revision: number,
+  baseServerRevision: number,
+  writer: SyncWriter = db,
+): void {
+  writer
+    .update(syncOutbox)
+    .set({ baseServerRevision })
+    .where(and(eq(syncOutbox.id, id), eq(syncOutbox.revision, revision)))
+    .run();
+}
+
+/**
+ * Repoints queued work at a new global identity.
+ *
+ * Two records legitimately change identity when the cloud is reconciled: the
+ * settings singleton, whose real cloud identity is the owning user, and a
+ * built-in category matched by `system_key`. Queued local intent must follow the
+ * record rather than be orphaned on an identity that no longer exists.
+ */
+export function rekeySyncMutation(
+  entityType: SyncEntityType,
+  fromSyncId: string,
+  toSyncId: string,
+  writer: SyncWriter = db,
+): void {
+  if (fromSyncId === toSyncId) return;
+  const pending = readPending(writer, entityType, fromSyncId);
+  if (pending === null) return;
+
+  // The unique (entity_type, entity_sync_id) index allows only one live entry.
+  writer
+    .delete(syncOutbox)
+    .where(and(eq(syncOutbox.entityType, entityType), eq(syncOutbox.entitySyncId, toSyncId)))
+    .run();
+  writer
+    .update(syncOutbox)
+    .set({ entitySyncId: toSyncId })
+    .where(eq(syncOutbox.id, pending.id))
+    .run();
 }
 
 /** Pending operations in deterministic push order. */
@@ -130,8 +192,28 @@ export function countPendingSyncMutations(): number {
 export function getPendingSyncMutation(
   entityType: SyncEntityType,
   entitySyncId: string,
+  writer: SyncWriter = db,
 ): SyncOutboxEntry | null {
-  return readPending(db, entityType, entitySyncId);
+  return readPending(writer, entityType, entitySyncId);
+}
+
+/** Pending work for a whole pull batch in one query per entity type. */
+export function readPendingSyncMutations(
+  entityType: SyncEntityType,
+  entitySyncIds: readonly string[],
+  writer: SyncWriter = db,
+): Map<string, SyncOutboxEntry> {
+  const pending = new Map<string, SyncOutboxEntry>();
+  const unique = [...new Set(entitySyncIds)];
+  if (unique.length === 0) return pending;
+
+  const rows = writer
+    .select()
+    .from(syncOutbox)
+    .where(and(eq(syncOutbox.entityType, entityType), inArray(syncOutbox.entitySyncId, unique)))
+    .all();
+  for (const row of rows) pending.set(row.entitySyncId, row);
+  return pending;
 }
 
 /**
@@ -164,9 +246,13 @@ export function removeAcknowledgedSyncMutation(id: number): void {
   db.delete(syncOutbox).where(eq(syncOutbox.id, id)).run();
 }
 
-/** Restore replaces the whole local dataset, so stale queued work is dropped. */
+/**
+ * Restore replaces the whole local dataset, so stale queued work is dropped and
+ * every per-record belief about the cloud is dropped with it.
+ */
 export function clearSyncOutbox(writer: SyncWriter = db): void {
   writer.delete(syncOutbox).run();
+  clearSyncBaselines(writer);
 }
 
 export function getSyncState() {
@@ -179,6 +265,7 @@ export function updateSyncState(
     pullCursor: number | null;
     lastSuccessfulSyncAt: Date | null;
     lastSuccessfulPushAt: Date | null;
+    lastSuccessfulPullAt: Date | null;
     lastSyncError: string | null;
   }>,
   writer: SyncWriter = db,

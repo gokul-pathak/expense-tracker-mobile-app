@@ -14,24 +14,36 @@ import { drizzle, type NodeSQLiteDatabase } from 'drizzle-orm/node-sqlite';
  * split on `--> statement-breakpoint`, each chunk prepared as a single
  * statement — so a migration file that would silently half-apply on a device
  * fails here too.
+ *
+ * More than one database can exist at a time, each standing for one device.
+ * `useTestDevice` switches which one the `db` proxy resolves to, so a two-device
+ * synchronization scenario runs against two genuinely separate databases rather
+ * than a simulation of one.
  */
 
 const migrationsDirectory = join(dirname(fileURLToPath(import.meta.url)), '../../drizzle');
 
-type Connection = { client: DatabaseSync; orm: NodeSQLiteDatabase };
+const DEFAULT_DEVICE = 'default';
 
-let connection: Connection | undefined;
-let directory: string | undefined;
-let databasePath: string | undefined;
+type Device = {
+  client: DatabaseSync;
+  orm: NodeSQLiteDatabase;
+  directory: string;
+  path: string;
+};
 
-function active(): Connection {
-  if (connection === undefined) {
+const devices = new Map<string, Device>();
+let activeName: string | undefined;
+
+function active(): Device {
+  const device = activeName === undefined ? undefined : devices.get(activeName);
+  if (device === undefined) {
     throw new Error('Call createTestDatabase() before using the test database.');
   }
-  return connection;
+  return device;
 }
 
-/** Stable handle: reopening the database swaps the target behind this proxy. */
+/** Stable handle: switching device or reopening swaps the target behind this proxy. */
 export const db = new Proxy({} as NodeSQLiteDatabase, {
   get(_target, property) {
     const orm = active().orm as unknown as Record<string | symbol, unknown>;
@@ -53,21 +65,41 @@ export type TestDatabaseOptions = {
   through?: string;
 };
 
-/** Fresh on-disk database with all migrations applied. */
+/** Fresh on-disk database with all migrations applied, replacing any existing one. */
 export function createTestDatabase(options: TestDatabaseOptions = {}) {
   closeTestDatabase();
-  directory = mkdtempSync(join(tmpdir(), 'pet-sync-'));
-  databasePath = join(directory, 'test.db');
-  open();
+  createTestDevice(DEFAULT_DEVICE, options);
+}
+
+/**
+ * An additional device with its own database file, and its own seed identities.
+ * Two devices seed the same built-in categories independently, which is exactly
+ * the reconciliation case a second device has to survive.
+ */
+export function createTestDevice(name: string, options: TestDatabaseOptions = {}) {
+  devices.get(name)?.client.close();
+  const directory = mkdtempSync(join(tmpdir(), `pet-sync-${name}-`));
+  const path = join(directory, 'test.db');
+  devices.set(name, { ...open(path), directory, path });
+  activeName = name;
   runMigrations(options.through);
+}
+
+/** Points every repository at one device's database. */
+export function useTestDevice(name: string = DEFAULT_DEVICE) {
+  if (!devices.has(name)) throw new Error(`No test device named "${name}".`);
+  activeName = name;
 }
 
 /** Simulates an app restart: the file survives, the connection does not. */
 export function reopenTestDatabase() {
-  if (databasePath === undefined) throw new Error('No test database to reopen.');
-  connection?.client.close();
-  connection = undefined;
-  open();
+  const device = active();
+  device.client.close();
+  devices.set(activeName!, {
+    ...open(device.path),
+    directory: device.directory,
+    path: device.path,
+  });
 }
 
 /** Applies any migrations not yet run, as a later app version would. */
@@ -76,11 +108,12 @@ export function migrateTestDatabase(through?: string) {
 }
 
 export function closeTestDatabase() {
-  connection?.client.close();
-  connection = undefined;
-  if (directory !== undefined) rmSync(directory, { recursive: true, force: true });
-  directory = undefined;
-  databasePath = undefined;
+  for (const device of devices.values()) {
+    device.client.close();
+    rmSync(device.directory, { recursive: true, force: true });
+  }
+  devices.clear();
+  activeName = undefined;
 }
 
 export function rawClient() {
@@ -94,10 +127,10 @@ export function listMigrationNames(): string[] {
     .sort();
 }
 
-function open() {
-  const client = new DatabaseSync(databasePath!);
+function open(path: string) {
+  const client = new DatabaseSync(path);
   client.exec('PRAGMA foreign_keys = ON;');
-  connection = { client, orm: drizzle({ client }) };
+  return { client, orm: drizzle({ client }) };
 }
 
 function runMigrations(through?: string) {
