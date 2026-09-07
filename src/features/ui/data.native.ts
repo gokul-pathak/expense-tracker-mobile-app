@@ -27,6 +27,14 @@ export {
   unarchivePerson,
 } from '@/features/people/person.service';
 export { getAppSettings, updateDefaultCurrency } from '@/features/settings/settings.service';
+export {
+  shareTransactionsCsv,
+  shareTransactionsJson,
+  shareFullDataJson,
+  createAndShareBackup,
+  chooseBackup,
+  restoreChosenBackup,
+} from '@/features/backup/backup-files.native';
 export { getDashboardSummary } from '@/features/dashboard/dashboard.service';
 export {
   getCustomRange,

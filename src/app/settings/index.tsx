@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { AppButton, AppText, Card, NativeDataNotice, Screen, ScreenState } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
@@ -8,8 +8,15 @@ import {
   getAppSettings,
   isLocalFinanceDataAvailable,
   listAccounts,
+  shareTransactionsCsv,
+  shareTransactionsJson,
+  shareFullDataJson,
+  createAndShareBackup,
+  chooseBackup,
+  restoreChosenBackup,
   updateDefaultCurrency,
 } from '@/features/ui/data';
+import type { BackupPreview } from '@/features/backup/backup.types';
 import { getUserErrorMessage } from '@/features/ui/error-message';
 
 const currencies = ['NPR', 'USD', 'INR'] as const;
@@ -19,6 +26,7 @@ export default function SettingsScreen() {
   const [hasAccounts, setHasAccounts] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [dataOperation, setDataOperation] = useState('');
   const [error, setError] = useState('');
   const load = useCallback(() => {
     if (!isLocalFinanceDataAvailable) return;
@@ -89,7 +97,48 @@ export default function SettingsScreen() {
         </AppText>
       ) : null}
       {error ? <AppText color={colors.danger}>{error}</AppText> : null}
-      <AppButton label={saving ? 'Saving...' : 'Save Settings'} disabled={saving} onPress={save} />
+      <AppButton
+        label={saving ? 'Saving...' : 'Save Settings'}
+        disabled={saving || Boolean(dataOperation)}
+        onPress={save}
+      />
+      <Card style={styles.card}>
+        <AppText weight="700">Data</AppText>
+        <AppText color={colors.textMuted}>
+          Exports are read-only and include archived history.
+        </AppText>
+        <AppButton
+          label={dataOperation === 'csv' ? 'Exporting...' : 'Export Transactions (CSV)'}
+          disabled={Boolean(dataOperation)}
+          onPress={() => run('csv', shareTransactionsCsv)}
+        />
+        <AppButton
+          label={dataOperation === 'json' ? 'Exporting...' : 'Export Transactions (JSON)'}
+          disabled={Boolean(dataOperation)}
+          onPress={() => run('json', shareTransactionsJson)}
+        />
+        <AppButton
+          label={dataOperation === 'full' ? 'Exporting...' : 'Export All Data (JSON)'}
+          disabled={Boolean(dataOperation)}
+          onPress={() => run('full', shareFullDataJson)}
+        />
+      </Card>
+      <Card style={styles.card}>
+        <AppText weight="700">Backup & Restore</AppText>
+        <AppText color={colors.textMuted}>
+          Restore replaces all current local financial data. It does not merge backups.
+        </AppText>
+        <AppButton
+          label={dataOperation === 'backup' ? 'Creating backup...' : 'Create Backup'}
+          disabled={Boolean(dataOperation)}
+          onPress={() => run('backup', createAndShareBackup)}
+        />
+        <AppButton
+          label={dataOperation === 'restore' ? 'Restoring backup...' : 'Restore Backup'}
+          disabled={Boolean(dataOperation)}
+          onPress={startRestore}
+        />
+      </Card>
     </Screen>
   );
   function save() {
@@ -103,6 +152,64 @@ export default function SettingsScreen() {
     } finally {
       setSaving(false);
     }
+  }
+  async function run(name: string, operation: () => Promise<unknown>) {
+    if (dataOperation) return;
+    setDataOperation(name);
+    setError('');
+    try {
+      await operation();
+    } catch (caught) {
+      setError(getUserErrorMessage(caught));
+    } finally {
+      setDataOperation('');
+    }
+  }
+  async function startRestore() {
+    if (dataOperation) return;
+    setDataOperation('restore');
+    setError('');
+    let awaitingConfirmation = false;
+    try {
+      const selected = await chooseBackup();
+      if (!selected) return;
+      awaitingConfirmation = true;
+      confirmRestore(selected.text, selected.preview);
+    } catch (caught) {
+      setError(getUserErrorMessage(caught));
+    } finally {
+      if (!awaitingConfirmation) setDataOperation('');
+    }
+  }
+  function confirmRestore(text: string, preview: BackupPreview) {
+    Alert.alert(
+      'Restore this backup?',
+      `Backup date: ${new Date(preview.createdAt).toLocaleString()}\nAccounts: ${preview.accounts}\nTransactions: ${preview.transactions}\nPeople: ${preview.people}\nCurrency: ${preview.currency}\n\nYour current local data will be replaced with this backup.`,
+      [
+        { text: 'Cancel', style: 'cancel', onPress: () => setDataOperation('') },
+        {
+          text: 'Restore',
+          style: 'destructive',
+          onPress: () => {
+            setDataOperation('restore');
+            try {
+              restoreChosenBackup(text);
+              load();
+              Alert.alert(
+                'Backup restored',
+                'Your local financial data has been replaced successfully.',
+              );
+            } catch (caught) {
+              setError('Backup could not be restored. Your existing data was not changed.');
+              console.error('Backup restore failed', caught);
+            } finally {
+              setDataOperation('');
+            }
+          },
+        },
+      ],
+      { onDismiss: () => setDataOperation('') },
+    );
   }
 }
 const styles = StyleSheet.create({
