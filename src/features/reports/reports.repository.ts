@@ -1,10 +1,14 @@
-import { and, desc, eq, gte, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, lt, or, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
 import { categories } from '@/db/schema/categories';
 import { transactions } from '@/db/schema/transactions';
 
 import type { ReportFilters, ReportRange } from './reports.types';
+
+// Every report aggregate reads live source rows only.
+const liveTransaction = isNull(transactions.deletedAt);
+const liveCategory = isNull(categories.deletedAt);
 
 export function getSummaryTotals(range: ReportRange, filters?: ReportFilters) {
   return db
@@ -31,7 +35,7 @@ export function getCategoryTotals(
       amountMinor,
     })
     .from(transactions)
-    .innerJoin(categories, eq(transactions.categoryId, categories.id))
+    .innerJoin(categories, and(liveCategory, eq(transactions.categoryId, categories.id)))
     .where(and(eq(transactions.type, type), rangeCondition(range), filterCondition(filters)))
     .groupBy(categories.id, categories.name, categories.icon)
     .orderBy(desc(amountMinor), categories.id)
@@ -57,6 +61,7 @@ export function getDailyIncomeExpenseTotals(range: ReportRange, filters?: Report
 
 function rangeCondition(range: ReportRange) {
   return and(
+    liveTransaction,
     gte(transactions.transactionDate, range.start),
     lt(transactions.transactionDate, range.end),
   );

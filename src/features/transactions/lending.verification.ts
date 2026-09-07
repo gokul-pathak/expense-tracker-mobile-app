@@ -8,6 +8,7 @@ import { archiveAccount, createAccount } from '@/features/accounts/account.servi
 import { getDashboardSummary } from '@/features/dashboard/dashboard.service';
 import { archivePerson, createPerson } from '@/features/people/person.service';
 import { ValidationError } from '@/features/shared/errors';
+import { removeQueuedWorkForMissingRows } from '@/features/sync/sync.verification';
 
 import { getAccountBalance, getTotalBalance } from './account-balance.service';
 import {
@@ -91,7 +92,6 @@ export function verifyLendingEngine() {
     updateRepaymentReceived(repaymentReceived.id, { amountMinor: 600_000 });
     assertSummary(ram.id, 400_000, 0, 'partially_paid');
     deleteTransaction(repaymentReceived.id);
-    transactionIds.splice(transactionIds.indexOf(repaymentReceived.id), 1);
     assertSummary(ram.id, 1_000_000, 0, 'pending');
 
     const settlement = createRepaymentReceived({
@@ -113,7 +113,6 @@ export function verifyLendingEngine() {
       ValidationError,
     );
     deleteTransaction(settlement.id);
-    transactionIds.splice(transactionIds.indexOf(settlement.id), 1);
 
     const borrow = createBorrow({
       personId: sita.id,
@@ -201,9 +200,11 @@ export function verifyLendingEngine() {
 
     return { lending: true };
   } finally {
+    // Deleting is a tombstone now, so every fixture row is still removed here.
     for (const id of transactionIds) db.delete(transactions).where(eq(transactions.id, id)).run();
     for (const id of personIds) db.delete(people).where(eq(people.id, id)).run();
     for (const id of accountIds) db.delete(accounts).where(eq(accounts.id, id)).run();
+    removeQueuedWorkForMissingRows();
   }
 
   function account(name: string, type: 'cash' | 'bank', openingBalanceMinor: number) {

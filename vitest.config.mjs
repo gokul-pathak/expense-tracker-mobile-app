@@ -6,6 +6,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // Native module: tests use a Node stand-in with the same UUID contract.
+      'expo-crypto': fileURLToPath(new URL('./test/support/expo-crypto.ts', import.meta.url)),
     },
   },
   test: {

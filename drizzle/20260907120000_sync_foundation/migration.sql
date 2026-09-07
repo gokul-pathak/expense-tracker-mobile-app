@@ -1,37 +1,43 @@
-ALTER TABLE `accounts` ADD `sync_id` text;
-ALTER TABLE `accounts` ADD `deleted_at` integer;
-ALTER TABLE `categories` ADD `sync_id` text;
-ALTER TABLE `categories` ADD `deleted_at` integer;
-ALTER TABLE `people` ADD `sync_id` text;
-ALTER TABLE `people` ADD `deleted_at` integer;
-ALTER TABLE `settings` ADD `sync_id` text;
-ALTER TABLE `settings` ADD `deleted_at` integer;
-ALTER TABLE `transactions` ADD `sync_id` text;
-ALTER TABLE `transactions` ADD `deleted_at` integer;
-UPDATE accounts SET sync_id = lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6))) WHERE sync_id IS NULL;
-UPDATE categories SET sync_id = lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6))) WHERE sync_id IS NULL;
-UPDATE people SET sync_id = lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6))) WHERE sync_id IS NULL;
-UPDATE settings SET sync_id = lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6))) WHERE sync_id IS NULL;
-UPDATE transactions SET sync_id = lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6))) WHERE sync_id IS NULL;
-CREATE UNIQUE INDEX `uq_accounts_sync_id` ON `accounts` (`sync_id`);
-CREATE UNIQUE INDEX `uq_categories_sync_id` ON `categories` (`sync_id`);
-CREATE UNIQUE INDEX `uq_people_sync_id` ON `people` (`sync_id`);
-CREATE UNIQUE INDEX `uq_settings_sync_id` ON `settings` (`sync_id`);
-CREATE UNIQUE INDEX `uq_transactions_sync_id` ON `transactions` (`sync_id`);
-CREATE TABLE `sync_outbox` (`id` integer PRIMARY KEY AUTOINCREMENT, `entity_type` text NOT NULL, `entity_sync_id` text NOT NULL, `operation` text NOT NULL, `created_at` integer NOT NULL, `attempt_count` integer DEFAULT 0 NOT NULL, `last_error` text, UNIQUE(`entity_type`, `entity_sync_id`), CHECK(`operation` IN ('upsert', 'delete')));
-CREATE INDEX `idx_sync_outbox_created_at` ON `sync_outbox` (`created_at`, `id`);
-CREATE TABLE `sync_state` (`singleton_id` integer PRIMARY KEY CHECK(`singleton_id` = 1), `linked_user_id` text, `pull_cursor` integer, `last_successful_sync_at` integer, `last_sync_error` text);
-INSERT INTO `sync_state` (`singleton_id`) VALUES (1);
-CREATE TRIGGER sync_accounts_id AFTER INSERT ON accounts WHEN NEW.sync_id IS NULL BEGIN UPDATE accounts SET sync_id = lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6))) WHERE id = NEW.id; END;
-CREATE TRIGGER sync_categories_id AFTER INSERT ON categories WHEN NEW.sync_id IS NULL BEGIN UPDATE categories SET sync_id = lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6))) WHERE id = NEW.id; END;
-CREATE TRIGGER sync_people_id AFTER INSERT ON people WHEN NEW.sync_id IS NULL BEGIN UPDATE people SET sync_id = lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6))) WHERE id = NEW.id; END;
-CREATE TRIGGER sync_settings_id AFTER INSERT ON settings WHEN NEW.sync_id IS NULL BEGIN UPDATE settings SET sync_id = lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6))) WHERE id = NEW.id; END;
-CREATE TRIGGER sync_transactions_id AFTER INSERT ON transactions WHEN NEW.sync_id IS NULL BEGIN UPDATE transactions SET sync_id = lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6))) WHERE id = NEW.id; END;
-CREATE TRIGGER sync_accounts_outbox AFTER INSERT ON accounts WHEN NEW.sync_id IS NOT NULL AND EXISTS(SELECT 1 FROM app_metadata WHERE key = 'seed.categories.version') BEGIN INSERT INTO sync_outbox(entity_type, entity_sync_id, operation, created_at) VALUES('account', NEW.sync_id, 'upsert', NEW.updated_at) ON CONFLICT(entity_type, entity_sync_id) DO UPDATE SET operation='upsert', created_at=excluded.created_at; END;
-CREATE TRIGGER sync_accounts_update_outbox AFTER UPDATE ON accounts WHEN NEW.sync_id IS NOT NULL AND EXISTS(SELECT 1 FROM app_metadata WHERE key = 'seed.categories.version') BEGIN INSERT INTO sync_outbox(entity_type, entity_sync_id, operation, created_at) VALUES('account', NEW.sync_id, CASE WHEN NEW.deleted_at IS NULL THEN 'upsert' ELSE 'delete' END, NEW.updated_at) ON CONFLICT(entity_type, entity_sync_id) DO UPDATE SET operation=excluded.operation, created_at=excluded.created_at; END;
-CREATE TRIGGER sync_categories_outbox AFTER UPDATE ON categories WHEN NEW.sync_id IS NOT NULL AND EXISTS(SELECT 1 FROM app_metadata WHERE key = 'seed.categories.version') BEGIN INSERT INTO sync_outbox(entity_type, entity_sync_id, operation, created_at) VALUES('category', NEW.sync_id, 'upsert', NEW.updated_at) ON CONFLICT(entity_type, entity_sync_id) DO UPDATE SET created_at=excluded.created_at; END;
-CREATE TRIGGER sync_people_outbox AFTER INSERT ON people WHEN NEW.sync_id IS NOT NULL BEGIN INSERT INTO sync_outbox(entity_type, entity_sync_id, operation, created_at) VALUES('person', NEW.sync_id, 'upsert', NEW.updated_at) ON CONFLICT(entity_type, entity_sync_id) DO UPDATE SET created_at=excluded.created_at; END;
-CREATE TRIGGER sync_people_update_outbox AFTER UPDATE ON people WHEN NEW.sync_id IS NOT NULL AND EXISTS(SELECT 1 FROM app_metadata WHERE key = 'seed.categories.version') BEGIN INSERT INTO sync_outbox(entity_type, entity_sync_id, operation, created_at) VALUES('person', NEW.sync_id, 'upsert', NEW.updated_at) ON CONFLICT(entity_type, entity_sync_id) DO UPDATE SET created_at=excluded.created_at; END;
-CREATE TRIGGER sync_settings_outbox AFTER UPDATE ON settings WHEN NEW.sync_id IS NOT NULL AND EXISTS(SELECT 1 FROM app_metadata WHERE key = 'seed.categories.version') BEGIN INSERT INTO sync_outbox(entity_type, entity_sync_id, operation, created_at) VALUES('settings', NEW.sync_id, 'upsert', NEW.updated_at) ON CONFLICT(entity_type, entity_sync_id) DO UPDATE SET created_at=excluded.created_at; END;
-CREATE TRIGGER sync_transactions_outbox AFTER INSERT ON transactions WHEN NEW.sync_id IS NOT NULL BEGIN INSERT INTO sync_outbox(entity_type, entity_sync_id, operation, created_at) VALUES('transaction', NEW.sync_id, 'upsert', NEW.updated_at) ON CONFLICT(entity_type, entity_sync_id) DO UPDATE SET created_at=excluded.created_at; END;
-CREATE TRIGGER sync_transactions_update_outbox AFTER UPDATE ON transactions WHEN NEW.sync_id IS NOT NULL AND EXISTS(SELECT 1 FROM app_metadata WHERE key = 'seed.categories.version') BEGIN INSERT INTO sync_outbox(entity_type, entity_sync_id, operation, created_at) VALUES('transaction', NEW.sync_id, CASE WHEN NEW.deleted_at IS NULL THEN 'upsert' ELSE 'delete' END, NEW.updated_at) ON CONFLICT(entity_type, entity_sync_id) DO UPDATE SET operation=excluded.operation, created_at=excluded.created_at; END;
+ALTER TABLE `accounts` ADD `sync_id` text;--> statement-breakpoint
+ALTER TABLE `accounts` ADD `deleted_at` integer;--> statement-breakpoint
+ALTER TABLE `categories` ADD `sync_id` text;--> statement-breakpoint
+ALTER TABLE `categories` ADD `deleted_at` integer;--> statement-breakpoint
+ALTER TABLE `people` ADD `sync_id` text;--> statement-breakpoint
+ALTER TABLE `people` ADD `deleted_at` integer;--> statement-breakpoint
+ALTER TABLE `settings` ADD `sync_id` text;--> statement-breakpoint
+ALTER TABLE `settings` ADD `deleted_at` integer;--> statement-breakpoint
+ALTER TABLE `transactions` ADD `sync_id` text;--> statement-breakpoint
+ALTER TABLE `transactions` ADD `deleted_at` integer;--> statement-breakpoint
+UPDATE `accounts` SET `sync_id` = lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random() % 4) + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))) WHERE `sync_id` IS NULL;--> statement-breakpoint
+UPDATE `categories` SET `sync_id` = lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random() % 4) + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))) WHERE `sync_id` IS NULL;--> statement-breakpoint
+UPDATE `people` SET `sync_id` = lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random() % 4) + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))) WHERE `sync_id` IS NULL;--> statement-breakpoint
+UPDATE `settings` SET `sync_id` = lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random() % 4) + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))) WHERE `sync_id` IS NULL;--> statement-breakpoint
+UPDATE `transactions` SET `sync_id` = lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random() % 4) + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))) WHERE `sync_id` IS NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX `uq_accounts_sync_id` ON `accounts` (`sync_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `uq_categories_sync_id` ON `categories` (`sync_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `uq_people_sync_id` ON `people` (`sync_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `uq_settings_sync_id` ON `settings` (`sync_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `uq_transactions_sync_id` ON `transactions` (`sync_id`);--> statement-breakpoint
+CREATE TABLE `sync_outbox` (
+	`id` integer PRIMARY KEY AUTOINCREMENT,
+	`entity_type` text NOT NULL,
+	`entity_sync_id` text NOT NULL,
+	`operation` text NOT NULL,
+	`created_at` integer NOT NULL,
+	`attempt_count` integer DEFAULT 0 NOT NULL,
+	`last_error` text,
+	CONSTRAINT `uq_sync_outbox_entity` UNIQUE(`entity_type`,`entity_sync_id`),
+	CONSTRAINT "valid_sync_operation" CHECK(`operation` IN ('upsert', 'delete'))
+);
+--> statement-breakpoint
+CREATE INDEX `idx_sync_outbox_order` ON `sync_outbox` (`created_at`,`id`);--> statement-breakpoint
+CREATE TABLE `sync_state` (
+	`singleton_id` integer PRIMARY KEY,
+	`linked_user_id` text,
+	`pull_cursor` integer,
+	`last_successful_sync_at` integer,
+	`last_sync_error` text,
+	CONSTRAINT "single_sync_state_row" CHECK(`singleton_id` = 1)
+);
+--> statement-breakpoint
+INSERT OR IGNORE INTO `sync_state` (`singleton_id`) VALUES (1);

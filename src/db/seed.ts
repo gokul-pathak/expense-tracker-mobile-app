@@ -1,5 +1,7 @@
 import { sql } from 'drizzle-orm';
 
+import { createSyncId } from '@/features/sync/uuid';
+
 import { db } from './index';
 import { appMetadata, categories, settings } from './schema';
 import { DEFAULT_CURRENCY } from './constants';
@@ -36,6 +38,9 @@ const defaultIncomeCategories = [
  * Run versioned default data seeding.
  * Safe to call on every app start — will not create duplicates.
  * Must be called after migrations complete successfully.
+ *
+ * Seeded rows get a stable sync identity, but seeding is not a user mutation:
+ * it never enqueues sync outbox work.
  */
 export async function runSeed(): Promise<void> {
   const versionRow = db
@@ -59,6 +64,7 @@ export async function runSeed(): Promise<void> {
           isDefault: true,
           createdAt: now,
           updatedAt: now,
+          syncId: createSyncId(),
         })
         .onConflictDoNothing({ target: categories.systemKey })
         .run();
@@ -74,6 +80,7 @@ export async function runSeed(): Promise<void> {
           isDefault: true,
           createdAt: now,
           updatedAt: now,
+          syncId: createSyncId(),
         })
         .onConflictDoNothing({ target: categories.systemKey })
         .run();
@@ -85,6 +92,7 @@ export async function runSeed(): Promise<void> {
         defaultCurrency: DEFAULT_CURRENCY,
         createdAt: now,
         updatedAt: now,
+        syncId: createSyncId(),
       })
       .onConflictDoNothing({ target: settings.id })
       .run();

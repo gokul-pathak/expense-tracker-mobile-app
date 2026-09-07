@@ -4,7 +4,10 @@ import {
   BACKUP_FORMAT,
   BACKUP_FORMAT_VERSION,
   BACKUP_SCHEMA_VERSION,
+  LEGACY_BACKUP_FORMAT_VERSION,
+  LEGACY_BACKUP_SCHEMA_VERSION,
   type BackupEnvelope,
+  type LegacyBackupEnvelope,
 } from '@/features/backup/backup.types';
 import {
   getBackupPreview,
@@ -23,6 +26,7 @@ function fixture(): BackupEnvelope {
       accounts: [
         {
           id: 1,
+          syncId: '11111111-1111-4111-8111-111111111111',
           name: 'Cash',
           type: 'cash',
           openingBalanceMinor: 0,
@@ -36,6 +40,7 @@ function fixture(): BackupEnvelope {
       categories: [
         {
           id: 1,
+          syncId: '22222222-2222-4222-8222-222222222222',
           name: 'Food',
           type: 'expense',
           icon: null,
@@ -46,6 +51,7 @@ function fixture(): BackupEnvelope {
         },
         {
           id: 2,
+          syncId: '33333333-3333-4333-8333-333333333333',
           name: 'Salary',
           type: 'income',
           icon: null,
@@ -55,12 +61,31 @@ function fixture(): BackupEnvelope {
           updatedAt: 1,
         },
       ],
-      people: [{ id: 1, name: 'राम', note: null, isArchived: false, createdAt: 1, updatedAt: 1 }],
-      settings: [{ id: 1, defaultCurrency: 'NPR', createdAt: 1, updatedAt: 1 }],
+      people: [
+        {
+          id: 1,
+          syncId: '44444444-4444-4444-8444-444444444444',
+          name: 'राम',
+          note: null,
+          isArchived: false,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      settings: [
+        {
+          id: 1,
+          syncId: '55555555-5555-4555-8555-555555555555',
+          defaultCurrency: 'NPR',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
       appMetadata: [{ key: 'seed.categories.version', value: '1' }],
       transactions: [
         {
           id: 1,
+          syncId: '66666666-6666-4666-8666-666666666666',
           type: 'expense',
           amountMinor: 1299,
           currency: 'NPR',
@@ -105,7 +130,11 @@ describe('backup validation', () => {
     delete missing.data.transactions;
     expect(() => validateBackup(missing)).toThrow('invalid');
     const duplicate = fixture();
-    duplicate.data.accounts.push({ ...duplicate.data.accounts[0]!, id: 1 });
+    duplicate.data.accounts.push({
+      ...duplicate.data.accounts[0]!,
+      id: 1,
+      syncId: '77777777-7777-4777-8777-777777777777',
+    });
     expect(() => validateBackup(duplicate)).toThrow('duplicate');
     const money = fixture();
     money.data.transactions[0]!.amountMinor = 12.99;
@@ -141,7 +170,10 @@ describe('backup validation', () => {
   });
   it('requires exactly one settings record and valid enums', () => {
     const settings = fixture();
-    settings.data.settings.push({ ...settings.data.settings[0]! });
+    settings.data.settings.push({
+      ...settings.data.settings[0]!,
+      syncId: '88888888-8888-4888-8888-888888888888',
+    });
     expect(() => validateBackup(settings)).toThrow('duplicate settings');
     const enumValue = fixture() as unknown as { data: { accounts: Array<{ type: string }> } };
     enumValue.data.accounts[0]!.type = 'invalid';
@@ -161,5 +193,57 @@ describe('backup validation', () => {
     const backup = fixture() as BackupEnvelope & { session?: { access_token: string } };
     backup.session = { access_token: 'never-exported' };
     expect(() => validateBackup(backup)).toThrow('invalid');
+  });
+});
+
+/** The pre-M7C shape a released build produced, without global sync identity. */
+function legacyFixture(): LegacyBackupEnvelope {
+  const current = fixture();
+  const strip = <T extends { syncId: string }>(items: T[]) =>
+    items.map(({ syncId: _syncId, ...rest }) => rest);
+  return {
+    format: BACKUP_FORMAT,
+    formatVersion: LEGACY_BACKUP_FORMAT_VERSION,
+    schemaVersion: LEGACY_BACKUP_SCHEMA_VERSION,
+    createdAt: current.createdAt,
+    appVersion: current.appVersion,
+    data: {
+      accounts: strip(current.data.accounts),
+      categories: strip(current.data.categories),
+      people: strip(current.data.people),
+      transactions: strip(current.data.transactions),
+      settings: strip(current.data.settings),
+      appMetadata: current.data.appMetadata,
+    },
+  };
+}
+
+describe('backup format versions', () => {
+  it('still accepts a pre-M7C backup', () => {
+    const legacy = validateBackup(legacyFixture());
+    expect(legacy.formatVersion).toBe(LEGACY_BACKUP_FORMAT_VERSION);
+    expect(getBackupPreview(legacy)).toMatchObject({ accounts: 1, transactions: 1 });
+  });
+  it('rejects a pre-M7C backup that smuggles in sync identity', () => {
+    const legacy = legacyFixture() as unknown as {
+      data: { accounts: Record<string, unknown>[] };
+    };
+    legacy.data.accounts[0]!.syncId = '11111111-1111-4111-8111-111111111111';
+    expect(() => validateBackup(legacy)).toThrow('invalid');
+  });
+  it('requires sync identity in a current backup', () => {
+    const current = fixture() as unknown as { data: { accounts: Record<string, unknown>[] } };
+    delete current.data.accounts[0]!.syncId;
+    expect(() => validateBackup(current)).toThrow('invalid');
+  });
+  it('rejects a malformed sync identity', () => {
+    const current = fixture();
+    current.data.accounts[0]!.syncId = '1234';
+    expect(() => validateBackup(current)).toThrow('invalid');
+  });
+  it('rejects the same sync identity used by two records', () => {
+    const current = fixture();
+    current.data.categories[1]!.syncId = current.data.categories[0]!.syncId;
+    expect(() => validateBackup(current)).toThrow('duplicate');
   });
 });

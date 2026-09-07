@@ -4,11 +4,13 @@ import migrations from '../../drizzle/migrations';
 
 import { db } from './index';
 import { runSeed } from './seed';
+import { assertSyncFoundationReady } from './sync-integrity';
 
 let initializationPromise: Promise<void> | undefined;
 
 export function initializeDatabase() {
   initializationPromise ??= migrate(db, migrations)
+    .then(() => assertSyncFoundationReady())
     .then(() => runSeed())
     .catch(handleMigrationFailure);
 

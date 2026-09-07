@@ -1,8 +1,10 @@
 import { alias } from 'drizzle-orm/sqlite-core';
-import { and, desc, eq, inArray, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
 import type { TransactionType } from '@/db/constants';
+import { enqueueSyncMutation } from '@/features/sync/sync.repository';
+import { createSyncId, requireSyncId } from '@/features/sync/uuid';
 import { accounts } from '@/db/schema/accounts';
 import { categories } from '@/db/schema/categories';
 import { people } from '@/db/schema/people';
@@ -24,17 +26,26 @@ const transactionOrder = [
 const sourceAccount = alias(accounts, 'source_account');
 const destinationAccount = alias(accounts, 'destination_account');
 const debtTypes = ['lend', 'borrow', 'repayment_received', 'repayment_paid'] as const;
+// Tombstoned rows stay in SQLite for future sync but must behave as deleted everywhere.
+const notDeleted = isNull(transactions.deletedAt);
 
 export function getTransactions() {
   return db
     .select()
     .from(transactions)
+    .where(notDeleted)
     .orderBy(...transactionOrder)
     .all();
 }
 
 export function getTransactionById(id: number) {
-  return db.select().from(transactions).where(eq(transactions.id, id)).get() ?? null;
+  return (
+    db
+      .select()
+      .from(transactions)
+      .where(and(notDeleted, eq(transactions.id, id)))
+      .get() ?? null
+  );
 }
 
 export function getTransactionViews() {
@@ -63,9 +74,12 @@ export function getTransactionsByAccount(accountId: number) {
     .select()
     .from(transactions)
     .where(
-      or(
-        eq(transactions.sourceAccountId, accountId),
-        eq(transactions.destinationAccountId, accountId),
+      and(
+        notDeleted,
+        or(
+          eq(transactions.sourceAccountId, accountId),
+          eq(transactions.destinationAccountId, accountId),
+        ),
       ),
     )
     .orderBy(...transactionOrder)
@@ -76,7 +90,7 @@ export function getTransactionsByCategory(categoryId: number) {
   return db
     .select()
     .from(transactions)
-    .where(eq(transactions.categoryId, categoryId))
+    .where(and(notDeleted, eq(transactions.categoryId, categoryId)))
     .orderBy(...transactionOrder)
     .all();
 }
@@ -85,21 +99,68 @@ export function getTransactionsByType(type: TransactionType) {
   return db
     .select()
     .from(transactions)
-    .where(eq(transactions.type, type))
+    .where(and(notDeleted, eq(transactions.type, type)))
     .orderBy(...transactionOrder)
     .all();
 }
 
 export function createTransaction(data: CreateTransactionRecord) {
-  return db.insert(transactions).values(data).returning().get();
+  const syncId = createSyncId();
+  return db.transaction((tx) => {
+    const transaction = tx
+      .insert(transactions)
+      .values({ ...data, syncId })
+      .returning()
+      .get();
+    enqueueSyncMutation(tx, {
+      entityType: 'transaction',
+      entitySyncId: syncId,
+      operation: 'upsert',
+    });
+    return transaction;
+  });
 }
 
 export function updateTransaction(id: number, data: UpdateTransactionRecord) {
-  return db.update(transactions).set(data).where(eq(transactions.id, id)).returning().get() ?? null;
+  return db.transaction((tx) => {
+    const transaction =
+      tx
+        .update(transactions)
+        .set(data)
+        .where(and(notDeleted, eq(transactions.id, id)))
+        .returning()
+        .get() ?? null;
+    if (transaction === null) return null;
+    enqueueSyncMutation(tx, {
+      entityType: 'transaction',
+      entitySyncId: requireSyncId(transaction.syncId, 'transaction'),
+      operation: 'upsert',
+    });
+    return transaction;
+  });
 }
 
-export function deleteTransaction(id: number) {
-  return db.delete(transactions).where(eq(transactions.id, id)).returning().get() ?? null;
+/**
+ * Deletion is a tombstone: the row keeps its global identity so the deletion
+ * can reach other devices later, and every domain query hides it immediately.
+ */
+export function deleteTransaction(id: number, deletedAt = new Date()) {
+  return db.transaction((tx) => {
+    const transaction =
+      tx
+        .update(transactions)
+        .set({ deletedAt })
+        .where(and(notDeleted, eq(transactions.id, id)))
+        .returning()
+        .get() ?? null;
+    if (transaction === null) return null;
+    enqueueSyncMutation(tx, {
+      entityType: 'transaction',
+      entitySyncId: requireSyncId(transaction.syncId, 'transaction'),
+      operation: 'delete',
+    });
+    return transaction;
+  });
 }
 
 export function getAccountIncomeTotal(accountId: number) {
@@ -169,6 +230,7 @@ export function getPersonDebtTotals(personId: number, excludeTransactionId?: num
     .from(transactions)
     .where(
       and(
+        notDeleted,
         eq(transactions.personId, personId),
         inArray(transactions.type, debtTypes),
         excludeTransactionId === undefined ? undefined : ne(transactions.id, excludeTransactionId),
@@ -190,6 +252,7 @@ export function getPersonDebtCurrencies(personId: number, excludeTransactionId?:
     .from(transactions)
     .where(
       and(
+        notDeleted,
         eq(transactions.personId, personId),
         inArray(transactions.type, debtTypes),
         excludeTransactionId === undefined ? undefined : ne(transactions.id, excludeTransactionId),
@@ -211,7 +274,7 @@ export function getPeopleDebtTotals() {
     .from(people)
     .leftJoin(
       transactions,
-      and(eq(transactions.personId, people.id), inArray(transactions.type, debtTypes)),
+      and(notDeleted, eq(transactions.personId, people.id), inArray(transactions.type, debtTypes)),
     )
     .groupBy(people.id)
     .all();
@@ -238,7 +301,9 @@ export function getPersonTransactionItems(personId: number): PersonTransactionIt
         eq(transactions.destinationAccountId, account.id),
       ),
     )
-    .where(and(eq(transactions.personId, personId), inArray(transactions.type, debtTypes)))
+    .where(
+      and(notDeleted, eq(transactions.personId, personId), inArray(transactions.type, debtTypes)),
+    )
     .orderBy(...transactionOrder)
     .all() as PersonTransactionItem[];
 }
@@ -251,7 +316,7 @@ function getAccountTotal(
   const result = db
     .select({ total: sql<number>`coalesce(sum(${transactions.amountMinor}), 0)` })
     .from(transactions)
-    .where(and(eq(transactions.type, type), eq(accountColumn, accountId)))
+    .where(and(notDeleted, eq(transactions.type, type), eq(accountColumn, accountId)))
     .get();
 
   return result?.total ?? 0;
@@ -261,7 +326,7 @@ function getTransactionTotal(type: TransactionType) {
   const result = db
     .select({ total: sql<number>`coalesce(sum(${transactions.amountMinor}), 0)` })
     .from(transactions)
-    .where(eq(transactions.type, type))
+    .where(and(notDeleted, eq(transactions.type, type)))
     .get();
 
   return result?.total ?? 0;
@@ -294,6 +359,7 @@ function getTransactionViewQuery(id?: number) {
     .leftJoin(destinationAccount, eq(transactions.destinationAccountId, destinationAccount.id))
     .where(
       and(
+        notDeleted,
         inArray(transactions.type, [
           'expense',
           'income',

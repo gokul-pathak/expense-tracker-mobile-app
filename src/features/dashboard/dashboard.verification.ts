@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 
 import { db } from '@/db';
+import { removeQueuedWorkForMissingRows } from '@/features/sync/sync.verification';
 import { accounts } from '@/db/schema/accounts';
 import { categories } from '@/db/schema/categories';
 import { transactions } from '@/db/schema/transactions';
@@ -131,7 +132,6 @@ export function verifyDashboardService() {
     );
     assert(summary.recentTransactions.length === 4, 'Recent transaction limit was ignored.');
     deleteTransaction(backdated.id);
-    transactionIds.splice(transactionIds.indexOf(backdated.id), 1);
 
     updateExpense(currentFood.id, { amountMinor: 800_000 });
     summary = getDashboardSummary({ now });
@@ -145,7 +145,6 @@ export function verifyDashboardService() {
     ]);
 
     deleteTransaction(currentShopping.id);
-    transactionIds.splice(transactionIds.indexOf(currentShopping.id), 1);
     summary = getDashboardSummary({ now });
     assert(summary.totalBalanceMinor === 11_150_000, 'Deleting did not restore total balance.');
     assert(summary.monthlyExpenseMinor === 1_050_000, 'Deleting did not update monthly expense.');
@@ -164,9 +163,11 @@ export function verifyDashboardService() {
 
     return { dashboard: true };
   } finally {
+    // Deleting is a tombstone now, so every fixture row is still removed here.
     for (const id of transactionIds) db.delete(transactions).where(eq(transactions.id, id)).run();
     for (const id of accountIds) db.delete(accounts).where(eq(accounts.id, id)).run();
     for (const id of categoryIds) db.delete(categories).where(eq(categories.id, id)).run();
+    removeQueuedWorkForMissingRows();
   }
 }
 

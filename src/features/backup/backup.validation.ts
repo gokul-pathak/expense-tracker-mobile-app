@@ -1,12 +1,16 @@
 import { z } from 'zod';
 
 import { ACCOUNT_TYPES, CATEGORY_TYPES, PAYMENT_MODES } from '@/db/constants';
+import { isSyncId } from '@/db/schema';
 import { ValidationError } from '@/features/shared/errors';
 
 import {
   BACKUP_FORMAT,
   BACKUP_FORMAT_VERSION,
   BACKUP_SCHEMA_VERSION,
+  LEGACY_BACKUP_FORMAT_VERSION,
+  LEGACY_BACKUP_SCHEMA_VERSION,
+  type AnyBackupEnvelope,
   type BackupEnvelope,
   type BackupPreview,
 } from './backup.types';
@@ -26,96 +30,111 @@ const id = integer.positive();
 const currency = z.string().regex(/^[A-Z]{3,16}$/);
 const timestamp = integer.nonnegative();
 const nullableText = z.string().nullable();
-const accountSchema = z
-  .object({
-    id,
-    name: z.string().trim().min(1),
-    type: z.enum(ACCOUNT_TYPES),
-    openingBalanceMinor: integer,
-    currency,
-    icon: nullableText,
-    isArchived: z.boolean(),
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  })
-  .strict();
-const categorySchema = z
-  .object({
-    id,
-    name: z.string().trim().min(1),
-    type: z.enum(CATEGORY_TYPES),
-    icon: nullableText,
-    systemKey: nullableText,
-    isDefault: z.boolean(),
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  })
-  .strict();
-const personSchema = z
-  .object({
-    id,
-    name: z.string().trim().min(1),
-    note: nullableText,
-    isArchived: z.boolean(),
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  })
-  .strict();
-const transactionSchema = z
-  .object({
-    id,
-    type: z.enum(supportedTransactionTypes),
-    amountMinor: integer.positive(),
-    currency,
-    categoryId: id.nullable(),
-    sourceAccountId: id.nullable(),
-    destinationAccountId: id.nullable(),
-    personId: id.nullable(),
-    paymentMode: z.enum(PAYMENT_MODES).nullable(),
-    transactionDate: timestamp,
-    title: z.string(),
-    note: nullableText,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  })
-  .strict();
-const settingSchema = z
-  .object({
-    id: z.literal(1),
-    defaultCurrency: currency,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  })
-  .strict();
+// Global identity must be a real UUID: a restored collision would corrupt cloud identity.
+const syncId = z.string().refine(isSyncId, 'must be a valid sync identity');
+
+const legacyAccountShape = {
+  id,
+  name: z.string().trim().min(1),
+  type: z.enum(ACCOUNT_TYPES),
+  openingBalanceMinor: integer,
+  currency,
+  icon: nullableText,
+  isArchived: z.boolean(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+};
+const legacyCategoryShape = {
+  id,
+  name: z.string().trim().min(1),
+  type: z.enum(CATEGORY_TYPES),
+  icon: nullableText,
+  systemKey: nullableText,
+  isDefault: z.boolean(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+};
+const legacyPersonShape = {
+  id,
+  name: z.string().trim().min(1),
+  note: nullableText,
+  isArchived: z.boolean(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+};
+const legacyTransactionShape = {
+  id,
+  type: z.enum(supportedTransactionTypes),
+  amountMinor: integer.positive(),
+  currency,
+  categoryId: id.nullable(),
+  sourceAccountId: id.nullable(),
+  destinationAccountId: id.nullable(),
+  personId: id.nullable(),
+  paymentMode: z.enum(PAYMENT_MODES).nullable(),
+  transactionDate: timestamp,
+  title: z.string(),
+  note: nullableText,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+};
+const legacySettingShape = {
+  id: z.literal(1),
+  defaultCurrency: currency,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+};
 const metadataSchema = z
   .object({ key: z.string().startsWith('seed.'), value: z.string() })
   .strict();
-const envelopeSchema = z
+
+const dataSchema = (withSyncId: boolean) => {
+  const extend = <T extends z.ZodRawShape>(shape: T) =>
+    z.object(withSyncId ? { ...shape, syncId } : shape).strict();
+  return z
+    .object({
+      accounts: z.array(extend(legacyAccountShape)),
+      categories: z.array(extend(legacyCategoryShape)),
+      people: z.array(extend(legacyPersonShape)),
+      transactions: z.array(extend(legacyTransactionShape)),
+      settings: z.array(extend(legacySettingShape)),
+      appMetadata: z.array(metadataSchema),
+    })
+    .strict();
+};
+
+const currentEnvelopeSchema = z
   .object({
     format: z.literal(BACKUP_FORMAT),
     formatVersion: z.literal(BACKUP_FORMAT_VERSION),
     schemaVersion: z.literal(BACKUP_SCHEMA_VERSION),
     createdAt: z.string().datetime(),
     appVersion: z.string().min(1),
-    data: z
-      .object({
-        accounts: z.array(accountSchema),
-        categories: z.array(categorySchema),
-        people: z.array(personSchema),
-        transactions: z.array(transactionSchema),
-        settings: z.array(settingSchema),
-        appMetadata: z.array(metadataSchema),
-      })
-      .strict(),
+    data: dataSchema(true),
   })
   .strict();
+const legacyEnvelopeSchema = z
+  .object({
+    format: z.literal(BACKUP_FORMAT),
+    formatVersion: z.literal(LEGACY_BACKUP_FORMAT_VERSION),
+    schemaVersion: z.literal(LEGACY_BACKUP_SCHEMA_VERSION),
+    createdAt: z.string().datetime(),
+    appVersion: z.string().min(1),
+    data: dataSchema(false),
+  })
+  .strict();
+const envelopeSchema = z.discriminatedUnion('formatVersion', [
+  legacyEnvelopeSchema,
+  currentEnvelopeSchema,
+]);
 
-export function validateBackup(value: unknown): BackupEnvelope {
+export function validateBackup(value: unknown): AnyBackupEnvelope {
   if (
     typeof value === 'object' &&
     value !== null &&
     'formatVersion' in value &&
-    (value as { formatVersion?: unknown }).formatVersion !== BACKUP_FORMAT_VERSION
+    typeof (value as { formatVersion?: unknown }).formatVersion === 'number' &&
+    (value as { formatVersion: number }).formatVersion > BACKUP_FORMAT_VERSION
   ) {
     throw new ValidationError(
       'This backup was created by a newer or unsupported version of the app and cannot be restored here.',
@@ -126,7 +145,7 @@ export function validateBackup(value: unknown): BackupEnvelope {
     throw new ValidationError(
       `Backup is invalid: ${parsed.error.issues[0]?.message ?? 'unknown structure error'}`,
     );
-  const backup = parsed.data;
+  const backup = parsed.data as AnyBackupEnvelope;
   assertUnique(backup.data.accounts, 'accounts');
   assertUnique(backup.data.categories, 'categories');
   assertUnique(backup.data.people, 'people');
@@ -135,6 +154,7 @@ export function validateBackup(value: unknown): BackupEnvelope {
   if (backup.data.settings.length !== 1)
     throw new ValidationError('Backup must contain exactly one settings record.');
   assertUniqueBy(backup.data.appMetadata, 'app metadata', (item) => item.key);
+  if (isCurrentBackup(backup)) assertUniqueSyncIds(backup);
   const systemKeys = backup.data.categories
     .filter((item) => item.systemKey)
     .map((item) => item.systemKey!);
@@ -144,7 +164,19 @@ export function validateBackup(value: unknown): BackupEnvelope {
   return backup;
 }
 
-export function parseBackupJson(text: string): BackupEnvelope {
+export function isCurrentBackup(backup: AnyBackupEnvelope): backup is BackupEnvelope {
+  return backup.formatVersion === BACKUP_FORMAT_VERSION;
+}
+
+/** Backups this app writes are always the current format. */
+export function assertCurrentBackup(backup: AnyBackupEnvelope): BackupEnvelope {
+  if (!isCurrentBackup(backup)) {
+    throw new ValidationError('Expected a current-format backup.');
+  }
+  return backup;
+}
+
+export function parseBackupJson(text: string): AnyBackupEnvelope {
   try {
     return validateBackup(JSON.parse(text));
   } catch (error) {
@@ -153,7 +185,7 @@ export function parseBackupJson(text: string): BackupEnvelope {
   }
 }
 
-export function getBackupPreview(backup: BackupEnvelope): BackupPreview {
+export function getBackupPreview(backup: AnyBackupEnvelope): BackupPreview {
   return {
     createdAt: backup.createdAt,
     accounts: backup.data.accounts.length,
@@ -179,7 +211,31 @@ function assertUniqueBy<T>(items: T[], label: string, getKey: (item: T) => strin
     throw new ValidationError(`Backup contains duplicate ${label} IDs.`);
 }
 
-function validateRelationshipsAndDomain(backup: BackupEnvelope) {
+/**
+ * Restored identity collisions would make two records the same row in the cloud,
+ * so a duplicate sync ID anywhere in the backup is rejected before any write.
+ */
+function assertUniqueSyncIds(backup: BackupEnvelope) {
+  const sets = [
+    ['accounts', backup.data.accounts],
+    ['categories', backup.data.categories],
+    ['people', backup.data.people],
+    ['transactions', backup.data.transactions],
+    ['settings', backup.data.settings],
+  ] as const;
+  const seen = new Set<string>();
+  for (const [label, items] of sets) {
+    const keys = items.map((item) => item.syncId);
+    if (new Set(keys).size !== keys.length)
+      throw new ValidationError(`Backup contains duplicate ${label} sync IDs.`);
+    for (const key of keys) {
+      if (seen.has(key)) throw new ValidationError('Backup contains duplicate sync IDs.');
+      seen.add(key);
+    }
+  }
+}
+
+function validateRelationshipsAndDomain(backup: AnyBackupEnvelope) {
   const accounts = new Map(backup.data.accounts.map((item) => [item.id, item]));
   const categories = new Map(backup.data.categories.map((item) => [item.id, item]));
   const people = new Set(backup.data.people.map((item) => item.id));

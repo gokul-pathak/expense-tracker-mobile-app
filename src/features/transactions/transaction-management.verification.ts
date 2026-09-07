@@ -4,6 +4,7 @@ import { db } from '@/db';
 import { accounts } from '@/db/schema/accounts';
 import { categories } from '@/db/schema/categories';
 import { NotFoundError } from '@/features/shared/errors';
+import { removeQueuedWorkForMissingRows } from '@/features/sync/sync.verification';
 import { createAccount } from '@/features/accounts/account.service';
 import { createCategory } from '@/features/categories/category.service';
 
@@ -110,15 +111,16 @@ export function verifyTransactionManagement() {
       'Deleting an expense did not restore its balance.',
     );
     expectNotFound(() => getTransaction(expense.id));
-    transactionIds.splice(transactionIds.indexOf(expense.id), 1);
 
     return true;
   } finally {
+    // Deleting is a tombstone now, so every fixture row is still removed here.
     for (const id of transactionIds) db.delete(transactions).where(eq(transactions.id, id)).run();
     if (cashId !== undefined) db.delete(accounts).where(eq(accounts.id, cashId)).run();
     if (bankId !== undefined) db.delete(accounts).where(eq(accounts.id, bankId)).run();
     if (foodId !== undefined) db.delete(categories).where(eq(categories.id, foodId)).run();
     if (salaryId !== undefined) db.delete(categories).where(eq(categories.id, salaryId)).run();
+    removeQueuedWorkForMissingRows();
   }
 }
 

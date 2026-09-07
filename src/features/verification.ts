@@ -32,6 +32,7 @@ import {
 } from '@/features/people/person.service';
 import { getAppSettings, updateDefaultCurrency } from '@/features/settings/settings.service';
 import { ConflictError, NotFoundError, ValidationError } from '@/features/shared/errors';
+import { removeQueuedWorkForMissingRows } from '@/features/sync/sync.verification';
 import {
   getAccountBalance,
   getTotalBalance,
@@ -347,6 +348,7 @@ export function verifyServiceLayer() {
     if (m1CategoryId !== undefined)
       db.delete(categories).where(eq(categories.id, m1CategoryId)).run();
     if (personId !== undefined) db.delete(people).where(eq(people.id, personId)).run();
+    removeQueuedWorkForMissingRows();
   }
 }
 

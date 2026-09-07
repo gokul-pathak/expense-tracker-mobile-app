@@ -9,6 +9,7 @@ import { archiveAccount, createAccount } from '@/features/accounts/account.servi
 import { createCategory } from '@/features/categories/category.service';
 import { createPerson } from '@/features/people/person.service';
 import { ValidationError } from '@/features/shared/errors';
+import { removeQueuedWorkForMissingRows } from '@/features/sync/sync.verification';
 import {
   createBorrow,
   createExpense,
@@ -211,21 +212,21 @@ export function verifyReportsService() {
     const backdated = expense(1, food.id, 7, 20);
     assertSummary(getReportRange('this_month', now), 70_000, 35_000, 35_000);
     deleteTransaction(backdated.id);
-    transactionIds.splice(transactionIds.indexOf(backdated.id), 1);
     updateExpense(septemberFood.id, { amountMinor: 18_000 });
     assertSummary(getReportRange('this_month', now), 70_000, 38_000, 32_000);
     deleteTransaction(septemberFood.id);
-    transactionIds.splice(transactionIds.indexOf(septemberFood.id), 1);
     assertSummary(getReportRange('this_month', now), 70_000, 20_000, 50_000);
 
     archiveAccount(account.id);
     assertSummary(getReportRange('this_month', now), 70_000, 20_000, 50_000);
     return { reports: true };
   } finally {
+    // Deleting is a tombstone now, so every fixture row is still removed here.
     for (const id of transactionIds) db.delete(transactions).where(eq(transactions.id, id)).run();
     for (const id of personIds) db.delete(people).where(eq(people.id, id)).run();
     for (const id of accountIds) db.delete(accounts).where(eq(accounts.id, id)).run();
     for (const id of categoryIds) db.delete(categories).where(eq(categories.id, id)).run();
+    removeQueuedWorkForMissingRows();
   }
 
   function category(name: string, type: 'income' | 'expense') {

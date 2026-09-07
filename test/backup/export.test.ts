@@ -7,6 +7,7 @@ const data: BackupData = {
   accounts: [
     {
       id: 1,
+      syncId: '11111111-1111-4111-8111-111111111111',
       name: 'Cash, Café',
       type: 'cash',
       openingBalanceMinor: 0,
@@ -20,6 +21,7 @@ const data: BackupData = {
   categories: [
     {
       id: 1,
+      syncId: '22222222-2222-4222-8222-222222222222',
       name: 'Food',
       type: 'expense',
       icon: null,
@@ -29,12 +31,31 @@ const data: BackupData = {
       updatedAt: 0,
     },
   ],
-  people: [{ id: 1, name: 'राम', note: null, isArchived: true, createdAt: 0, updatedAt: 0 }],
-  settings: [{ id: 1, defaultCurrency: 'NPR', createdAt: 0, updatedAt: 0 }],
+  people: [
+    {
+      id: 1,
+      syncId: '44444444-4444-4444-8444-444444444444',
+      name: 'राम',
+      note: null,
+      isArchived: true,
+      createdAt: 0,
+      updatedAt: 0,
+    },
+  ],
+  settings: [
+    {
+      id: 1,
+      syncId: '55555555-5555-4555-8555-555555555555',
+      defaultCurrency: 'NPR',
+      createdAt: 0,
+      updatedAt: 0,
+    },
+  ],
   appMetadata: [],
   transactions: [
     {
       id: 1,
+      syncId: '66666666-6666-4666-8666-666666666666',
       type: 'expense',
       amountMinor: 1299,
       currency: 'NPR',

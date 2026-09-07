@@ -8,6 +8,7 @@ import { archiveAccount, createAccount } from '@/features/accounts/account.servi
 import { createCategory } from '@/features/categories/category.service';
 import { getDashboardSummary } from '@/features/dashboard/dashboard.service';
 import { NotFoundError, ValidationError } from '@/features/shared/errors';
+import { removeQueuedWorkForMissingRows } from '@/features/sync/sync.verification';
 
 import { getAccountBalance, getTotalBalance } from './account-balance.service';
 import {
@@ -199,7 +200,6 @@ export function verifyTransferEngine() {
       'Archived-account transfer was not readable.',
     );
     deleteTransaction(transfer.id);
-    transactionIds.splice(transactionIds.indexOf(transfer.id), 1);
     assert(getAccountBalance(bankB.id) === 700_000, 'Deleting transfer did not restore source.');
     assert(
       getAccountBalance(walletB.id) === 200_000,
@@ -212,9 +212,11 @@ export function verifyTransferEngine() {
 
     return { transfers: true };
   } finally {
+    // Deleting is a tombstone now, so every fixture row is still removed here.
     for (const id of transactionIds) db.delete(transactions).where(eq(transactions.id, id)).run();
     for (const id of categoryIds) db.delete(categories).where(eq(categories.id, id)).run();
     for (const id of accountIds) db.delete(accounts).where(eq(accounts.id, id)).run();
+    removeQueuedWorkForMissingRows();
   }
 
   function account(

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
 import { accounts } from '@/db/schema/accounts';
@@ -9,6 +9,10 @@ import { getRecentTransactionViews } from '@/features/transactions/transaction.r
 import type { DateRange } from '@/utils/date-range';
 
 const totalAmount = sql<number>`coalesce(sum(${transactions.amountMinor}), 0)`;
+// Tombstoned source rows never contribute to a derived financial figure.
+const liveTransaction = isNull(transactions.deletedAt);
+const liveAccount = isNull(accounts.deletedAt);
+const liveCategory = isNull(categories.deletedAt);
 
 export function getActiveAccountOpeningBalanceTotal() {
   return getAccountTotal(accounts.openingBalanceMinor);
@@ -20,9 +24,13 @@ export function getActiveAccountIncomeTotal() {
     .from(transactions)
     .innerJoin(
       accounts,
-      and(eq(transactions.destinationAccountId, accounts.id), eq(accounts.isArchived, false)),
+      and(
+        liveAccount,
+        eq(transactions.destinationAccountId, accounts.id),
+        eq(accounts.isArchived, false),
+      ),
     )
-    .where(eq(transactions.type, 'income'))
+    .where(and(liveTransaction, eq(transactions.type, 'income')))
     .get();
 
   return result?.total ?? 0;
@@ -34,9 +42,13 @@ export function getActiveAccountExpenseTotal() {
     .from(transactions)
     .innerJoin(
       accounts,
-      and(eq(transactions.sourceAccountId, accounts.id), eq(accounts.isArchived, false)),
+      and(
+        liveAccount,
+        eq(transactions.sourceAccountId, accounts.id),
+        eq(accounts.isArchived, false),
+      ),
     )
-    .where(eq(transactions.type, 'expense'))
+    .where(and(liveTransaction, eq(transactions.type, 'expense')))
     .get();
 
   return result?.total ?? 0;
@@ -84,9 +96,10 @@ export function getExpenseByCategory(range: DateRange, limit: number) {
       amountMinor: categoryAmount,
     })
     .from(transactions)
-    .innerJoin(categories, eq(transactions.categoryId, categories.id))
+    .innerJoin(categories, and(liveCategory, eq(transactions.categoryId, categories.id)))
     .where(
       and(
+        liveTransaction,
         eq(transactions.type, 'expense'),
         eq(categories.type, 'expense'),
         gte(transactions.transactionDate, range.start),
@@ -107,7 +120,7 @@ function getAccountTotal(column: typeof accounts.openingBalanceMinor) {
   const result = db
     .select({ total: sql<number>`coalesce(sum(${column}), 0)` })
     .from(accounts)
-    .where(eq(accounts.isArchived, false))
+    .where(and(liveAccount, eq(accounts.isArchived, false)))
     .get();
 
   return result?.total ?? 0;
@@ -121,8 +134,11 @@ function getActiveAccountTransactionTotal(
   const result = db
     .select({ total: totalAmount })
     .from(transactions)
-    .innerJoin(accounts, and(eq(accountColumn, accounts.id), eq(accounts.isArchived, false)))
-    .where(eq(transactions.type, type))
+    .innerJoin(
+      accounts,
+      and(liveAccount, eq(accountColumn, accounts.id), eq(accounts.isArchived, false)),
+    )
+    .where(and(liveTransaction, eq(transactions.type, type)))
     .get();
 
   return result?.total ?? 0;
@@ -134,6 +150,7 @@ function getTransactionTotalForRange(type: 'income' | 'expense', range: DateRang
     .from(transactions)
     .where(
       and(
+        liveTransaction,
         eq(transactions.type, type),
         gte(transactions.transactionDate, range.start),
         lt(transactions.transactionDate, range.end),
