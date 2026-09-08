@@ -42,6 +42,7 @@ import {
   unlinkCloudAccount,
 } from '@/features/sync/sync.service';
 import * as transactionService from '@/features/transactions/transaction.service';
+import { getAccountBalance } from '@/features/transactions/account-balance.service';
 
 import { cloudAccount, OTHER_USER, TEST_USER } from '../support/cloud-rows';
 import { expenseCategory, makeAccount, setupDatabase } from '../support/domain';
@@ -179,17 +180,20 @@ describe('sync orchestration', () => {
     expect(countPendingSyncMutations()).toBe(1);
   });
 
-  it('does not claim a successful sync when only the download failed', async () => {
+  it('does not upload at all when the download fails first', async () => {
     makeAccount('Cash');
     cloud.failPullWith(() => new PullRemoteError('network'));
 
     const result = await sync();
 
-    // The upload landed, but half a cycle is not a synchronized device.
+    // Downloading first is what makes deletion safe, so a failed download stops
+    // the cycle before anything is published.
     expect(result.status).toBe('offline');
-    expect(result.pushed).toBe(1);
+    expect(result.pushed).toBe(0);
+    expect(cloud.rows('account')).toHaveLength(0);
     expect(getSyncState()?.lastSuccessfulSyncAt).toBeNull();
-    expect(cloud.rows('account')).toHaveLength(1);
+    // The work is kept for the next attempt.
+    expect(countPendingSyncMutations()).toBe(1);
   });
 
   it('pushes again when a conflict left a local change queued', async () => {
@@ -233,17 +237,44 @@ describe('sync orchestration', () => {
     expect(accountService.getAccount(cash.id).name).toBe('Local edit');
   });
 
-  it('converges without a conflict when this device pushes before it pulls', async () => {
+  it('converges without a conflict when only this device changed', async () => {
     const cash = makeAccount('Cash', 'NPR', 100000);
     await sync();
     accountService.updateAccount(cash.id, { name: 'Local edit' });
 
     const result = await sync();
 
-    // Uploading first is what keeps the ordinary case conflict-free.
+    // The download finds nothing newer, so the local edit is simply uploaded.
     expect(result.conflicts).toBe(0);
     expect(result.status).toBe('success');
     expect(cloud.rowBySyncId('account', cash.syncId!)).toMatchObject({ name: 'Local edit' });
+    expect(countPendingSyncMutations()).toBe(0);
+  });
+
+  it('does not resurrect a record another device deleted while this one edited it', async () => {
+    const cash = makeAccount('Cash', 'NPR', 100000);
+    const expense = addExpense(cash.id, 5000);
+    await sync();
+
+    // Another device deletes it and publishes the tombstone.
+    const remote = cloud.rowBySyncId('transaction', expense.syncId!) as unknown as Record<
+      string,
+      unknown
+    >;
+    cloud.putRow('transaction', { ...remote, deleted_at: Date.now() });
+    // This device, offline until now, edited the same record.
+    transactionService.updateExpense(expense.id, { amountMinor: 9000 });
+
+    await sync();
+
+    expect(transactionService.listTransactions()).toHaveLength(0);
+    expect(cloud.rowBySyncId('transaction', expense.syncId!)).toMatchObject({
+      deleted_at: expect.any(Number),
+    });
+    // A further cycle must not bring it back either.
+    await sync();
+    expect(transactionService.listTransactions()).toHaveLength(0);
+    expect(getAccountBalance(cash.id)).toBe(100000);
   });
 
   it('runs one cycle at a time however often it is asked', async () => {

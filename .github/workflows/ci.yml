@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Everything that must pass on every change. Needs no credentials, no network
+  # and no Docker: the sync engine is tested against an in-memory cloud and real
+  # SQLite databases, so this job never depends on a hosted project being up.
+  checks:
+    name: Typecheck, lint and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      # Covers the M0-M6 financial regressions, backup, security, and the whole
+      # sync engine including the crash, stress, multi-device and audit suites.
+      - run: npm test
+      - name: Web bundle
+        run: npx expo export --platform web --output-dir dist-ci
+
+  # The guarantees only a real database can make: row level security, grants,
+  # cross-user foreign keys and the cloud-side integrity constraints.
+  #
+  # Deliberately not continue-on-error. A security regression that only warns is
+  # a security regression that ships.
+  database:
+    name: Supabase schema, RLS and integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Start local Supabase
+        run: supabase start
+      - name: Apply migrations from version control
+        run: supabase db reset
+      - name: RLS, integrity, push, pull and reconciliation suites
+        run: supabase test db
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop

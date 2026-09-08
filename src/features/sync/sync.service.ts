@@ -23,16 +23,21 @@ import { deriveCloudSyncStatus, type CloudSyncStatus } from './sync-status';
  * The one entry point the app uses to synchronize.
  *
  * Screens call `syncNow()`. They do not call push and pull themselves, because
- * the order and the stopping condition are the interesting part: a pull that
- * decides a local edit wins leaves that edit queued, and without a second push
- * the two devices would stay disagreeing while the UI happily said "Synced".
+ * the order is the interesting part: downloading before uploading is what stops
+ * an offline edit from overwriting another device's deletion, and it is what
+ * lets a conflict be resolved before either answer is published. A short
+ * read-back afterwards keeps the cursor level with this device's own uploads.
  *
  * Everything below still reads and writes SQLite only. No screen ever sees a
  * cloud row.
  */
 
-/** Push passes per cycle. Two is enough for push → pull → push; more would loop. */
-const MAX_PUSH_PASSES = 2;
+/**
+ * Upload passes per cycle. One is enough after a download: the download has
+ * already decided what survives, so a second pass could only re-send work the
+ * first one failed to send.
+ */
+const MAX_PUSH_PASSES = 1;
 
 export type SyncCycleStatus =
   | 'success'
@@ -67,40 +72,65 @@ export function isSyncCycleRunning(): boolean {
 }
 
 /**
- * One complete cycle: send what is queued, take what is new, then send again if
- * conflict resolution kept a local change that has still not reached the cloud.
+ * One complete cycle: take what is new, then send what survives.
+ *
+ * Downloading first is what makes deletion safe. Uploads are unconditional
+ * upserts keyed by identity, so a device that edited a record offline would
+ * otherwise overwrite a tombstone another device had already published — and the
+ * deleted record would come back everywhere. Pulling first means the tombstone
+ * arrives before that upload is even considered, delete-wins removes the stale
+ * queue entry, and nothing resurrects.
+ *
+ * The cost is that a local change waits one round trip longer to leave the
+ * device. That is the right trade: a slow upload is an inconvenience, and a
+ * resurrected transaction is a wrong balance.
  */
 export async function syncNow(options: SyncNowOptions = {}): Promise<SyncResult> {
   let pushed = 0;
-  let conflicts = 0;
+  let applied = 0;
+  let deleted = 0;
 
-  const first = await pushPendingChanges(options.push);
-  pushed += first.succeeded;
-  if (!isPushUsable(first.status)) return failed(cycleStatusOfPush(first.status), { pushed });
-
-  const pull = await pullRemoteChanges(options.pull);
-  conflicts += pull.conflicts.length;
-  if (!isPullUsable(pull.status)) {
-    return failed(cycleStatusOfPull(pull.status), { pushed, conflicts, cursor: pull.cursor });
+  const download = await pullRemoteChanges(options.pull);
+  const conflicts = download.conflicts.length;
+  if (!isPullUsable(download.status)) {
+    return failed(cycleStatusOfPull(download.status), { conflicts, cursor: download.cursor });
   }
+  applied += download.applied;
+  deleted += download.deleted;
+  let cursor = download.cursor;
+  let attentionRequired = download.status === 'attention_required';
 
-  // A conflict the local side won stays queued; only a second push makes the
-  // two devices actually agree.
-  let passes = 1;
-  while (passes < MAX_PUSH_PASSES && countPendingSyncMutations() > 0 && conflicts > 0) {
-    const again = await pushPendingChanges(options.push);
-    pushed += again.succeeded;
+  // Whatever survived the download — including a local change that won its
+  // conflict — goes up now.
+  let passes = 0;
+  while (passes < MAX_PUSH_PASSES && countPendingSyncMutations() > 0) {
+    const attempt = await pushPendingChanges(options.push);
+    pushed += attempt.succeeded;
     passes += 1;
-    if (!isPushUsable(again.status)) {
-      return failed(cycleStatusOfPush(again.status), { pushed, conflicts, cursor: pull.cursor });
+    if (!isPushUsable(attempt.status)) {
+      return failed(cycleStatusOfPush(attempt.status), { pushed, conflicts, cursor });
     }
   }
 
-  if (pull.applied > 0 || pull.deleted > 0) emitSyncedDataChanged();
+  // Reading back what was just uploaded is what lets the cursor catch up with
+  // this device's own changes. Without it every cycle that sent something would
+  // leave the next one re-downloading it, and no run would ever be a no-op.
+  if (pushed > 0) {
+    const catchUp = await pullRemoteChanges(options.pull);
+    if (!isPullUsable(catchUp.status)) {
+      return failed(cycleStatusOfPull(catchUp.status), { pushed, conflicts, cursor });
+    }
+    applied += catchUp.applied;
+    deleted += catchUp.deleted;
+    cursor = catchUp.cursor;
+    attentionRequired = attentionRequired || catchUp.status === 'attention_required';
+  }
+
+  if (applied > 0 || deleted > 0) emitSyncedDataChanged();
 
   const pending = countPendingSyncMutations();
   const status: SyncCycleStatus =
-    pull.status === 'attention_required' || countSyncConflicts('attention_required') > 0
+    attentionRequired || countSyncConflicts('attention_required') > 0
       ? 'attention_required'
       : 'success';
 
@@ -110,15 +140,7 @@ export async function syncNow(options: SyncNowOptions = {}): Promise<SyncResult>
     updateSyncState({ lastSuccessfulSyncAt: new Date(), lastSyncError: null });
   }
 
-  return {
-    status,
-    pushed,
-    pulled: pull.applied,
-    deleted: pull.deleted,
-    conflicts,
-    pending,
-    cursor: pull.cursor,
-  };
+  return { status, pushed, pulled: applied, deleted, conflicts, pending, cursor };
 }
 
 function failed(

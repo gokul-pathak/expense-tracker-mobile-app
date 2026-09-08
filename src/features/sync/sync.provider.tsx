@@ -29,6 +29,28 @@ import type { CloudSyncStatus } from './sync-status';
  */
 export const FOREGROUND_SYNC_INTERVAL_MS = 60_000;
 
+/**
+ * After a failure the automatic interval backs off, so a device with no
+ * connection or an expired session stops asking every minute. It is a ceiling on
+ * eagerness, never a delay a person waits through: Sync Now ignores it entirely,
+ * and one success resets it.
+ */
+export const FOREGROUND_SYNC_MAX_INTERVAL_MS = 15 * 60_000;
+
+export function foregroundSyncInterval(consecutiveFailures: number): number {
+  if (consecutiveFailures <= 0) return FOREGROUND_SYNC_INTERVAL_MS;
+  const backedOff = FOREGROUND_SYNC_INTERVAL_MS * 2 ** Math.min(consecutiveFailures, 8);
+  return Math.min(backedOff, FOREGROUND_SYNC_MAX_INTERVAL_MS);
+}
+
+/** Failures worth waiting longer over. A refused record is not one of them. */
+const RETRYABLE_CYCLE_STATUSES: readonly string[] = [
+  'offline',
+  'error',
+  'auth_required',
+  'unavailable',
+];
+
 type SyncContextValue = CloudSyncState & {
   syncing: boolean;
   /** True while a first-link reconciliation is running. */
@@ -49,6 +71,7 @@ export function SyncProvider({ children }: PropsWithChildren) {
   const [lastResult, setLastResult] = useState<SyncResult | null>(null);
   const [version, setVersion] = useState(0);
   const lastAttemptAt = useRef(0);
+  const consecutiveFailures = useRef(0);
   const mounted = useRef(true);
 
   const refresh = useCallback(() => setVersion((current) => current + 1), []);
@@ -68,6 +91,9 @@ export function SyncProvider({ children }: PropsWithChildren) {
     lastAttemptAt.current = Date.now();
     try {
       const result = await syncNow();
+      consecutiveFailures.current = RETRYABLE_CYCLE_STATUSES.includes(result.status)
+        ? consecutiveFailures.current + 1
+        : 0;
       if (!mounted.current) return result;
       setLastResult(result);
       // Screens that are already open re-read SQLite rather than being told
@@ -76,6 +102,7 @@ export function SyncProvider({ children }: PropsWithChildren) {
       return result;
     } catch {
       // A sync failure is never allowed to take the app down with it.
+      consecutiveFailures.current += 1;
       return null;
     } finally {
       if (mounted.current) {
@@ -97,7 +124,12 @@ export function SyncProvider({ children }: PropsWithChildren) {
     if (!configured || authenticatedUserId === null) return;
     const maybeSync = (appState: AppStateStatus) => {
       if (appState !== 'active') return;
-      if (Date.now() - lastAttemptAt.current < FOREGROUND_SYNC_INTERVAL_MS) return;
+      if (
+        Date.now() - lastAttemptAt.current <
+        foregroundSyncInterval(consecutiveFailures.current)
+      ) {
+        return;
+      }
       void run();
     };
     maybeSync(AppState.currentState);

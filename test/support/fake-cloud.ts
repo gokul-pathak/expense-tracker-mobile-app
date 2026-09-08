@@ -137,6 +137,16 @@ export function createFakeCloud(): FakeCloud {
         }
       }
 
+      // An identity already owned by someone else cannot be written over. The
+      // real database refuses this through row level security: the existing row
+      // is invisible to this caller, so the conflicting upsert cannot update it.
+      for (const row of rows) {
+        const existing = findStored(entityType, String(readField(row, 'sync_id')));
+        if (existing !== undefined && existing.row.user_id !== readField(row, 'user_id')) {
+          throw new PushRemoteError('authorization', '42501');
+        }
+      }
+
       for (const row of rows) write(entityType, { ...(row as Record<string, unknown>) });
 
       const afterWrite = afterWriteFailureRule?.(call);

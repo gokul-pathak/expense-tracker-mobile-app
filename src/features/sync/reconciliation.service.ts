@@ -17,7 +17,7 @@ import {
 } from './cloud-snapshot.service';
 import { readLocalDataInventory, type DataInventory } from './data-inventory';
 import { InitialUploadError, performInitialUpload } from './initial-upload.service';
-import { pullRemoteChanges } from './pull-sync.service';
+import { PULL_BATCH_SIZE, pullRemoteChanges } from './pull-sync.service';
 import {
   createSupabasePullRepository,
   createSupabaseSnapshotRepository,
@@ -258,8 +258,14 @@ async function useLocalData(ready: Ready): Promise<ReconciliationResult> {
 
   // Converge against what the cloud now actually holds: this establishes the
   // cursor and the per-record baselines, and proves the upload landed.
+  //
+  // The batch bound that protects an ordinary sync run would stop this one
+  // part-way through a large first upload, leaving a linked device whose cursor
+  // is thousands of changes behind and whose next few syncs are heavy. Setup
+  // happens once, so it is allowed to read as far as its own upload reaches.
   const pull = await pullRemoteChanges({
     acceptPendingLink: true,
+    maxBatches: convergenceBatches(uploaded + tombstoned),
     dependencies: {
       getAuthenticatedUserId: async () => ready.userId,
       createRemote: () => ready.pullRemote,
@@ -367,6 +373,19 @@ function commitLink(userId: string, options: { clearOutbox: boolean }) {
     lastSuccessfulSyncAt: new Date(),
     lastSyncError: null,
   });
+}
+
+/**
+ * Enough batches to read back everything this link just wrote, plus room for the
+ * duplicate change rows the cloud trigger appends and for another device writing
+ * at the same time. Still bounded: a runaway feed stops rather than looping.
+ */
+function convergenceBatches(writtenRows: number): number {
+  const CHANGES_PER_ROW = 2;
+  const HEADROOM_BATCHES = 20;
+  const MAX_BATCHES = 1000;
+  const needed = Math.ceil((writtenRows * CHANGES_PER_ROW) / PULL_BATCH_SIZE) + HEADROOM_BATCHES;
+  return Math.min(needed, MAX_BATCHES);
 }
 
 function adoptCloudSettingsIdentity(cloudSettingsSyncId: string | null) {

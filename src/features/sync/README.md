@@ -1,4 +1,4 @@
-# Sync (M7C foundation + M7D push + M7E pull + M7F linking and UX)
+# Sync (M7C foundation + M7D push + M7E pull + M7F linking and UX + M7G hardening)
 
 Local synchronization primitives, outgoing push, incoming pull, and the first-link flows and
 orchestration a person actually interacts with. There is no Realtime and no OS background
@@ -198,3 +198,20 @@ attention-required records and no leftover error.
 mounted inside the App Lock gate so a locked device syncs nothing. `sync-status.ts` derives every
 user-facing state from durable facts, and `sync-presentation.ts` holds the wording — no SQLSTATE,
 PostgREST code or JWT message ever reaches a person.
+
+## Hardening (M7G)
+
+`syncNow()` downloads before it uploads. That order is not a preference: uploads are unconditional
+upserts keyed by identity, so a device that edited a record offline would otherwise overwrite a
+tombstone another device had published, and the deleted record would return everywhere. Pulling
+first means delete-wins has already removed the stale queue entry before anything is sent. A short
+read-back afterwards keeps the cursor level with this device's own uploads, so a settled device
+really does no work.
+
+`dev/verify-sync-integrity.ts` audits a local database — identities, queue, binding, cursor,
+baselines, relation integrity — and returns codes and counts. It reports and never repairs, and it
+is deliberately not reachable from any screen.
+
+The invariants this feature must uphold are written down in `docs/sync-invariants.md`, each naming
+the test that fails if it stops being true. `docs/cloud-sync-runbook.md` covers running local
+Supabase, reading a status, and diagnosing a device that is stuck.
