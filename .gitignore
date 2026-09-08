@@ -13,3 +13,7 @@ coverage/
 
 expo-env.d.ts
 # @end expo-cli
+
+# Supabase CLI
+supabase/.temp/
+supabase/.branches/

@@ -64,6 +64,25 @@ export type RemotePullRepository = {
   fetchRows(entityType: SyncEntityType, syncIds: readonly string[]): Promise<unknown[]>;
 };
 
+export type RemoteSnapshotRepository = {
+  /**
+   * One page of the complete dataset for an entity type, ordered by identity.
+   *
+   * Whole-dataset reads page by `sync_id` rather than by offset: identity is
+   * immutable, so a row written during paging cannot shift another row out of
+   * the window the way a numbered page would.
+   */
+  fetchRowPage(
+    entityType: SyncEntityType,
+    input: { afterSyncId: string | null; limit: number },
+  ): Promise<unknown[]>;
+  /**
+   * The newest change position for this account, which becomes the pull cursor
+   * once a whole dataset has been downloaded or uploaded.
+   */
+  fetchLatestSequence(): Promise<number>;
+};
+
 export function createSupabaseSyncRepository(
   client: SupabaseClient | null = getSupabaseClient(),
 ): RemoteSyncRepository | null {
@@ -133,6 +152,56 @@ export function createSupabasePullRepository(
       }
       if (response.error !== null) throw toPullRemoteError(response.error);
       return response.data ?? [];
+    },
+  };
+}
+
+export function createSupabaseSnapshotRepository(
+  client: SupabaseClient | null = getSupabaseClient(),
+): RemoteSnapshotRepository | null {
+  if (client === null) return null;
+
+  return {
+    async fetchRowPage(entityType, { afterSyncId, limit }) {
+      const { table } = REMOTE_TABLES[entityType];
+      let response;
+      try {
+        let query = client
+          .schema(REMOTE_SCHEMA)
+          .from(table)
+          .select(PULLED_COLUMNS[entityType])
+          .order('sync_id', { ascending: true })
+          .limit(limit);
+        if (afterSyncId !== null) query = query.gt('sync_id', afterSyncId);
+        response = await query;
+      } catch (error) {
+        throw new PullRemoteError(toPullErrorCode(classifyThrownError(error)));
+      }
+      if (response.error !== null) throw toPullRemoteError(response.error);
+      return response.data ?? [];
+    },
+
+    async fetchLatestSequence() {
+      let response;
+      try {
+        response = await client
+          .schema(REMOTE_SCHEMA)
+          .from('sync_changes')
+          .select('sequence')
+          .order('sequence', { ascending: false })
+          .limit(1);
+      } catch (error) {
+        throw new PullRemoteError(toPullErrorCode(classifyThrownError(error)));
+      }
+      if (response.error !== null) throw toPullRemoteError(response.error);
+      const first = response.data?.[0] as { sequence?: unknown } | undefined;
+      const sequence = Number(first?.sequence ?? 0);
+      // A position that cannot be represented exactly would silently skip
+      // changes, so it is refused rather than rounded.
+      if (!Number.isSafeInteger(sequence) || sequence < 0) {
+        throw new PullRemoteError('remote_unknown', 'sequence');
+      }
+      return sequence;
     },
   };
 }

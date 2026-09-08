@@ -108,6 +108,27 @@ export async function runSeed(): Promise<void> {
 }
 
 /**
+ * Re-seeds defaults after the dataset was replaced from the cloud.
+ *
+ * A cloud account may legitimately hold no categories and no settings row. The
+ * version marker would normally suppress seeding, which would leave the device
+ * unable to record an expense at all, so the marker is cleared first. Existing
+ * rows are untouched: `system_key` and the settings singleton id keep seeding
+ * from duplicating anything that arrived from the cloud.
+ */
+export async function reseedDefaultsIfMissing(): Promise<boolean> {
+  const categoryCount = db.select({ id: categories.id }).from(categories).all().length;
+  const settingsRow = db.select({ id: settings.id }).from(settings).get();
+  if (categoryCount > 0 && settingsRow !== undefined) return false;
+
+  db.delete(appMetadata)
+    .where(sql`${appMetadata.key} = ${SEED_VERSION_KEY}`)
+    .run();
+  await runSeed();
+  return true;
+}
+
+/**
  * Development-only: verify that the default seed produced the expected data.
  */
 export function verifySeedData(): { categoriesCount: number; settingsExists: boolean } {

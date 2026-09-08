@@ -8,6 +8,7 @@ import { initializeDatabase } from '@/db/migrations';
 import { AppLockGate } from '@/features/security/AppLockGate';
 import { AppErrorBoundary } from '@/components/ui';
 import { CloudAuthProvider } from '@/features/cloud-auth/auth.provider';
+import { SyncProvider } from '@/features/sync/sync.provider';
 
 export default function RootLayout() {
   const [migrationError, setMigrationError] = useState<Error>();
@@ -59,12 +60,18 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <AppLockGate>
         <CloudAuthProvider>
-          <AppErrorBoundary>
-            <StatusBar style="dark" />
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="(tabs)" />
-            </Stack>
-          </AppErrorBoundary>
+          {/*
+            Sync lives inside the lock gate, so a locked device performs no
+            synchronization and the first foreground sync happens after unlock.
+          */}
+          <SyncProvider>
+            <AppErrorBoundary>
+              <StatusBar style="dark" />
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="(tabs)" />
+              </Stack>
+            </AppErrorBoundary>
+          </SyncProvider>
         </CloudAuthProvider>
       </AppLockGate>
     </SafeAreaProvider>

@@ -195,6 +195,31 @@ export function readLocalDebtRowsForPeople(personSyncIds: readonly string[]): Lo
     );
 }
 
+export type LocalSnapshot = {
+  accounts: Account[];
+  categories: Category[];
+  people: Person[];
+  settings: Setting[];
+  transactions: Transaction[];
+};
+
+/**
+ * Every syncable row, read in one transaction so the tables describe one
+ * logical moment.
+ *
+ * Tombstoned rows are included: a first upload has to carry this device's
+ * deletions too, or another device would keep records this one has deleted.
+ */
+export function readLocalSnapshot(): LocalSnapshot {
+  return db.transaction((tx) => ({
+    accounts: tx.select().from(accounts).all(),
+    categories: tx.select().from(categories).all(),
+    people: tx.select().from(people).all(),
+    settings: tx.select().from(settings).all(),
+    transactions: tx.select().from(transactions).all(),
+  }));
+}
+
 /** Narrow read used when a caller already knows it needs a transaction. */
 export function readLocalTransaction(syncId: string): Transaction | null {
   return db.select().from(transactions).where(eq(transactions.syncId, syncId)).get() ?? null;

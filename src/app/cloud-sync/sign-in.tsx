@@ -6,37 +6,31 @@ import { colors } from '@/constants/theme';
 import { CloudAuthForm } from '@/features/cloud-auth/CloudAuthForm';
 import { cloudAuthService } from '@/features/cloud-auth/auth.service';
 
-export default function SignUpScreen() {
+export default function SignInScreen() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   return (
-    <FormScreen title="Create Account">
+    <FormScreen title="Sign In">
       <AppText color={colors.textMuted}>
-        A Cloud Account is optional and is separate from your App Lock PIN.
+        Sign in to your cloud account. This is separate from App Lock, and signing in does not move
+        any financial data on its own.
       </AppText>
       <CloudAuthForm
-        mode="sign_up"
+        mode="sign_in"
         saving={saving}
         onSubmit={(values) => void submit(values.email, values.password)}
       />
-      {notice ? <AppText color={colors.success}>{notice}</AppText> : null}
       {error ? <AppText color={colors.danger}>{error}</AppText> : null}
     </FormScreen>
   );
   async function submit(email: string, password: string) {
     setSaving(true);
     setError('');
-    setNotice('');
     try {
-      const result = await cloudAuthService.signUp(email, password);
-      if (!result.session) {
-        setNotice('Check your email to confirm your account, then sign in.');
-        return;
-      }
-      router.replace('/cloud-account' as never);
+      await cloudAuthService.signIn(email, password);
+      router.replace('/cloud-sync' as never);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to create an account.');
+      setError(caught instanceof Error ? caught.message : 'Unable to sign in.');
     } finally {
       setSaving(false);
     }

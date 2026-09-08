@@ -14,6 +14,7 @@ export const PULL_STATUSES = [
   'unavailable',
   'auth_required',
   'not_linked',
+  'reconciliation_required',
   'account_mismatch',
   'offline',
   'conflict',

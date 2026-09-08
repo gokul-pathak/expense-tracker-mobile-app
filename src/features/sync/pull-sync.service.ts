@@ -39,6 +39,7 @@ import {
   getPendingSyncMutation,
   getSyncState,
   rekeySyncMutation,
+  resolveSyncableUserId,
   setPendingSyncMutationBase,
   updateSyncState,
 } from './sync.repository';
@@ -88,6 +89,11 @@ export type PullSyncOptions = {
   dependencies?: Partial<PullSyncDependencies>;
   batchSize?: number;
   maxBatches?: number;
+  /**
+   * Reconciliation only. It lets the first-link flow converge a database it is
+   * still binding, without that half-finished state ever counting as a link.
+   */
+  acceptPendingLink?: boolean;
 };
 
 export function isPullRunning(): boolean {
@@ -124,10 +130,12 @@ async function runPull(options: PullSyncOptions): Promise<PullSyncResult> {
   // Being signed in is not the same as this database belonging to that account.
   // Without an explicit link, downloading cloud rows would pour one account's
   // financial history into whatever local database happened to be open.
+  const eligibility = resolveSyncableUserId(userId, {
+    acceptPendingLink: options.acceptPendingLink,
+  });
+  if (!eligibility.ok) return emptyPullResult(eligibility.reason, currentCursor());
   const state = getSyncState();
-  const linkedUserId = state?.linkedUserId ?? null;
-  if (linkedUserId === null) return emptyPullResult('not_linked', currentCursor());
-  if (linkedUserId !== userId) return emptyPullResult('account_mismatch', currentCursor());
+  const linkedUserId = userId;
 
   const run: RunState = {
     cursor: state?.pullCursor ?? PULL_CURSOR_START,

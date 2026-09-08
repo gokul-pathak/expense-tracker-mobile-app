@@ -25,6 +25,14 @@ import type {
   RemoteSettings,
   RemoteTransaction,
 } from './remote-apply.repository';
+import {
+  findDebtViolation,
+  isDebtType,
+  validateRemoteTransaction,
+  type DebtContribution,
+  type DebtType,
+  type RemoteRelationIndex,
+} from './remote-domain-validation';
 import { readSyncBaselines } from './sync-baseline.repository';
 import { readPendingSyncMutations } from './sync.repository';
 import {
@@ -54,13 +62,6 @@ import {
  * cursor there. A rejected record is never stepped over: a cursor that moves
  * past a record it never applied loses that record forever.
  */
-
-/** Types the cloud schema permits but this app has no domain support for. */
-const UNSUPPORTED_TRANSACTION_TYPES: readonly string[] = ['investment', 'investment_return'];
-
-const DEBT_TYPES = ['lend', 'borrow', 'repayment_received', 'repayment_paid'] as const;
-
-type DebtType = (typeof DEBT_TYPES)[number];
 
 type PendingEntry = {
   id: number;
@@ -171,8 +172,14 @@ function planPrefix(input: PullBatchInput, horizon: number): PrefixResult {
     const { change, index } = identity;
     const raw = input.rows.get(change.entityType)?.get(change.entitySyncId);
     if (raw === undefined) {
-      // The change feed named a row the query did not return. Skipping it would
-      // hide a real record behind an advancing cursor, so the run stops here.
+      // Settings are identified in the cloud by their owner, not by their sync
+      // ID, so an upload from another device can retire one identity in favour
+      // of another. A change naming an identity that no longer exists is
+      // therefore obsolete rather than missing, and there is nothing to apply.
+      if (change.entityType === 'settings') continue;
+      // Every other change naming a row the query did not return is a real
+      // record. Skipping it would hide it behind an advancing cursor, so the
+      // run stops here instead.
       return { ok: false, index, failure: failureFor(change, 'remote_row_missing') };
     }
 
@@ -254,9 +261,7 @@ type LocalContext = {
   baselines: Map<SyncEntityType, Map<string, { serverRevision: number; deleted: boolean }>>;
   localSettingsSyncId: string | null;
   /** Local rows plus the batch's own parents, which land before their children. */
-  accounts: Map<string, { currency: string; isArchived: boolean }>;
-  categoryTypes: Map<string, string>;
-  people: Set<string>;
+  relations: RemoteRelationIndex;
   localDebtRows: LocalDebtRow[];
 };
 
@@ -297,19 +302,21 @@ function readLocalContext(decoded: Map<string, DecodedEntry>): LocalContext {
     if (row.person_sync_id !== null) referencedPeople.push(row.person_sync_id);
   }
 
-  const accounts = new Map<string, { currency: string; isArchived: boolean }>();
-  const categoryTypes = new Map<string, string>();
-  const people = new Set<string>();
+  const relations: RemoteRelationIndex = {
+    accounts: new Map(),
+    categoryTypes: new Map(),
+    people: new Set(),
+  };
 
   // Local parents first, so a parent that only exists locally still resolves.
   for (const [syncId, row] of readAccountCurrenciesBySyncId(referencedAccounts)) {
-    accounts.set(syncId, row);
+    relations.accounts.set(syncId, row);
   }
   for (const [syncId, type] of readCategoryTypesBySyncId(referencedCategories)) {
-    categoryTypes.set(syncId, type);
+    relations.categoryTypes.set(syncId, type);
   }
   for (const syncId of readLocalRowsBySyncIds('person', referencedPeople).keys()) {
-    people.add(syncId);
+    relations.people.add(syncId);
   }
 
   // Then the batch's own parents, which are applied before their children and
@@ -319,16 +326,19 @@ function readLocalContext(decoded: Map<string, DecodedEntry>): LocalContext {
     switch (entry.change.entityType) {
       case 'account': {
         const row = entry.row as PulledAccountRow;
-        accounts.set(row.sync_id, { currency: row.currency, isArchived: row.is_archived });
+        relations.accounts.set(row.sync_id, {
+          currency: row.currency,
+          isArchived: row.is_archived,
+        });
         break;
       }
       case 'category': {
         const row = entry.row as PulledCategoryRow;
-        categoryTypes.set(row.sync_id, row.type);
+        relations.categoryTypes.set(row.sync_id, row.type);
         break;
       }
       case 'person':
-        people.add(entry.row.sync_id);
+        relations.people.add(entry.row.sync_id);
         break;
       default:
         break;
@@ -340,9 +350,7 @@ function readLocalContext(decoded: Map<string, DecodedEntry>): LocalContext {
     pending,
     baselines,
     localSettingsSyncId: readLocalSettingsSyncId(),
-    accounts,
-    categoryTypes,
-    people,
+    relations,
     localDebtRows: readLocalDebtRowsForPeople(referencedPeople),
   };
 }
@@ -369,7 +377,11 @@ function decide(entry: DecodedEntry, context: LocalContext): Decision {
   }
 
   if (entityType === 'transaction') {
-    const problem = validateTransaction(row as PulledTransactionRow, context, remoteDeleted);
+    const problem = validateRemoteTransaction(
+      row as PulledTransactionRow,
+      context.relations,
+      remoteDeleted,
+    );
     if (problem !== undefined) {
       return { ok: false, failure: failureFor(change, problem.code, problem.detail) };
     }
@@ -668,107 +680,6 @@ function sameNullableInstant(local: Date | null, remote: number | null): boolean
   return remote !== null && local.getTime() === remote;
 }
 
-type TransactionProblem = {
-  code: 'invalid_remote_data' | 'unknown_parent' | 'unsupported_remote_data';
-  detail: string;
-};
-
-/**
- * Domain invariants for one downloaded transaction.
- *
- * The cloud enforces shape, but a client cannot delegate meaning: category type
- * compatibility, transfer account difference, currency agreement and relation
- * existence are all checked again before anything reaches SQLite.
- */
-function validateTransaction(
-  row: PulledTransactionRow,
-  context: LocalContext,
-  remoteDeleted: boolean,
-): TransactionProblem | undefined {
-  if (UNSUPPORTED_TRANSACTION_TYPES.includes(row.type)) {
-    return { code: 'unsupported_remote_data', detail: `type:${row.type}` };
-  }
-  // A deleted record is invisible to every domain calculation, so its shape
-  // cannot corrupt anything and is not re-litigated here.
-  if (remoteDeleted) return undefined;
-
-  const source = row.source_account_sync_id;
-  const destination = row.destination_account_sync_id;
-  const category = row.category_sync_id;
-  const person = row.person_sync_id;
-
-  const shape = validateShape(row.type, { source, destination, category, person });
-  if (shape !== undefined) return shape;
-
-  if (category !== null) {
-    const type = context.categoryTypes.get(category);
-    if (type === undefined) return { code: 'unknown_parent', detail: 'category' };
-    const required = row.type === 'expense' ? 'expense' : 'income';
-    if (type !== required) return { code: 'invalid_remote_data', detail: 'category_type' };
-  }
-
-  for (const accountSyncId of [source, destination]) {
-    if (accountSyncId === null) continue;
-    const account = context.accounts.get(accountSyncId);
-    // A missing parent is never resolved by writing a null foreign key: that
-    // would silently change what the record means.
-    if (account === undefined) return { code: 'unknown_parent', detail: 'account' };
-    if (account.currency !== row.currency) {
-      return { code: 'invalid_remote_data', detail: 'account_currency' };
-    }
-  }
-
-  if (person !== null && !context.people.has(person)) {
-    return { code: 'unknown_parent', detail: 'person' };
-  }
-
-  return undefined;
-}
-
-function validateShape(
-  type: PulledTransactionRow['type'],
-  relations: {
-    source: string | null;
-    destination: string | null;
-    category: string | null;
-    person: string | null;
-  },
-): TransactionProblem | undefined {
-  const { source, destination, category, person } = relations;
-  const invalid = (detail: string): TransactionProblem => ({
-    code: 'invalid_remote_data',
-    detail,
-  });
-
-  switch (type) {
-    case 'expense':
-      if (source === null || destination !== null) return invalid('expense_accounts');
-      if (category === null || person !== null) return invalid('expense_relations');
-      return undefined;
-    case 'income':
-      if (destination === null || source !== null) return invalid('income_accounts');
-      if (category === null || person !== null) return invalid('income_relations');
-      return undefined;
-    case 'transfer':
-      if (source === null || destination === null) return invalid('transfer_accounts');
-      if (source === destination) return invalid('transfer_same_account');
-      if (category !== null || person !== null) return invalid('transfer_relations');
-      return undefined;
-    case 'lend':
-    case 'repayment_paid':
-      if (source === null || destination !== null) return invalid('debt_accounts');
-      if (person === null || category !== null) return invalid('debt_relations');
-      return undefined;
-    case 'borrow':
-    case 'repayment_received':
-      if (destination === null || source !== null) return invalid('debt_accounts');
-      if (person === null || category !== null) return invalid('debt_relations');
-      return undefined;
-    default:
-      return { code: 'unsupported_remote_data', detail: `type:${type}` };
-  }
-}
-
 /**
  * Debt invariants across local history and the whole batch together.
  *
@@ -782,60 +693,42 @@ function validateDebtInvariants(
   decoded: Map<string, DecodedEntry>,
   context: LocalContext,
 ): { index: number; failure: PullFailure } | undefined {
-  type Totals = Record<DebtType, number>;
-  const empty = (): Totals => ({ lend: 0, borrow: 0, repayment_received: 0, repayment_paid: 0 });
-
   const supersededBySyncId = new Set(
     items.filter((item) => item.entityType === 'transaction').map((item) => item.syncId),
   );
-  const totals = new Map<string, Totals>();
-  const currencies = new Map<string, Set<string>>();
 
-  const contribute = (personSyncId: string, type: DebtType, amount: number, currency: string) => {
-    const bucket = totals.get(personSyncId) ?? empty();
-    bucket[type] += amount;
-    totals.set(personSyncId, bucket);
-    const seen = currencies.get(personSyncId) ?? new Set<string>();
-    seen.add(currency);
-    currencies.set(personSyncId, seen);
-  };
-
-  for (const row of context.localDebtRows) {
-    // A record this batch rewrites or hides is counted from the batch instead.
-    if (supersededBySyncId.has(row.syncId)) continue;
-    contribute(row.personSyncId, row.type as DebtType, row.amountMinor, row.currency);
-  }
+  // A record this batch rewrites or hides is counted from the batch instead.
+  const existing = context.localDebtRows
+    .filter((row) => !supersededBySyncId.has(row.syncId))
+    .map((row) => ({
+      personSyncId: row.personSyncId,
+      type: row.type as DebtType,
+      amountMinor: row.amountMinor,
+      currency: row.currency,
+    }));
 
   // In server order, so a principal is counted before the repayment that
-  // depends on it and blame for a violation lands on the record that caused it.
-  const contributors = [...decoded.values()]
+  // depends on it.
+  const incoming: DebtContribution<DecodedEntry>[] = [...decoded.values()]
     .filter((entry) => entry.change.entityType === 'transaction')
-    .filter((entry) => (entry.row as PulledTransactionRow).deleted_at === null)
-    .filter((entry) => DEBT_TYPES.includes((entry.row as PulledTransactionRow).type as DebtType))
-    .sort((left, right) => left.index - right.index);
+    .map((entry) => ({ entry, row: entry.row as PulledTransactionRow }))
+    .filter(({ row }) => row.deleted_at === null && isDebtType(row.type))
+    .filter(({ row }) => row.person_sync_id !== null)
+    .sort((left, right) => left.entry.index - right.entry.index)
+    .map(({ entry, row }) => ({
+      key: entry,
+      personSyncId: row.person_sync_id!,
+      type: row.type as DebtType,
+      amountMinor: row.amount_minor,
+      currency: row.currency,
+    }));
 
-  for (const entry of contributors) {
-    const row = entry.row as PulledTransactionRow;
-    const personSyncId = row.person_sync_id;
-    if (personSyncId === null) continue;
-
-    contribute(personSyncId, row.type as DebtType, row.amount_minor, row.currency);
-
-    const bucket = totals.get(personSyncId)!;
-    const problem =
-      bucket.repayment_received > bucket.lend
-        ? 'repayment_received_exceeds_lent'
-        : bucket.repayment_paid > bucket.borrow
-          ? 'repayment_paid_exceeds_borrowed'
-          : (currencies.get(personSyncId)?.size ?? 0) > 1
-            ? 'mixed_person_currency'
-            : undefined;
-    if (problem === undefined) continue;
-
-    return { index: entry.index, failure: failureFor(entry.change, 'domain_invariant', problem) };
-  }
-
-  return undefined;
+  const violation = findDebtViolation(existing, incoming);
+  if (violation === undefined) return undefined;
+  return {
+    index: violation.key.index,
+    failure: failureFor(violation.key.change, 'domain_invariant', violation.problem),
+  };
 }
 
 /**

@@ -29,9 +29,9 @@ import { isSyncEngineRunning, withSyncEngineLock } from './sync-lock';
 import {
   acknowledgeSyncMutation,
   countPendingSyncMutations,
-  getSyncState,
   listPendingSyncMutationsForPush,
   markSyncAttempt,
+  resolveSyncableUserId,
   updateSyncState,
 } from './sync.repository';
 import {
@@ -89,6 +89,11 @@ export type PushSyncOptions = {
   dependencies?: Partial<PushSyncDependencies>;
   batchSize?: number;
   maxOperations?: number;
+  /**
+   * Reconciliation only. It lets the first-link flow converge a database it is
+   * still binding, without that half-finished state ever counting as a link.
+   */
+  acceptPendingLink?: boolean;
 };
 
 export function isPushRunning(): boolean {
@@ -125,11 +130,10 @@ async function runPush(options: PushSyncOptions): Promise<PushSyncResult> {
   // Being signed in is not the same as this database belonging to that account.
   // Without an explicit link, uploading local financial data would silently
   // publish it to whichever account happened to sign in.
-  const linkedUserId = getSyncState()?.linkedUserId ?? null;
-  if (linkedUserId === null) return emptyPushResult('not_linked', countPendingSyncMutations());
-  if (linkedUserId !== userId) {
-    return emptyPushResult('account_mismatch', countPendingSyncMutations());
-  }
+  const eligibility = resolveSyncableUserId(userId, {
+    acceptPendingLink: options.acceptPendingLink,
+  });
+  if (!eligibility.ok) return emptyPushResult(eligibility.reason, countPendingSyncMutations());
 
   const context: MappingContext = { userId };
   const failures: PushFailure[] = [];

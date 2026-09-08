@@ -3,7 +3,7 @@ import { asc, isNull, like } from 'drizzle-orm';
 
 import { db } from '@/db';
 import { appMetadata, accounts, categories, people, settings, transactions } from '@/db/schema';
-import { clearSyncOutbox, updateSyncState } from '@/features/sync/sync.repository';
+import { clearCloudKnowledge, updateSyncState } from '@/features/sync/sync.repository';
 import { createSyncId, requireSyncId } from '@/features/sync/uuid';
 
 import {
@@ -179,14 +179,22 @@ export function restoreBackup(backup: AnyBackupEnvelope): void {
         })
         .run();
     for (const item of valid.data.appMetadata) tx.insert(appMetadata).values(item).run();
-    // Queued work referred to the replaced dataset, and pull position no longer applies.
-    clearSyncOutbox(tx);
+    // Queued work referred to the replaced dataset, and the pull position and
+    // per-record baselines describe rows that are no longer here.
+    clearCloudKnowledge(tx);
     updateSyncState(
       {
         pullCursor: null,
         lastSuccessfulSyncAt: null,
         lastSuccessfulPushAt: null,
+        lastSuccessfulPullAt: null,
         lastSyncError: null,
+        // A restored dataset has never been agreed with the cloud. Sync stays
+        // blocked until the user makes an explicit choice, so an older backup
+        // cannot silently overwrite newer cloud data.
+        linkedUserId: null,
+        pendingLinkUserId: null,
+        reconciliationRequired: true,
       },
       tx,
     );

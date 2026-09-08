@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { useFocusEffect, router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { AppButton, AppText, Card, NativeDataNotice, Screen, ScreenState } from '@/components/ui';
+import { useRefreshOnSyncedData } from '@/features/sync/use-synced-data';
 import { colors, radii, spacing } from '@/constants/theme';
 import { formatMinorUnits } from '@/utils/money';
 import type { Person } from '@/features/people/person.types';
@@ -37,6 +38,8 @@ export default function PeopleScreen() {
     }
   }, [archived]);
   useFocusEffect(load);
+  // A sync that changes SQLite refreshes this screen even while it is open.
+  useRefreshOnSyncedData(load);
   if (!isLocalFinanceDataAvailable)
     return (
       <Screen>

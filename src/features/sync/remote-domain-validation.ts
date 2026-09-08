@@ -1,0 +1,183 @@
+import type { TransactionType } from '@/db/constants';
+
+import type { PulledTransactionRow } from './remote/remote-pull-rows';
+
+/**
+ * The domain rules a downloaded transaction must satisfy before it is allowed
+ * to touch SQLite.
+ *
+ * The cloud enforces shape, but meaning cannot be delegated: whether a category
+ * may carry an expense, whether two transfer accounts differ, whether a currency
+ * agrees with its account, and whether a repayment is covered by its principal
+ * are all questions the local domain answers, so the client answers them again.
+ *
+ * Shared by incremental pull and by whole-dataset restore, so a record cannot be
+ * accepted through one path that the other would reject.
+ */
+
+/** Types the cloud schema permits but this app has no domain support for. */
+export const UNSUPPORTED_TRANSACTION_TYPES: readonly string[] = ['investment', 'investment_return'];
+
+export const DEBT_TYPES = ['lend', 'borrow', 'repayment_received', 'repayment_paid'] as const;
+
+export type DebtType = (typeof DEBT_TYPES)[number];
+
+export function isDebtType(type: TransactionType | string): type is DebtType {
+  return DEBT_TYPES.includes(type as DebtType);
+}
+
+/** Relations a transaction may reference, from local rows and the batch alike. */
+export type RemoteRelationIndex = {
+  accounts: Map<string, { currency: string; isArchived: boolean }>;
+  categoryTypes: Map<string, string>;
+  people: Set<string>;
+};
+
+export type TransactionProblem = {
+  code: 'invalid_remote_data' | 'unknown_parent' | 'unsupported_remote_data';
+  detail: string;
+};
+
+export function validateRemoteTransaction(
+  row: PulledTransactionRow,
+  index: RemoteRelationIndex,
+  remoteDeleted: boolean,
+): TransactionProblem | undefined {
+  if (UNSUPPORTED_TRANSACTION_TYPES.includes(row.type)) {
+    return { code: 'unsupported_remote_data', detail: `type:${row.type}` };
+  }
+  // A deleted record is invisible to every domain calculation, so its shape
+  // cannot corrupt anything and is not re-litigated here.
+  if (remoteDeleted) return undefined;
+
+  const source = row.source_account_sync_id;
+  const destination = row.destination_account_sync_id;
+  const category = row.category_sync_id;
+  const person = row.person_sync_id;
+
+  const shape = validateShape(row.type, { source, destination, category, person });
+  if (shape !== undefined) return shape;
+
+  if (category !== null) {
+    const type = index.categoryTypes.get(category);
+    if (type === undefined) return { code: 'unknown_parent', detail: 'category' };
+    const required = row.type === 'expense' ? 'expense' : 'income';
+    if (type !== required) return { code: 'invalid_remote_data', detail: 'category_type' };
+  }
+
+  for (const accountSyncId of [source, destination]) {
+    if (accountSyncId === null) continue;
+    const account = index.accounts.get(accountSyncId);
+    // A missing parent is never resolved by writing a null foreign key: that
+    // would silently change what the record means.
+    if (account === undefined) return { code: 'unknown_parent', detail: 'account' };
+    if (account.currency !== row.currency) {
+      return { code: 'invalid_remote_data', detail: 'account_currency' };
+    }
+  }
+
+  if (person !== null && !index.people.has(person)) {
+    return { code: 'unknown_parent', detail: 'person' };
+  }
+
+  return undefined;
+}
+
+function validateShape(
+  type: PulledTransactionRow['type'],
+  relations: {
+    source: string | null;
+    destination: string | null;
+    category: string | null;
+    person: string | null;
+  },
+): TransactionProblem | undefined {
+  const { source, destination, category, person } = relations;
+  const invalid = (detail: string): TransactionProblem => ({ code: 'invalid_remote_data', detail });
+
+  switch (type) {
+    case 'expense':
+      if (source === null || destination !== null) return invalid('expense_accounts');
+      if (category === null || person !== null) return invalid('expense_relations');
+      return undefined;
+    case 'income':
+      if (destination === null || source !== null) return invalid('income_accounts');
+      if (category === null || person !== null) return invalid('income_relations');
+      return undefined;
+    case 'transfer':
+      if (source === null || destination === null) return invalid('transfer_accounts');
+      if (source === destination) return invalid('transfer_same_account');
+      if (category !== null || person !== null) return invalid('transfer_relations');
+      return undefined;
+    case 'lend':
+    case 'repayment_paid':
+      if (source === null || destination !== null) return invalid('debt_accounts');
+      if (person === null || category !== null) return invalid('debt_relations');
+      return undefined;
+    case 'borrow':
+    case 'repayment_received':
+      if (destination === null || source !== null) return invalid('debt_accounts');
+      if (person === null || category !== null) return invalid('debt_relations');
+      return undefined;
+    default:
+      return { code: 'unsupported_remote_data', detail: `type:${type}` };
+  }
+}
+
+/** One debt record's effect on a person's balance. */
+export type DebtContribution<TKey> = {
+  key: TKey;
+  personSyncId: string;
+  type: DebtType;
+  amountMinor: number;
+  currency: string;
+};
+
+export type DebtViolation<TKey> = { key: TKey; problem: string };
+
+/**
+ * Debt invariants across existing history and incoming records together.
+ *
+ * `incoming` must already be in the order the records will be applied, so a
+ * principal is counted before the repayment that depends on it — a repayment
+ * arriving alongside its principal is valid, and blame for a real violation
+ * lands on the record that caused it rather than on the first one seen.
+ */
+export function findDebtViolation<TKey>(
+  existing: readonly Omit<DebtContribution<TKey>, 'key'>[],
+  incoming: readonly DebtContribution<TKey>[],
+): DebtViolation<TKey> | undefined {
+  type Totals = Record<DebtType, number>;
+  const empty = (): Totals => ({ lend: 0, borrow: 0, repayment_received: 0, repayment_paid: 0 });
+  const totals = new Map<string, Totals>();
+  const currencies = new Map<string, Set<string>>();
+
+  const contribute = (personSyncId: string, type: DebtType, amount: number, currency: string) => {
+    const bucket = totals.get(personSyncId) ?? empty();
+    bucket[type] += amount;
+    totals.set(personSyncId, bucket);
+    const seen = currencies.get(personSyncId) ?? new Set<string>();
+    seen.add(currency);
+    currencies.set(personSyncId, seen);
+  };
+
+  for (const row of existing) {
+    contribute(row.personSyncId, row.type, row.amountMinor, row.currency);
+  }
+
+  for (const row of incoming) {
+    contribute(row.personSyncId, row.type, row.amountMinor, row.currency);
+    const bucket = totals.get(row.personSyncId)!;
+    const problem =
+      bucket.repayment_received > bucket.lend
+        ? 'repayment_received_exceeds_lent'
+        : bucket.repayment_paid > bucket.borrow
+          ? 'repayment_paid_exceeds_borrowed'
+          : (currencies.get(row.personSyncId)?.size ?? 0) > 1
+            ? 'mixed_person_currency'
+            : undefined;
+    if (problem !== undefined) return { key: row.key, problem };
+  }
+
+  return undefined;
+}

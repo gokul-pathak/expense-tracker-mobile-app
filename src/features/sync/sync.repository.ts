@@ -5,6 +5,7 @@ import { syncOutbox, syncState } from '@/db/schema';
 import type { SyncEntityType, SyncOperation, SyncOutboxEntry } from '@/db/schema';
 
 import { clearSyncBaselines, readSyncBaseline } from './sync-baseline.repository';
+import { areUserMutationsSuspended, MutationsSuspendedError } from './sync-lock';
 import type { SyncMutation, SyncWriter } from './sync.types';
 import { requireSyncId } from './uuid';
 
@@ -18,6 +19,10 @@ const MAX_ERROR_CODE_LENGTH = 120;
  * commit or roll back together. Remote apply and migrations never call this.
  */
 export function enqueueSyncMutation(writer: SyncWriter, mutation: SyncMutation): void {
+  // Only user-originated writes reach here, which makes this the one place that
+  // can hold them back while a reconciliation captures or replaces the whole
+  // dataset. Remote apply and migrations are unaffected by design.
+  if (areUserMutationsSuspended()) throw new MutationsSuspendedError();
   const entitySyncId = requireSyncId(mutation.entitySyncId, `${mutation.entityType} record`);
   const pending = readPending(writer, mutation.entityType, entitySyncId);
   // The revision this local change is written on top of. Pull compares the
@@ -246,12 +251,20 @@ export function removeAcknowledgedSyncMutation(id: number): void {
   db.delete(syncOutbox).where(eq(syncOutbox.id, id)).run();
 }
 
-/**
- * Restore replaces the whole local dataset, so stale queued work is dropped and
- * every per-record belief about the cloud is dropped with it.
- */
+/** Drops queued work whose dataset no longer exists. */
 export function clearSyncOutbox(writer: SyncWriter = db): void {
   writer.delete(syncOutbox).run();
+}
+
+/**
+ * Drops everything this device believes about the cloud.
+ *
+ * Used when the dataset underneath those beliefs was replaced — a backup
+ * restore, or unlinking — because a baseline that describes rows which no longer
+ * exist would make the next conflict comparison meaningless.
+ */
+export function clearCloudKnowledge(writer: SyncWriter = db): void {
+  clearSyncOutbox(writer);
   clearSyncBaselines(writer);
 }
 
@@ -259,9 +272,81 @@ export function getSyncState() {
   return readSyncState(db);
 }
 
+export type CloudBinding = {
+  /** The account this database has finished agreeing with. */
+  linkedUserId: string | null;
+  /** The account a reconciliation is currently working towards. */
+  pendingLinkUserId: string | null;
+  /** True while the local dataset was replaced under a link and needs a choice. */
+  reconciliationRequired: boolean;
+};
+
+export function getCloudBinding(writer: SyncWriter = db): CloudBinding {
+  const state = readSyncState(writer);
+  return {
+    linkedUserId: state?.linkedUserId ?? null,
+    pendingLinkUserId: state?.pendingLinkUserId ?? null,
+    reconciliationRequired: state?.reconciliationRequired ?? false,
+  };
+}
+
+/**
+ * The account the sync engines may act for.
+ *
+ * Ordinary push and pull accept only a committed link. Reconciliation passes
+ * `acceptPendingLink` so it can converge a database it is still in the middle of
+ * binding, without that half-finished state ever looking like a real link.
+ */
+export function resolveSyncableUserId(
+  authenticatedUserId: string,
+  options: { acceptPendingLink?: boolean } = {},
+  writer: SyncWriter = db,
+):
+  | { ok: true }
+  | { ok: false; reason: 'not_linked' | 'account_mismatch' | 'reconciliation_required' } {
+  const binding = getCloudBinding(writer);
+  if (binding.reconciliationRequired && options.acceptPendingLink !== true) {
+    return { ok: false, reason: 'reconciliation_required' };
+  }
+  const bound =
+    binding.linkedUserId ?? (options.acceptPendingLink === true ? binding.pendingLinkUserId : null);
+  if (bound === null) return { ok: false, reason: 'not_linked' };
+  if (bound !== authenticatedUserId) return { ok: false, reason: 'account_mismatch' };
+  return { ok: true };
+}
+
+/**
+ * Removes the cloud binding while keeping every financial record.
+ *
+ * Domain rows and their global identities stay exactly as they are, so the data
+ * remains usable offline and can be reconciled again later. What goes is
+ * everything that describes a relationship with one cloud account: the binding,
+ * the cursor, the per-record baselines and the progress markers. Queued local
+ * work is deliberately kept — it is the user's unsent intent, and unlinking is
+ * not a reason to discard it.
+ */
+export function clearCloudBinding(writer: SyncWriter = db): void {
+  updateSyncState(
+    {
+      linkedUserId: null,
+      pendingLinkUserId: null,
+      reconciliationRequired: false,
+      pullCursor: null,
+      lastSuccessfulSyncAt: null,
+      lastSuccessfulPushAt: null,
+      lastSuccessfulPullAt: null,
+      lastSyncError: null,
+    },
+    writer,
+  );
+  clearSyncBaselines(writer);
+}
+
 export function updateSyncState(
   patch: Partial<{
     linkedUserId: string | null;
+    pendingLinkUserId: string | null;
+    reconciliationRequired: boolean;
     pullCursor: number | null;
     lastSuccessfulSyncAt: Date | null;
     lastSuccessfulPushAt: Date | null;

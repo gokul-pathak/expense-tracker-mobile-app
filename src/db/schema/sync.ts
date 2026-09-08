@@ -57,6 +57,13 @@ export const syncState = sqliteTable(
     singletonId: int('singleton_id').primaryKey(),
     linkedUserId: text('linked_user_id'),
     /**
+     * The account a reconciliation is currently being performed for. It exists
+     * so a run that fails half-way leaves a resumable setup state rather than a
+     * database that claims to be linked to an account it never finished
+     * agreeing with. Only the reconciliation service may sync against it.
+     */
+    pendingLinkUserId: text('pending_link_user_id'),
+    /**
      * Highest `sync.sync_changes.sequence` whose effect is committed locally.
      * Null means no incremental position has been established yet, which is not
      * the same as being up to date.
@@ -68,6 +75,15 @@ export const syncState = sqliteTable(
     // Pull-only marker. A full sync marker needs push and pull orchestration.
     lastSuccessfulPullAt: int('last_successful_pull_at', { mode: 'timestamp_ms' }),
     lastSyncError: text('last_sync_error'),
+    /**
+     * Set when the local dataset was replaced underneath a cloud link — today
+     * only by a backup restore. Sync stays blocked until the user makes an
+     * explicit reconciliation choice, so a restore cannot silently overwrite
+     * the cloud with older data.
+     */
+    reconciliationRequired: int('reconciliation_required', { mode: 'boolean' })
+      .notNull()
+      .default(false),
   },
   (t) => [check('single_sync_state_row', sql`${t.singletonId} = 1`)],
 );

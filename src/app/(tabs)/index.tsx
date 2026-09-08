@@ -3,6 +3,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppButton, AppText, Card, NativeDataNotice, Screen, ScreenState } from '@/components/ui';
+import { useRefreshOnSyncedData } from '@/features/sync/use-synced-data';
 import { colors, radii, spacing } from '@/constants/theme';
 import type { DashboardSummary } from '@/features/dashboard/dashboard.types';
 import { TransactionListRow } from '@/features/transactions/TransactionListRow';
@@ -37,6 +38,8 @@ export default function HomeScreen() {
     }
   }, []);
   useFocusEffect(load);
+  // A sync that changes SQLite refreshes this screen even while it is open.
+  useRefreshOnSyncedData(load);
 
   if (!isLocalFinanceDataAvailable)
     return (

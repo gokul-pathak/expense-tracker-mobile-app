@@ -1,9 +1,9 @@
-# Sync (M7C foundation + M7D push + M7E pull)
+# Sync (M7C foundation + M7D push + M7E pull + M7F linking and UX)
 
-Local synchronization primitives, outgoing push and incoming pull. There is no Realtime, no
-background scheduling and no user-facing synchronization control. SQLite stays authoritative and the
-app remains fully local-first: every local write works offline, signed out, or with Supabase
-unconfigured, and no screen ever reads cloud data.
+Local synchronization primitives, outgoing push, incoming pull, and the first-link flows and
+orchestration a person actually interacts with. There is no Realtime and no OS background
+scheduling. SQLite stays authoritative and the app remains fully local-first: every local write
+works offline, signed out, or with Supabase unconfigured, and no screen ever reads cloud data.
 
 ## Identity
 
@@ -157,3 +157,44 @@ Conflicts follow M7A: a tombstone always wins over a concurrent update, in both 
 ordinary edits resolve to the local one, which has not reached the server yet and so resolves later.
 The local winner stays queued and propagates on the next push — pull never writes to the cloud, not
 even to resolve a conflict it just decided.
+
+## Linking and orchestration (M7F)
+
+Authentication is not linking. `sync_state.linked_user_id` is what the engines trust, and it is
+written only by `reconciliation.service.ts` when a first link completes. `pending_link_user_id`
+marks a link in progress, so a run that fails leaves a resumable setup rather than a database
+claiming a relationship it never finished. `reconciliation_required` marks a dataset that was
+replaced underneath a link — today only by a backup restore — and blocks sync until the user chooses
+again.
+
+`data-inventory.ts` decides whether a side "has data" from the domain, not from the outbox: seeded
+categories and an untouched settings row are not data, and records that predate the outbox still
+are. That judgement picks one of four flows:
+
+```text
+A both empty     link
+B local only     backup -> full upload -> pull to converge -> link
+C cloud only     download -> validate -> atomic local replacement -> link
+D both populated explicit choice, never a merge, backup either way
+```
+
+`initial-upload.service.ts` uploads the current dataset directly, because push reads the outbox and
+rows that predate it have no queued work. On the "use this device" choice it also tombstones cloud
+rows this device does not have, or the next pull would download the replaced data straight back.
+`cloud-snapshot.service.ts` downloads and validates a whole cloud account before
+`replaceLocalDataFromRemote` swaps it in inside one transaction.
+
+While a reconciliation runs, `enqueueSyncMutation` refuses user writes — the one chokepoint every
+user-originated write already passes through, and one that leaves remote apply free to work. The
+shared engine lock lets reconciliation drive push and pull as nested steps while turning away any
+other run.
+
+`sync.service.ts` is what the UI calls: `syncNow()` runs push → pull → push, bounded, because a pull
+that decides a local edit wins leaves that edit queued. `last_successful_sync_at` moves only when the
+whole cycle succeeds with nothing left waiting, and "Synced" additionally requires a real binding, no
+attention-required records and no leftover error.
+
+`sync.provider.tsx` owns the live view and the foreground trigger: sync on app-active, throttled, and
+mounted inside the App Lock gate so a locked device syncs nothing. `sync-status.ts` derives every
+user-facing state from durable facts, and `sync-presentation.ts` holds the wording — no SQLSTATE,
+PostgREST code or JWT message ever reaches a person.

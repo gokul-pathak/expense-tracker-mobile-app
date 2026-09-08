@@ -3,6 +3,7 @@ import { useFocusEffect, router } from 'expo-router';
 import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { AppButton, AppText, NativeDataNotice, Screen, ScreenState } from '@/components/ui';
+import { useRefreshOnSyncedData } from '@/features/sync/use-synced-data';
 import { colors, radii, spacing } from '@/constants/theme';
 import {
   formatTransactionDateSection,
@@ -41,6 +42,8 @@ export default function TransactionsScreen() {
     }
   }, []);
   useFocusEffect(load);
+  // A sync that changes SQLite refreshes this screen even while it is open.
+  useRefreshOnSyncedData(load);
 
   if (!isLocalFinanceDataAvailable)
     return (

@@ -4,6 +4,7 @@ import {
   PullRemoteError,
   PushRemoteError,
   type RemotePullRepository,
+  type RemoteSnapshotRepository,
   type RemoteSyncRepository,
 } from '@/features/sync/remote/supabase-sync.repository';
 
@@ -45,6 +46,7 @@ type StoredChange = {
 export type FakeCloud = {
   repository: RemoteSyncRepository;
   pullRepository: RemotePullRepository;
+  snapshotRepository: RemoteSnapshotRepository;
   calls: UpsertCall[];
   pullCalls: PullCall[];
   rows: (entityType: SyncEntityType) => RemoteRow[];
@@ -175,9 +177,45 @@ export function createFakeCloud(): FakeCloud {
     },
   };
 
+  const snapshotRepository: RemoteSnapshotRepository = {
+    async fetchRowPage(entityType, { afterSyncId, limit }) {
+      const call: PullCall = { kind: 'rows', entityType };
+      pullCalls.push(call);
+      const injected = pullFailureRule?.(call);
+      if (injected !== undefined) throw injected;
+
+      const rows: Record<string, unknown>[] = storedRows(entityType)
+        .filter((stored) => owner === null || stored.row.user_id === owner)
+        .map((stored) => ({
+          ...stored.row,
+          server_revision: stored.revision,
+          server_updated_at: stored.updatedAt,
+        }));
+      return (
+        rows
+          // Identity order, exactly as the real query pages.
+          .sort((left, right) => String(left.sync_id).localeCompare(String(right.sync_id)))
+          .filter((row) => afterSyncId === null || String(row.sync_id) > afterSyncId)
+          .slice(0, limit)
+      );
+    },
+
+    async fetchLatestSequence() {
+      const call: PullCall = { kind: 'changes' };
+      pullCalls.push(call);
+      const injected = pullFailureRule?.(call);
+      if (injected !== undefined) throw injected;
+
+      return changeLog
+        .filter((change) => owner === null || change.user_id === owner)
+        .reduce((highest, change) => Math.max(highest, change.sequence), 0);
+    },
+  };
+
   return {
     repository,
     pullRepository,
+    snapshotRepository,
     calls,
     pullCalls,
     rows: (entityType) => storedRows(entityType).map((stored) => stored.row) as RemoteRow[],

@@ -100,6 +100,49 @@ export type RemoteChangeBatch = {
   tombstones?: RemoteTombstone[];
 };
 
+export type RemoteDataset = {
+  settings: RemoteSettings[];
+  accounts: RemoteAccount[];
+  categories: RemoteCategory[];
+  people: RemotePerson[];
+  transactions: RemoteTransaction[];
+};
+
+/**
+ * Replaces every syncable local row with a validated remote dataset, atomically.
+ *
+ * This is the destructive half of "use the cloud's data", so it is one SQLite
+ * transaction: either the device ends up holding exactly the downloaded dataset,
+ * or it still holds exactly what it had. There is deliberately no window in
+ * which the local database is empty — a failure part-way through rolls back
+ * rather than leaving a person with nothing.
+ *
+ * `finalize` runs inside the same transaction so the cursor, the per-record
+ * baselines and the cloud binding commit with the rows they describe.
+ */
+export function replaceLocalDataFromRemote(
+  dataset: RemoteDataset,
+  finalize?: (writer: SyncWriter) => void,
+) {
+  return db.transaction((tx) => {
+    // Children first: foreign keys are enforced, so a parent cannot go before
+    // the rows that reference it.
+    tx.delete(transactions).run();
+    tx.delete(people).run();
+    tx.delete(categories).run();
+    tx.delete(accounts).run();
+    tx.delete(settings).run();
+
+    for (const row of dataset.settings) applyRemoteSettings(row, tx);
+    for (const row of dataset.accounts) applyRemoteAccount(row, tx);
+    for (const row of dataset.categories) applyRemoteCategory(row, tx);
+    for (const row of dataset.people) applyRemotePerson(row, tx);
+    for (const row of dataset.transactions) applyRemoteTransaction(row, tx);
+
+    finalize?.(tx);
+  });
+}
+
 /** Applies one validated batch in dependency-safe order inside a single transaction. */
 export function applyRemoteChanges(batch: RemoteChangeBatch) {
   return db.transaction((tx) => {

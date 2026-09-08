@@ -3,6 +3,8 @@ import { router, useFocusEffect } from 'expo-router';
 import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { AppButton, AppText, Card, NativeDataNotice, Screen, ScreenState } from '@/components/ui';
+import { useCloudSync } from '@/features/sync/sync.provider';
+import { isCloudLinked } from '@/features/sync/sync-status';
 import { colors, radii, spacing } from '@/constants/theme';
 import {
   getAppSettings,
@@ -32,6 +34,8 @@ import {
 const currencies = ['NPR', 'USD', 'INR'] as const;
 
 export default function SettingsScreen() {
+  const sync = useCloudSync();
+  const cloudLinked = isCloudLinked(sync.status);
   const [currency, setCurrency] = useState<string>();
   const [hasAccounts, setHasAccounts] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -189,11 +193,11 @@ export default function SettingsScreen() {
         onPress={save}
       />
       <Card style={styles.card}>
-        <AppText weight="700">Cloud Account</AppText>
+        <AppText weight="700">Cloud Sync</AppText>
         <AppText color={colors.textMuted}>
-          Cloud authentication is optional. Financial sync is not enabled yet.
+          Cloud sync is optional. Your financial data always stays on this device as well.
         </AppText>
-        <AppButton label="Cloud Account" onPress={() => router.push('/cloud-account' as never)} />
+        <AppButton label="Cloud Sync" onPress={() => router.push('/cloud-sync' as never)} />
       </Card>
       <Card style={styles.card}>
         <AppText weight="700">Data</AppText>
@@ -221,6 +225,12 @@ export default function SettingsScreen() {
         <AppText color={colors.textMuted}>
           Restore replaces all current local financial data. It does not merge backups.
         </AppText>
+        {cloudLinked ? (
+          <AppText color={colors.danger}>
+            This device is linked to cloud sync. Restoring a backup unlinks it, and you will choose
+            which copy to keep before syncing again. Nothing is uploaded automatically.
+          </AppText>
+        ) : null}
         <AppButton
           label={dataOperation === 'backup' ? 'Creating backup...' : 'Create Backup'}
           disabled={Boolean(dataOperation)}
@@ -421,9 +431,12 @@ export default function SettingsScreen() {
             try {
               restoreChosenBackup(text);
               load();
+              sync.refresh();
               Alert.alert(
                 'Backup restored',
-                'Your local financial data has been replaced successfully.',
+                cloudLinked
+                  ? 'Your local financial data has been replaced. This device is no longer linked to cloud sync — open Cloud Sync to choose which copy to keep.'
+                  : 'Your local financial data has been replaced successfully.',
               );
             } catch (caught) {
               setError('Backup could not be restored. Your existing data was not changed.');

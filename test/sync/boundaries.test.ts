@@ -50,6 +50,14 @@ const pullPaths = [
   'src/features/sync/pull-plan.ts',
 ];
 
+/** Orchestration and first-link flows, above the engines. */
+const orchestrationPaths = [
+  'src/features/sync/sync.service.ts',
+  'src/features/sync/reconciliation.service.ts',
+  'src/features/sync/initial-upload.service.ts',
+  'src/features/sync/cloud-snapshot.service.ts',
+];
+
 function read(path: string) {
   return readFileSync(join(projectRoot, path), 'utf8');
 }
@@ -72,7 +80,7 @@ describe('M7C boundaries', () => {
   });
 
   it('confines cloud data access to the Supabase sync repository', () => {
-    for (const path of [...pushPaths, ...pullPaths]) {
+    for (const path of [...pushPaths, ...pullPaths, ...orchestrationPaths]) {
       const source = read(path);
       // Orchestration may name the adapter but must not speak PostgREST itself.
       expect(source, path).not.toMatch(/\.from\(|\.schema\(/);
@@ -91,6 +99,16 @@ describe('M7C boundaries', () => {
       );
       // Cloud financial sync has no business with the local lock.
       expect(source, path).not.toMatch(/SecureStore|expo-secure-store|appLock|biometric|PIN/i);
+    }
+  });
+
+  it('never lets cloud sync touch the device lock or its credentials', () => {
+    for (const path of [...orchestrationPaths, 'src/features/sync/sync.provider.tsx']) {
+      const source = read(path);
+      // App Lock protects this device; it is not account state and never syncs.
+      expect(source, path).not.toMatch(/SecureStore|expo-secure-store|appLock|biometric|PIN/i);
+      // Session material stays with the auth layer, never in sync tables.
+      expect(source, path).not.toMatch(/accessToken|refreshToken|access_token|refresh_token/);
     }
   });
 
@@ -116,6 +134,7 @@ describe('M7C boundaries', () => {
     const syncPaths = [
       ...pushPaths,
       ...pullPaths,
+      ...orchestrationPaths,
       'src/features/sync/remote/supabase-sync.repository.ts',
       'src/features/sync/remote/remote-pull-rows.ts',
       'src/features/sync/sync-lock.ts',
@@ -124,8 +143,24 @@ describe('M7C boundaries', () => {
       const source = read(path);
       expect(source, path).not.toMatch(/realtime|channel\(|\.on\(/i);
       expect(source, path).not.toMatch(/setInterval|setTimeout|BackgroundFetch|TaskManager/);
+      // Lifecycle belongs to the provider, which is the only place allowed to
+      // decide that now is a reasonable moment to sync.
       expect(source, path).not.toMatch(/AppState|addEventListener/);
     }
+  });
+
+  it('binds a database to a cloud account only through reconciliation', () => {
+    // The engines read the binding; nothing but the first-link flow writes it.
+    for (const path of [
+      'src/features/sync/push-sync.service.ts',
+      'src/features/sync/pull-sync.service.ts',
+    ]) {
+      const source = read(path);
+      expect(source, path).not.toMatch(/updateSyncState\(\s*\{[^}]*linkedUserId/);
+    }
+    expect(read('src/features/sync/reconciliation.service.ts')).toMatch(
+      /linkedUserId: ready\.userId/,
+    );
   });
 
   it('never conditions local sync bookkeeping on an active cloud session', () => {
@@ -188,6 +223,8 @@ describe('M7C boundaries', () => {
         'last_sync_error',
         'last_successful_push_at',
         'last_successful_pull_at',
+        'pending_link_user_id',
+        'reconciliation_required',
       ]);
     });
 
