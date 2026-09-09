@@ -81,6 +81,19 @@ Breaking one of these is a release blocker, not a bug to schedule.
 | F3  | Debt invariants hold across devices: repayments never exceed their principal.                      | `test/sync/pull-sync.test.ts`, `test/sync/multi-device.test.ts`  |
 | F4  | Identical source records produce identical derived figures on every device.                        | `test/sync/new-device.test.ts`, `test/sync/multi-device.test.ts` |
 
+## Budgets
+
+| #   | Invariant                                                                                        | Verified by                                                                        |
+| --- | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| G1  | What was spent is never stored, transported or backed up; it is derived from expenses each time. | `test/budgets/budget-transaction-effects.test.ts`, `test/sync/budget-sync.test.ts` |
+| G2  | Only `expense` counts towards a budget; income, transfers and debt records never do.             | `test/budgets/budget-transaction-effects.test.ts`                                  |
+| G3  | A budget counts only expenses in its own currency. No conversion happens anywhere.               | `test/budgets/budget-engine.test.ts`                                               |
+| G4  | A month is `YYYY-MM` and matched on `transactionDate`, half-open, in local time.                 | `test/budgets/budget-engine.test.ts`, `test/budgets/budget-service.test.ts`        |
+| G5  | One live budget per month, currency and category — including the overall budget's null category. | `supabase/tests/budgets.sql`, `test/sync/budget-sync.test.ts`                      |
+| G6  | A remote budget whose category is unknown is refused, never written with a null category.        | `test/sync/budget-sync.test.ts`                                                    |
+| G7  | A budget's category always belongs to the same account.                                          | `supabase/tests/budgets.sql`                                                       |
+| G8  | Two devices holding the same records derive identical budget figures.                            | `test/sync/budget-sync.test.ts`                                                    |
+
 ## Security and privacy
 
 | #   | Invariant                                                                                       | Verified by                                                         |

@@ -1,5 +1,6 @@
 import type {
   PulledAccountRow,
+  PulledBudgetRow,
   PulledCategoryRow,
   PulledPersonRow,
   PulledSettingsRow,
@@ -7,6 +8,7 @@ import type {
 } from '../remote/remote-pull-rows';
 import type {
   RemoteAccount,
+  RemoteBudget,
   RemoteCategory,
   RemotePerson,
   RemoteSettings,
@@ -37,6 +39,21 @@ export function mapPulledAccountToLocal(row: PulledAccountRow): RemoteAccount {
     currency: row.currency,
     icon: row.icon,
     isArchived: row.is_archived,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+    deletedAt: toNullableDate(row.deleted_at),
+  };
+}
+
+/** The plan only: what was spent is recomputed here from local transactions. */
+export function mapPulledBudgetToLocal(row: PulledBudgetRow): RemoteBudget {
+  return {
+    syncId: row.sync_id,
+    // Null is the overall monthly budget.
+    categorySyncId: row.category_sync_id,
+    periodMonth: row.period_month,
+    amountMinor: row.amount_minor,
+    currency: row.currency,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
     deletedAt: toNullableDate(row.deleted_at),

@@ -1,4 +1,5 @@
 import type { Account } from '@/db/schema/accounts';
+import type { Budget } from '@/db/schema/budgets';
 import type { Category } from '@/db/schema/categories';
 import type { Person } from '@/db/schema/people';
 import type { Setting } from '@/db/schema/settings';
@@ -6,6 +7,7 @@ import type { Transaction } from '@/db/schema/transactions';
 
 import type {
   RemoteAccountRow,
+  RemoteBudgetRow,
   RemoteCategoryRow,
   RemotePersonRow,
   RemoteSettingsRow,
@@ -60,6 +62,33 @@ export function mapLocalAccountToRemote(
     created_at: toEpochMs(account.createdAt, 'account.createdAt'),
     updated_at: toEpochMs(account.updatedAt, 'account.updatedAt'),
     deleted_at: toNullableEpochMs(account.deletedAt),
+  };
+}
+
+/**
+ * A budget crosses the boundary as a plan, never as a figure.
+ *
+ * Only the month, the amount and what it applies to travel. What was spent is
+ * absent because it is not stored: every device recomputes it from the
+ * transactions it holds, so two devices with the same records always agree
+ * without a derived number ever being transported.
+ */
+export function mapLocalBudgetToRemote(
+  budget: Budget,
+  context: MappingContext,
+  resolve: RelationResolver,
+): RemoteBudgetRow {
+  return {
+    sync_id: requireSyncId(budget.syncId, 'budget'),
+    user_id: context.userId,
+    // Null is the overall monthly budget.
+    category_sync_id: resolveRelation(resolve.category, budget.categoryId, 'category'),
+    period_month: budget.periodMonth,
+    amount_minor: budget.amountMinor,
+    currency: budget.currency,
+    created_at: toEpochMs(budget.createdAt, 'budget.createdAt'),
+    updated_at: toEpochMs(budget.updatedAt, 'budget.updatedAt'),
+    deleted_at: toNullableEpochMs(budget.deletedAt),
   };
 }
 

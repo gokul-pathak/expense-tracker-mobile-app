@@ -3,7 +3,13 @@ import { z } from 'zod';
 import { ACCOUNT_TYPES, CATEGORY_TYPES, PAYMENT_MODES, TRANSACTION_TYPES } from '@/db/constants';
 import { SYNC_ENTITY_TYPES, type SyncEntityType } from '@/db/schema';
 
-import { currencySchema, syncIdSchema, userIdSchema, REMOTE_TABLES } from './remote-rows';
+import {
+  currencySchema,
+  periodMonthSchema,
+  syncIdSchema,
+  userIdSchema,
+  REMOTE_TABLES,
+} from './remote-rows';
 
 /**
  * Downloaded cloud rows.
@@ -119,6 +125,24 @@ export const pulledSettingsSchema = z
   })
   .strict();
 
+export const pulledBudgetSchema = z
+  .object({
+    sync_id: syncIdSchema,
+    user_id: userIdSchema,
+    // Null is the overall monthly budget.
+    category_sync_id: nullableSyncId,
+    period_month: periodMonthSchema,
+    amount_minor: bigIntegerSchema.refine((value) => value > 0, {
+      message: 'non_positive_amount',
+    }),
+    currency: currencySchema,
+    created_at: epochMs,
+    updated_at: epochMs,
+    deleted_at: nullableEpochMs,
+    ...serverColumns,
+  })
+  .strict();
+
 export const pulledTransactionSchema = z
   .object({
     sync_id: syncIdSchema,
@@ -145,10 +169,16 @@ export type PulledAccountRow = z.infer<typeof pulledAccountSchema>;
 export type PulledCategoryRow = z.infer<typeof pulledCategorySchema>;
 export type PulledPersonRow = z.infer<typeof pulledPersonSchema>;
 export type PulledSettingsRow = z.infer<typeof pulledSettingsSchema>;
+export type PulledBudgetRow = z.infer<typeof pulledBudgetSchema>;
 export type PulledTransactionRow = z.infer<typeof pulledTransactionSchema>;
 
 export type PulledRow =
-  PulledAccountRow | PulledCategoryRow | PulledPersonRow | PulledSettingsRow | PulledTransactionRow;
+  | PulledAccountRow
+  | PulledBudgetRow
+  | PulledCategoryRow
+  | PulledPersonRow
+  | PulledSettingsRow
+  | PulledTransactionRow;
 
 const pullSchemasByEntity = {
   account: pulledAccountSchema,
@@ -156,6 +186,7 @@ const pullSchemasByEntity = {
   person: pulledPersonSchema,
   settings: pulledSettingsSchema,
   transaction: pulledTransactionSchema,
+  budget: pulledBudgetSchema,
 } as const;
 
 /** Decodes one downloaded row. Returns an issue path only, never row values. */
@@ -176,6 +207,7 @@ export const PULLED_COLUMNS = {
   person: Object.keys(pulledPersonSchema.shape).join(','),
   settings: Object.keys(pulledSettingsSchema.shape).join(','),
   transaction: Object.keys(pulledTransactionSchema.shape).join(','),
+  budget: Object.keys(pulledBudgetSchema.shape).join(','),
 } as const satisfies Record<SyncEntityType, string>;
 
 /**

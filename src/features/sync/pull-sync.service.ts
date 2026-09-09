@@ -24,6 +24,7 @@ import {
 } from './remote/supabase-sync.repository';
 import {
   applyRemoteAccount,
+  applyRemoteBudget,
   applyRemoteCategory,
   applyRemotePerson,
   applyRemoteSettings,
@@ -416,6 +417,9 @@ function applyWrite(write: PlannedWrite, writer: SyncWriter): void {
   switch (write.write) {
     case 'account':
       applyRemoteAccount(write.row, writer);
+      return;
+    case 'budget':
+      applyRemoteBudget(write.row, writer);
       return;
     case 'category':
       applyRemoteCategory(write.row, writer);

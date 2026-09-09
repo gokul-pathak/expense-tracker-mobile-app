@@ -2,6 +2,7 @@ import type { SyncEntityType, SyncOperation } from '@/db/schema';
 
 import {
   mapPulledAccountToLocal,
+  mapPulledBudgetToLocal,
   mapPulledCategoryToLocal,
   mapPulledPersonToLocal,
   mapPulledSettingsToLocal,
@@ -11,6 +12,7 @@ import type { PullConflictOutcome, PullFailure } from './pull-sync.types';
 import {
   decodePulledRow,
   type PulledAccountRow,
+  type PulledBudgetRow,
   type PulledCategoryRow,
   type PulledPersonRow,
   type PulledRow,
@@ -20,6 +22,7 @@ import {
 } from './remote/remote-pull-rows';
 import type {
   RemoteAccount,
+  RemoteBudget,
   RemoteCategory,
   RemotePerson,
   RemoteSettings,
@@ -28,6 +31,7 @@ import type {
 import {
   findDebtViolation,
   isDebtType,
+  validateRemoteBudget,
   validateRemoteTransaction,
   type DebtContribution,
   type DebtType,
@@ -87,6 +91,7 @@ export type OutboxOperation =
 
 export type PlannedWrite =
   | { write: 'account'; row: RemoteAccount }
+  | { write: 'budget'; row: RemoteBudget }
   | { write: 'category'; row: RemoteCategory }
   | { write: 'person'; row: RemotePerson }
   | { write: 'settings'; row: RemoteSettings }
@@ -302,6 +307,14 @@ function readLocalContext(decoded: Map<string, DecodedEntry>): LocalContext {
     if (row.person_sync_id !== null) referencedPeople.push(row.person_sync_id);
   }
 
+  // A budget names a category too, and must be able to resolve one that already
+  // exists locally as well as one arriving in this batch.
+  for (const entry of decoded.values()) {
+    if (entry.change.entityType !== 'budget') continue;
+    const categorySyncId = (entry.row as PulledBudgetRow).category_sync_id;
+    if (categorySyncId !== null) referencedCategories.push(categorySyncId);
+  }
+
   const relations: RemoteRelationIndex = {
     accounts: new Map(),
     categoryTypes: new Map(),
@@ -382,6 +395,13 @@ function decide(entry: DecodedEntry, context: LocalContext): Decision {
       context.relations,
       remoteDeleted,
     );
+    if (problem !== undefined) {
+      return { ok: false, failure: failureFor(change, problem.code, problem.detail) };
+    }
+  }
+
+  if (entityType === 'budget') {
+    const problem = validateRemoteBudget(row as PulledBudgetRow, context.relations, remoteDeleted);
     if (problem !== undefined) {
       return { ok: false, failure: failureFor(change, problem.code, problem.detail) };
     }
@@ -501,6 +521,8 @@ function domainWrite(entityType: SyncEntityType, row: PulledRow): PlannedWrite {
   switch (entityType) {
     case 'account':
       return { write: 'account', row: mapPulledAccountToLocal(row as PulledAccountRow) };
+    case 'budget':
+      return { write: 'budget', row: mapPulledBudgetToLocal(row as PulledBudgetRow) };
     case 'category':
       return { write: 'category', row: mapPulledCategoryToLocal(row as PulledCategoryRow) };
     case 'person':
@@ -636,6 +658,23 @@ function remoteEqualsLocal(entityType: SyncEntityType, row: PulledRow): boolean 
         sameInstant(local.row.updatedAt, remote.updated_at)
       );
     }
+    case 'budget': {
+      const remote = row as PulledBudgetRow;
+      const categoryId =
+        remote.category_sync_id === null
+          ? null
+          : (readLocalRowsBySyncIds('category', [remote.category_sync_id]).get(
+              remote.category_sync_id,
+            )?.id ?? null);
+      return (
+        local.row.categoryId === categoryId &&
+        local.row.periodMonth === remote.period_month &&
+        local.row.amountMinor === remote.amount_minor &&
+        local.row.currency === remote.currency &&
+        sameInstant(local.row.updatedAt, remote.updated_at) &&
+        sameNullableInstant(local.row.deletedAt, remote.deleted_at)
+      );
+    }
     case 'transaction': {
       const remote = row as PulledTransactionRow;
       const relations = resolveLocalRelations(remote);
@@ -743,7 +782,9 @@ const PHASE_ORDER: Record<string, number> = {
   'account:row': 1,
   'category:row': 1,
   'person:row': 1,
+  'budget:row': 2,
   'transaction:row': 2,
+  'budget:tombstone': 3,
   'transaction:tombstone': 3,
   'settings:tombstone': 4,
   'account:tombstone': 4,

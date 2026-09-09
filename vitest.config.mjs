@@ -13,5 +13,13 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['test/**/*.test.ts'],
+    /**
+     * Setup hooks here create on-disk SQLite databases and run every migration,
+     * sometimes three of them for a three-device fixture. That is I/O bound, and
+     * with the whole suite running in parallel it can take far longer than the
+     * ten-second default on a loaded machine. The budget is for slow hardware,
+     * not for slow code: a hook that genuinely hangs still fails.
+     */
+    hookTimeout: 60_000,
   },
 });

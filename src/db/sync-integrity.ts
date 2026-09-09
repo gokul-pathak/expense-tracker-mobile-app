@@ -5,6 +5,7 @@ import { ensureSyncState } from '@/features/sync/sync.repository';
 import { db } from './index';
 import {
   accounts,
+  budgets,
   categories,
   people,
   settings,
@@ -17,6 +18,7 @@ import {
 
 const syncableTables = [
   ['accounts', accounts],
+  ['budgets', budgets],
   ['categories', categories],
   ['people', people],
   ['settings', settings],
@@ -32,6 +34,7 @@ const syncableTables = [
  * still be acted on.
  */
 const requiredSyncReads = [
+  ['budgets', () => db.select().from(budgets).limit(1).all()],
   ['sync_outbox', () => db.select().from(syncOutbox).limit(1).all()],
   ['sync_state', () => db.select().from(syncState).limit(1).all()],
   ['sync_baselines', () => db.select().from(syncBaselines).limit(1).all()],
@@ -48,6 +51,23 @@ const requiredSyncReads = [
  * the app never runs on a partially migrated database.
  */
 export function assertSyncFoundationReady(): void {
+  // Shape first. Selecting every column proves a table exists *and* matches what
+  // this build expects, which a bare table check would miss — and a table that
+  // is not there at all is a more fundamental problem than a missing identity,
+  // with a more actionable message, so it must be the one reported.
+  for (const [name, read] of requiredSyncReads) {
+    try {
+      read();
+    } catch (error) {
+      throw new Error(
+        `The local sync foundation is incomplete: ${name} is missing or out of date. ` +
+          'A migration has not been applied to this database. Clear the Metro cache and ' +
+          'restart (expo start -c); if that does not help, reinstall the development build ' +
+          `to re-run migrations. (${String(error)})`,
+      );
+    }
+  }
+
   for (const [name, table] of syncableTables) {
     let missing;
     try {
@@ -61,21 +81,6 @@ export function assertSyncFoundationReady(): void {
     if (missing !== undefined) {
       throw new Error(
         `The local sync foundation is incomplete: ${name} still contains rows without a sync identity.`,
-      );
-    }
-  }
-
-  // Selecting every column proves the table exists *and* has the shape this
-  // build expects, which a bare table check would miss.
-  for (const [name, read] of requiredSyncReads) {
-    try {
-      read();
-    } catch (error) {
-      throw new Error(
-        `The local sync foundation is incomplete: ${name} is missing or out of date. ` +
-          'A migration has not been applied to this database. Clear the Metro cache and ' +
-          'restart (expo start -c); if that does not help, reinstall the development build ' +
-          `to re-run migrations. (${String(error)})`,
       );
     }
   }

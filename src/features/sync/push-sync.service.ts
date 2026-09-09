@@ -4,6 +4,7 @@ import { cloudAuthService } from '@/features/cloud-auth/auth.service';
 import {
   MappingError,
   mapLocalAccountToRemote,
+  mapLocalBudgetToRemote,
   mapLocalCategoryToRemote,
   mapLocalPersonToRemote,
   mapLocalSettingsToRemote,
@@ -35,6 +36,7 @@ import {
   updateSyncState,
 } from './sync.repository';
 import {
+  readLocalBudget,
   readLocalEntity,
   readLocalTransaction,
   readSyncIdsByLocalId,
@@ -65,16 +67,16 @@ export const PUSH_MAX_OPERATIONS_PER_RUN = 500;
 
 /**
  * Dependency-safe phases. A cloud transaction has foreign keys to its account,
- * category and person rows, so those must exist remotely first. Parent
- * tombstones run last so a deletion never precedes the child rows that
- * reference it.
+ * category and person rows, and a cloud budget has one to its category, so those
+ * must exist remotely first. Parent tombstones run last so a deletion never
+ * precedes the child rows that reference it.
  */
 const PUSH_PHASES: readonly {
   entityTypes: readonly SyncEntityType[];
   operations: readonly SyncOperation[];
 }[] = [
   { entityTypes: ['settings', 'account', 'category', 'person'], operations: ['upsert'] },
-  { entityTypes: ['transaction'], operations: ['upsert', 'delete'] },
+  { entityTypes: ['budget', 'transaction'], operations: ['upsert', 'delete'] },
   { entityTypes: ['settings', 'account', 'category', 'person'], operations: ['delete'] },
 ];
 
@@ -117,7 +119,7 @@ export async function pushPendingChanges(options: PushSyncOptions = {}): Promise
 async function runPush(options: PushSyncOptions): Promise<PushSyncResult> {
   const dependencies = { ...defaultDependencies(), ...options.dependencies };
   const batchSize = options.batchSize ?? PUSH_BATCH_SIZE;
-  let budget = options.maxOperations ?? PUSH_MAX_OPERATIONS_PER_RUN;
+  let operationBudget = options.maxOperations ?? PUSH_MAX_OPERATIONS_PER_RUN;
 
   const remote = dependencies.createRemote();
   if (remote === null) return emptyPushResult('unavailable', countPendingSyncMutations());
@@ -148,11 +150,11 @@ async function runPush(options: PushSyncOptions): Promise<PushSyncResult> {
     // needs, so dependent phases are not attempted in this run.
     if (failures.length > 0) break;
 
-    while (budget > 0 && abortCode === undefined) {
+    while (operationBudget > 0 && abortCode === undefined) {
       const entries = listPendingSyncMutationsForPush({
         entityTypes: phase.entityTypes,
         operations: phase.operations,
-        limit: Math.min(batchSize, budget),
+        limit: Math.min(batchSize, operationBudget),
         excludeIds: [...blocked],
       });
       if (entries.length === 0) break;
@@ -164,7 +166,7 @@ async function runPush(options: PushSyncOptions): Promise<PushSyncResult> {
         const outcome = await pushGroup(remote, entityType, group, context);
         processed += group.length;
         succeeded += outcome.succeeded;
-        budget -= group.length;
+        operationBudget -= group.length;
         for (const id of outcome.blockedIds) blocked.add(id);
         failures.push(...outcome.failures);
         if (outcome.abortCode !== undefined) {
@@ -299,6 +301,9 @@ function prepareRow(
       case 'account':
         mapped = mapLocalAccountToRemote(local.row, context);
         break;
+      case 'budget':
+        mapped = mapLocalBudgetToRemote(local.row, context, resolver);
+        break;
       case 'category':
         mapped = mapLocalCategoryToRemote(local.row, context);
         break;
@@ -320,13 +325,17 @@ function prepareRow(
   return validated.ok ? { ok: true, row: validated.row } : { ok: false, detail: validated.issue };
 }
 
-/** One lookup per relation per batch instead of one per transaction. */
+/** One lookup per relation per batch instead of one per row. */
 function buildRelationResolver(
   entityType: SyncEntityType,
   entries: SyncOutboxEntry[],
 ): RelationResolver {
-  if (entityType !== 'transaction') return emptyResolver();
+  if (entityType === 'transaction') return transactionResolver(entries);
+  if (entityType === 'budget') return budgetResolver(entries);
+  return emptyResolver();
+}
 
+function transactionResolver(entries: SyncOutboxEntry[]): RelationResolver {
   const rows = entries
     .map((entry) => readLocalTransaction(entry.entitySyncId))
     .filter((row) => row !== null);
@@ -348,6 +357,21 @@ function buildRelationResolver(
     account: (localId) => accounts.get(localId),
     category: (localId) => categories.get(localId),
     person: (localId) => people.get(localId),
+  };
+}
+
+/** A budget's only relation is its category, and the overall budget has none. */
+function budgetResolver(entries: SyncOutboxEntry[]): RelationResolver {
+  const rows = entries
+    .map((entry) => readLocalBudget(entry.entitySyncId))
+    .filter((row) => row !== null);
+  const categories = readSyncIdsByLocalId(
+    'category',
+    rows.map((row) => row.categoryId).filter((id) => id !== null),
+  );
+  return {
+    ...emptyResolver(),
+    category: (localId) => categories.get(localId),
   };
 }
 

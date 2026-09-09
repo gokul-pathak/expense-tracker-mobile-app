@@ -169,7 +169,14 @@ describe('M7C boundaries', () => {
   });
 
   it('centralizes the sync vocabulary instead of comparing loose strings', () => {
-    expect(SYNC_ENTITY_TYPES).toEqual(['account', 'category', 'person', 'transaction', 'settings']);
+    expect(SYNC_ENTITY_TYPES).toEqual([
+      'account',
+      'category',
+      'person',
+      'transaction',
+      'settings',
+      'budget',
+    ]);
     expect(SYNC_OPERATIONS).toEqual(['upsert', 'delete']);
   });
 

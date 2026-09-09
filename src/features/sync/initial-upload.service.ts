@@ -3,6 +3,7 @@ import type { SyncEntityType } from '@/db/schema';
 import {
   MappingError,
   mapLocalAccountToRemote,
+  mapLocalBudgetToRemote,
   mapLocalCategoryToRemote,
   mapLocalPersonToRemote,
   mapLocalSettingsToRemote,
@@ -38,18 +39,23 @@ export const INITIAL_UPLOAD_BATCH_SIZE = 100;
 /** Rows per page when reading the cloud's existing identities. */
 export const CLOUD_IDENTITY_PAGE_SIZE = 500;
 
-/** Parents before children: a cloud transaction has foreign keys to all three. */
+/**
+ * Parents before children: a cloud transaction has foreign keys to its account,
+ * category and person, and a cloud budget has one to its category.
+ */
 const UPLOAD_ORDER: readonly SyncEntityType[] = [
   'settings',
   'account',
   'category',
   'person',
+  'budget',
   'transaction',
 ];
 
 /** Children before parents, so an obsolete parent is never hidden first. */
 const TOMBSTONE_ORDER: readonly SyncEntityType[] = [
   'transaction',
+  'budget',
   'account',
   'category',
   'person',
@@ -185,6 +191,7 @@ function localIdentitiesOf(snapshot: LocalSnapshot): Record<SyncEntityType, Set<
     new Set(rows.map((row) => row.syncId).filter((syncId): syncId is string => syncId !== null));
   return {
     account: identities(snapshot.accounts),
+    budget: identities(snapshot.budgets),
     category: identities(snapshot.categories),
     person: identities(snapshot.people),
     settings: identities(snapshot.settings),
@@ -202,6 +209,8 @@ function mapEntity(
     switch (entityType) {
       case 'account':
         return snapshot.accounts.map((row) => mapLocalAccountToRemote(row, context));
+      case 'budget':
+        return snapshot.budgets.map((row) => mapLocalBudgetToRemote(row, context, resolver));
       case 'category':
         return snapshot.categories.map((row) => mapLocalCategoryToRemote(row, context));
       case 'person':

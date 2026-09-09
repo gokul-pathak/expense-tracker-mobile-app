@@ -6,6 +6,7 @@ import m0002 from './20260907120000_sync_foundation/migration.sql';
 import m0003 from './20260907180000_push_sync/migration.sql';
 import m0004 from './20260907210000_pull_sync/migration.sql';
 import m0005 from './20260908090000_cloud_link/migration.sql';
+import m0006 from './20260909120000_budgets/migration.sql';
 
 export default {
   migrations: {
@@ -15,5 +16,6 @@ export default {
     '20260907180000_push_sync': m0003,
     '20260907210000_pull_sync': m0004,
     '20260908090000_cloud_link': m0005,
+    '20260909120000_budgets': m0006,
   },
 };

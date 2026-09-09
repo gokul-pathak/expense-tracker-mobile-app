@@ -1,6 +1,12 @@
 import { z } from 'zod';
 
-import { ACCOUNT_TYPES, CATEGORY_TYPES, PAYMENT_MODES, TRANSACTION_TYPES } from '@/db/constants';
+import {
+  ACCOUNT_TYPES,
+  CATEGORY_TYPES,
+  PAYMENT_MODES,
+  PERIOD_MONTH_PATTERN,
+  TRANSACTION_TYPES,
+} from '@/db/constants';
 import { SYNC_ID_PATTERN, type SyncEntityType } from '@/db/schema';
 
 /**
@@ -21,6 +27,8 @@ export const userIdSchema = z.string().min(1);
 // PostgreSQL bigint can hold more than JavaScript can represent exactly.
 export const safeIntegerSchema = z.number().int().safe();
 export const currencySchema = z.string().regex(/^[A-Z]{3,16}$/);
+// A budget's month is calendar text, never an instant.
+export const periodMonthSchema = z.string().regex(PERIOD_MONTH_PATTERN);
 
 const syncId = syncIdSchema;
 const userId = userIdSchema;
@@ -85,6 +93,21 @@ export const remoteSettingsSchema = z
   })
   .strict();
 
+export const remoteBudgetSchema = z
+  .object({
+    sync_id: syncId,
+    user_id: userId,
+    // Null is the overall monthly budget.
+    category_sync_id: syncId.nullable(),
+    period_month: periodMonthSchema,
+    amount_minor: safeInteger.positive(),
+    currency,
+    created_at: timestamp,
+    updated_at: timestamp,
+    deleted_at: nullableTimestamp,
+  })
+  .strict();
+
 export const remoteTransactionSchema = z
   .object({
     sync_id: syncId,
@@ -110,10 +133,16 @@ export type RemoteAccountRow = z.infer<typeof remoteAccountSchema>;
 export type RemoteCategoryRow = z.infer<typeof remoteCategorySchema>;
 export type RemotePersonRow = z.infer<typeof remotePersonSchema>;
 export type RemoteSettingsRow = z.infer<typeof remoteSettingsSchema>;
+export type RemoteBudgetRow = z.infer<typeof remoteBudgetSchema>;
 export type RemoteTransactionRow = z.infer<typeof remoteTransactionSchema>;
 
 export type RemoteRow =
-  RemoteAccountRow | RemoteCategoryRow | RemotePersonRow | RemoteSettingsRow | RemoteTransactionRow;
+  | RemoteAccountRow
+  | RemoteBudgetRow
+  | RemoteCategoryRow
+  | RemotePersonRow
+  | RemoteSettingsRow
+  | RemoteTransactionRow;
 
 /** Cloud table name and idempotency key for each local entity type. */
 export const REMOTE_TABLES = {
@@ -123,6 +152,7 @@ export const REMOTE_TABLES = {
   // Settings is one row per user in the cloud, so ownership is its identity.
   settings: { table: 'settings', onConflict: 'user_id' },
   transaction: { table: 'transactions', onConflict: 'sync_id' },
+  budget: { table: 'budgets', onConflict: 'sync_id' },
 } as const satisfies Record<SyncEntityType, { table: string; onConflict: string }>;
 
 export const REMOTE_SCHEMA = 'sync' as const;
@@ -133,6 +163,7 @@ const schemasByEntity = {
   person: remotePersonSchema,
   settings: remoteSettingsSchema,
   transaction: remoteTransactionSchema,
+  budget: remoteBudgetSchema,
 } as const;
 
 /** Validates one mapped row. Returns an issue path only, never the row values. */

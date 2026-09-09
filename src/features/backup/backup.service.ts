@@ -2,7 +2,15 @@ import Constants from 'expo-constants';
 import { asc, isNull, like } from 'drizzle-orm';
 
 import { db } from '@/db';
-import { appMetadata, accounts, categories, people, settings, transactions } from '@/db/schema';
+import {
+  appMetadata,
+  accounts,
+  budgets,
+  categories,
+  people,
+  settings,
+  transactions,
+} from '@/db/schema';
 import { clearCloudKnowledge, updateSyncState } from '@/features/sync/sync.repository';
 import { createSyncId, requireSyncId } from '@/features/sync/uuid';
 
@@ -10,6 +18,7 @@ import {
   BACKUP_FORMAT,
   BACKUP_FORMAT_VERSION,
   BACKUP_SCHEMA_VERSION,
+  SYNC_BACKUP_FORMAT_VERSION,
   type AnyBackupEnvelope,
   type BackupData,
   type BackupEnvelope,
@@ -35,6 +44,10 @@ export function createBackup(): BackupEnvelope {
  * Global sync IDs travel with the data so a restore keeps cloud identity.
  * Tombstoned rows are deleted data and are excluded, and the sync runtime state
  * (outbox, cursor, attempt counters, sessions) is never portable.
+ *
+ * Budgets travel as plans. What was spent against them is absent, because it is
+ * derived: the restored transactions reproduce it exactly, and a stored figure
+ * could only ever be a way for the file to disagree with them.
  */
 export function readBackupData(): BackupData {
   // Reads are performed in one SQLite transaction so the tables describe one logical snapshot.
@@ -88,6 +101,18 @@ export function readBackupData(): BackupData {
         createdAt: item.createdAt.getTime(),
         updatedAt: item.updatedAt.getTime(),
       })),
+    budgets: tx
+      .select()
+      .from(budgets)
+      .where(isNull(budgets.deletedAt))
+      .orderBy(asc(budgets.id))
+      .all()
+      .map(({ deletedAt: _deletedAt, ...item }) => ({
+        ...item,
+        syncId: requireSyncId(item.syncId, 'budget'),
+        createdAt: item.createdAt.getTime(),
+        updatedAt: item.updatedAt.getTime(),
+      })),
     settings: tx
       .select()
       .from(settings)
@@ -124,9 +149,13 @@ export function parseAndValidateBackup(text: string): AnyBackupEnvelope {
  */
 export function restoreBackup(backup: AnyBackupEnvelope): void {
   const valid = validateBackup(backup);
-  const withSyncIds = valid.formatVersion === BACKUP_FORMAT_VERSION;
+  const withSyncIds = valid.formatVersion >= SYNC_BACKUP_FORMAT_VERSION;
+  // A backup written before budgets existed carries none, which restores as a
+  // database with no budgets rather than as a reason to refuse the file.
+  const restoredBudgets = 'budgets' in valid.data ? valid.data.budgets : [];
   db.transaction((tx) => {
     tx.delete(transactions).run();
+    tx.delete(budgets).run();
     tx.delete(people).run();
     tx.delete(categories).run();
     tx.delete(accounts).run();
@@ -178,6 +207,15 @@ export function restoreBackup(backup: AnyBackupEnvelope): void {
           updatedAt: new Date(item.updatedAt),
         })
         .run();
+    for (const item of restoredBudgets)
+      tx.insert(budgets)
+        .values({
+          ...item,
+          syncId: resolveRestoredSyncId(item, true, 'budget'),
+          createdAt: new Date(item.createdAt),
+          updatedAt: new Date(item.updatedAt),
+        })
+        .run();
     for (const item of valid.data.appMetadata) tx.insert(appMetadata).values(item).run();
     // Queued work referred to the replaced dataset, and the pull position and
     // per-record baselines describe rows that are no longer here.
@@ -201,7 +239,10 @@ export function restoreBackup(backup: AnyBackupEnvelope): void {
   });
 }
 
-/** Keeps a restored global identity when the backup has one; assigns one when it does not. */
+/**
+ * Keeps a restored global identity when the backup has one; assigns one when it
+ * does not. Only a version 1 backup lacks them, and budgets never appear there.
+ */
 function resolveRestoredSyncId<T extends object>(
   item: T,
   backupHasSyncIds: boolean,

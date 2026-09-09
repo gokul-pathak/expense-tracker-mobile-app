@@ -2,7 +2,7 @@ import { and, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
 import { DEFAULT_CURRENCY } from '@/db/constants';
-import { accounts, categories, people, settings, transactions } from '@/db/schema';
+import { accounts, budgets, categories, people, settings, transactions } from '@/db/schema';
 
 /**
  * Does this database, or this cloud account, actually hold anything a person
@@ -28,6 +28,11 @@ export type DataInventory = {
   people: number;
   /** Categories the user created. Seeded built-ins are excluded on purpose. */
   customCategories: number;
+  /**
+   * Budgets are always user-created — nothing seeds or infers one — so any
+   * budget is a deliberate decision that would be a real loss to overwrite.
+   */
+  budgets: number;
   settingsChanged: boolean;
   hasMeaningfulData: boolean;
 };
@@ -38,6 +43,7 @@ export function emptyInventory(): DataInventory {
     transactions: 0,
     people: 0,
     customCategories: 0,
+    budgets: 0,
     settingsChanged: false,
     hasMeaningfulData: false,
   };
@@ -45,7 +51,7 @@ export function emptyInventory(): DataInventory {
 
 /** Tombstoned rows are deleted data and never make a database look populated. */
 export function readLocalDataInventory(): DataInventory {
-  const count = (table: typeof accounts | typeof transactions | typeof people) =>
+  const count = (table: typeof accounts | typeof transactions | typeof people | typeof budgets) =>
     db
       .select({ total: sql<number>`count(*)` })
       .from(table)
@@ -71,13 +77,14 @@ export function readLocalDataInventory(): DataInventory {
     transactions: count(transactions),
     people: count(people),
     customCategories,
+    budgets: count(budgets),
     settingsChanged,
   });
 }
 
 /** Local rows that carry a global identity, for reporting how much will upload. */
 export function countLocalSyncableRows(): number {
-  const tables = [accounts, categories, people, settings, transactions] as const;
+  const tables = [accounts, budgets, categories, people, settings, transactions] as const;
   return tables.reduce(
     (total, table) =>
       total +
@@ -95,6 +102,7 @@ export type CloudInventoryCounts = {
   transactions: number;
   people: number;
   customCategories: number;
+  budgets: number;
   settingsCurrency: string | null;
 };
 
@@ -111,6 +119,7 @@ export function summarizeCloudInventory(counts: CloudInventoryCounts): DataInven
     transactions: counts.transactions,
     people: counts.people,
     customCategories: counts.customCategories,
+    budgets: counts.budgets,
     settingsChanged:
       counts.settingsCurrency !== null && counts.settingsCurrency !== DEFAULT_CURRENCY,
   });
@@ -124,6 +133,7 @@ function summarize(counts: Omit<DataInventory, 'hasMeaningfulData'>): DataInvent
       counts.transactions > 0 ||
       counts.people > 0 ||
       counts.customCategories > 0 ||
+      counts.budgets > 0 ||
       counts.settingsChanged,
   };
 }

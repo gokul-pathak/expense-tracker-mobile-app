@@ -2,14 +2,20 @@ import type { AccountType, CategoryType, PaymentMode, TransactionType } from '@/
 
 export const BACKUP_FORMAT = 'personal-expense-tracker-backup' as const;
 /**
- * Version 2 carries the stable global `syncId` of every domain row so a restored
- * database keeps its cloud identity instead of being treated as new data.
- * Version 1 backups predate sync identity and remain restorable.
+ * Version 3 carries budgets. Version 2 carries the stable global `syncId` of
+ * every domain row so a restored database keeps its cloud identity instead of
+ * being treated as new data. Version 1 predates sync identity.
+ *
+ * All three remain restorable. A backup written before budgets existed simply
+ * has none, which restores as a database with no budgets — the truth about that
+ * backup, not a reason to reject it.
  */
-export const BACKUP_FORMAT_VERSION = 2 as const;
+export const BACKUP_FORMAT_VERSION = 3 as const;
+export const SYNC_BACKUP_FORMAT_VERSION = 2 as const;
 export const LEGACY_BACKUP_FORMAT_VERSION = 1 as const;
 // This identifies the newest migration understood by this logical backup format.
-export const BACKUP_SCHEMA_VERSION = '20260907120000_sync_foundation' as const;
+export const BACKUP_SCHEMA_VERSION = '20260909120000_budgets' as const;
+export const SYNC_BACKUP_SCHEMA_VERSION = '20260907120000_sync_foundation' as const;
 export const LEGACY_BACKUP_SCHEMA_VERSION = '20260904151616_damp_raider' as const;
 
 export type BackupAccount = {
@@ -61,6 +67,20 @@ export type BackupTransaction = {
   createdAt: number;
   updatedAt: number;
 };
+/**
+ * A plan, never a figure. What was spent is derived from the restored
+ * transactions, so storing it here could only be a way to disagree with them.
+ */
+export type BackupBudget = {
+  id: number;
+  syncId: string;
+  categoryId: number | null;
+  periodMonth: string;
+  amountMinor: number;
+  currency: string;
+  createdAt: number;
+  updatedAt: number;
+};
 export type BackupSetting = {
   id: number;
   syncId: string;
@@ -75,9 +95,13 @@ export type BackupData = {
   categories: BackupCategory[];
   people: BackupPerson[];
   transactions: BackupTransaction[];
+  budgets: BackupBudget[];
   settings: BackupSetting[];
   appMetadata: BackupMetadata[];
 };
+
+/** Pre-M8A shape: identical domain data, without budgets. */
+export type SyncBackupData = Omit<BackupData, 'budgets'>;
 
 /** Pre-M7C shape: identical domain data, without global sync identity. */
 export type LegacyBackupData = {
@@ -98,6 +122,15 @@ export type BackupEnvelope = {
   data: BackupData;
 };
 
+export type SyncBackupEnvelope = {
+  format: typeof BACKUP_FORMAT;
+  formatVersion: typeof SYNC_BACKUP_FORMAT_VERSION;
+  schemaVersion: typeof SYNC_BACKUP_SCHEMA_VERSION;
+  createdAt: string;
+  appVersion: string;
+  data: SyncBackupData;
+};
+
 export type LegacyBackupEnvelope = {
   format: typeof BACKUP_FORMAT;
   formatVersion: typeof LEGACY_BACKUP_FORMAT_VERSION;
@@ -107,7 +140,7 @@ export type LegacyBackupEnvelope = {
   data: LegacyBackupData;
 };
 
-export type AnyBackupEnvelope = BackupEnvelope | LegacyBackupEnvelope;
+export type AnyBackupEnvelope = BackupEnvelope | SyncBackupEnvelope | LegacyBackupEnvelope;
 
 export type BackupPreview = {
   createdAt: string;
@@ -115,5 +148,6 @@ export type BackupPreview = {
   categories: number;
   people: number;
   transactions: number;
+  budgets: number;
   currency: string;
 };

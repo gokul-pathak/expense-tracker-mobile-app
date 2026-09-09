@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 
 import { db } from '@/db';
 import type { AccountType, CategoryType, PaymentMode, TransactionType } from '@/db/constants';
-import { accounts, categories, people, settings, transactions } from '@/db/schema';
+import { accounts, budgets, categories, people, settings, transactions } from '@/db/schema';
 import type { SyncEntityType } from '@/db/schema';
 
 import type { SyncWriter } from './sync.types';
@@ -66,6 +66,18 @@ export type RemoteSettings = {
   deletedAt?: Date | null;
 };
 
+/** A budget references its category by global sync ID; null is the overall budget. */
+export type RemoteBudget = {
+  syncId: string;
+  categorySyncId: string | null;
+  periodMonth: string;
+  amountMinor: number;
+  currency: string;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt?: Date | null;
+};
+
 /** Remote transactions reference other rows by global sync ID, never local IDs. */
 export type RemoteTransaction = {
   syncId: string;
@@ -96,6 +108,7 @@ export type RemoteChangeBatch = {
   accounts?: RemoteAccount[];
   categories?: RemoteCategory[];
   people?: RemotePerson[];
+  budgets?: RemoteBudget[];
   transactions?: RemoteTransaction[];
   tombstones?: RemoteTombstone[];
 };
@@ -105,6 +118,7 @@ export type RemoteDataset = {
   accounts: RemoteAccount[];
   categories: RemoteCategory[];
   people: RemotePerson[];
+  budgets: RemoteBudget[];
   transactions: RemoteTransaction[];
 };
 
@@ -128,6 +142,7 @@ export function replaceLocalDataFromRemote(
     // Children first: foreign keys are enforced, so a parent cannot go before
     // the rows that reference it.
     tx.delete(transactions).run();
+    tx.delete(budgets).run();
     tx.delete(people).run();
     tx.delete(categories).run();
     tx.delete(accounts).run();
@@ -137,6 +152,7 @@ export function replaceLocalDataFromRemote(
     for (const row of dataset.accounts) applyRemoteAccount(row, tx);
     for (const row of dataset.categories) applyRemoteCategory(row, tx);
     for (const row of dataset.people) applyRemotePerson(row, tx);
+    for (const row of dataset.budgets) applyRemoteBudget(row, tx);
     for (const row of dataset.transactions) applyRemoteTransaction(row, tx);
 
     finalize?.(tx);
@@ -150,6 +166,7 @@ export function applyRemoteChanges(batch: RemoteChangeBatch) {
     for (const row of batch.accounts ?? []) applyRemoteAccount(row, tx);
     for (const row of batch.categories ?? []) applyRemoteCategory(row, tx);
     for (const row of batch.people ?? []) applyRemotePerson(row, tx);
+    for (const row of batch.budgets ?? []) applyRemoteBudget(row, tx);
     for (const row of batch.transactions ?? []) applyRemoteTransaction(row, tx);
     for (const row of batch.tombstones ?? []) applyRemoteTombstone(row, tx);
   });
@@ -244,6 +261,28 @@ export function rebindRemoteSettingsIdentity(syncId: string, writer: SyncWriter 
   writer.update(settings).set({ syncId: target }).where(eq(settings.id, SETTINGS_ID)).run();
 }
 
+/**
+ * A downloaded plan. Nothing derived is written: what was spent on this device
+ * is whatever this device's own transactions say, recomputed on every read.
+ */
+export function applyRemoteBudget(row: RemoteBudget, writer: SyncWriter = db) {
+  const syncId = requireSyncId(row.syncId, 'remote budget');
+  const values = {
+    categoryId: resolveLocalId(writer, 'category', row.categorySyncId),
+    periodMonth: row.periodMonth,
+    amountMinor: row.amountMinor,
+    currency: row.currency,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    deletedAt: row.deletedAt ?? null,
+  };
+  writer
+    .insert(budgets)
+    .values({ ...values, syncId })
+    .onConflictDoUpdate({ target: budgets.syncId, set: values })
+    .run();
+}
+
 export function applyRemotePerson(row: RemotePerson, writer: SyncWriter = db) {
   const syncId = requireSyncId(row.syncId, 'remote person');
   const values = {
@@ -316,6 +355,9 @@ export function applyRemoteTombstone(tombstone: RemoteTombstone, writer: SyncWri
     case 'person':
       writer.update(people).set({ deletedAt }).where(eq(people.syncId, syncId)).run();
       return;
+    case 'budget':
+      writer.update(budgets).set({ deletedAt }).where(eq(budgets.syncId, syncId)).run();
+      return;
     case 'transaction':
       writer.update(transactions).set({ deletedAt }).where(eq(transactions.syncId, syncId)).run();
       return;
@@ -335,7 +377,9 @@ function resolveLocalId(
     entityType === 'account' ? accounts : entityType === 'category' ? categories : people;
   const row = writer.select({ id: table.id }).from(table).where(eq(table.syncId, syncId)).get();
   if (row === undefined) {
-    throw new Error(`Remote transaction references an unknown ${entityType}.`);
+    // Writing a null foreign key instead would silently change what the record
+    // means: a category budget would become the overall budget.
+    throw new Error(`Remote record references an unknown ${entityType}.`);
   }
   return row.id;
 }

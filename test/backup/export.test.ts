@@ -51,6 +51,7 @@ const data: BackupData = {
       updatedAt: 0,
     },
   ],
+  budgets: [],
   appMetadata: [],
   transactions: [
     {

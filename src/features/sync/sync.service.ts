@@ -283,7 +283,7 @@ export async function signOutKeepingLocalData(): Promise<void> {
  */
 export async function removeCloudDataFromDevice(): Promise<void> {
   replaceLocalDataFromRemote(
-    { settings: [], accounts: [], categories: [], people: [], transactions: [] },
+    { settings: [], accounts: [], categories: [], people: [], budgets: [], transactions: [] },
     (writer) => {
       clearSyncOutbox(writer);
     },

@@ -1,6 +1,6 @@
 import type { TransactionType } from '@/db/constants';
 
-import type { PulledTransactionRow } from './remote/remote-pull-rows';
+import type { PulledBudgetRow, PulledTransactionRow } from './remote/remote-pull-rows';
 
 /**
  * The domain rules a downloaded transaction must satisfy before it is allowed
@@ -33,10 +33,12 @@ export type RemoteRelationIndex = {
   people: Set<string>;
 };
 
-export type TransactionProblem = {
+export type RemoteRecordProblem = {
   code: 'invalid_remote_data' | 'unknown_parent' | 'unsupported_remote_data';
   detail: string;
 };
+
+export type TransactionProblem = RemoteRecordProblem;
 
 export function validateRemoteTransaction(
   row: PulledTransactionRow,
@@ -122,6 +124,55 @@ function validateShape(
     default:
       return { code: 'unsupported_remote_data', detail: `type:${type}` };
   }
+}
+
+/**
+ * The domain rules a downloaded budget must satisfy.
+ *
+ * A budget is a plan, so there is little to check beyond what it points at — and
+ * that check matters: a budget whose category is missing locally must not be
+ * written with a null category, because null already means something else
+ * entirely, the overall monthly budget. Refusing it leaves the record for a
+ * later run, once its parent has arrived.
+ */
+export function validateRemoteBudget(
+  row: PulledBudgetRow,
+  index: RemoteRelationIndex,
+  remoteDeleted: boolean,
+): RemoteRecordProblem | undefined {
+  // A deleted plan is invisible to every calculation, so its shape cannot
+  // corrupt anything and is not re-litigated here.
+  if (remoteDeleted) return undefined;
+  if (row.category_sync_id === null) return undefined;
+
+  const type = index.categoryTypes.get(row.category_sync_id);
+  if (type === undefined) return { code: 'unknown_parent', detail: 'category' };
+  // A budget is a spending limit, so an income category has nothing to limit.
+  if (type !== 'expense') return { code: 'invalid_remote_data', detail: 'category_type' };
+  return undefined;
+}
+
+/**
+ * Two live budgets for the same month, currency and category have no meaningful
+ * reading: neither is the plan, and their sum is a number nobody chose. The
+ * cloud refuses the pair with a partial unique index; this is the same rule for
+ * a whole dataset that is about to replace a device's own.
+ */
+export function findDuplicateBudget<TKey>(
+  budgets: readonly {
+    key: TKey;
+    categorySyncId: string | null;
+    periodMonth: string;
+    currency: string;
+  }[],
+): TKey | undefined {
+  const seen = new Set<string>();
+  for (const budget of budgets) {
+    const identity = `${budget.periodMonth}|${budget.currency}|${budget.categorySyncId ?? ''}`;
+    if (seen.has(identity)) return budget.key;
+    seen.add(identity);
+  }
+  return undefined;
 }
 
 /** One debt record's effect on a person's balance. */

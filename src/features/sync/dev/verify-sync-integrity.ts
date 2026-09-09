@@ -1,8 +1,10 @@
-import { eq, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
+import { PERIOD_MONTH_PATTERN } from '@/db/constants';
 import {
   accounts,
+  budgets,
   categories,
   isSyncEntityType,
   isSyncId,
@@ -50,6 +52,10 @@ export const SYNC_INTEGRITY_CODES = [
   'tombstoned_parent_in_use',
   'transaction_orphaned_relation',
   'conflict_invalid_resolution',
+  'budget_invalid_amount',
+  'budget_invalid_month',
+  'budget_invalid_category',
+  'budget_duplicate_period',
 ] as const;
 
 export type SyncIntegrityCode = (typeof SYNC_INTEGRITY_CODES)[number];
@@ -71,6 +77,7 @@ export type SyncIntegrityReport = {
     people: number;
     settings: number;
     transactions: number;
+    budgets: number;
     pendingMutations: number;
     baselines: number;
     conflicts: number;
@@ -79,6 +86,7 @@ export type SyncIntegrityReport = {
 
 const SYNCABLE = [
   ['account', accounts],
+  ['budget', budgets],
   ['category', categories],
   ['person', people],
   ['settings', settings],
@@ -94,6 +102,7 @@ export function verifySyncIntegrity(): SyncIntegrityReport {
   checkBaselines(issues);
   checkTombstonedParents(issues);
   checkTransactionRelations(issues);
+  checkBudgets(issues);
 
   return { ok: issues.length === 0, issues, counts: readCounts() };
 }
@@ -309,6 +318,69 @@ function checkTransactionRelations(issues: SyncIntegrityIssue[]) {
   }
 }
 
+/**
+ * Budgets, checked against the rules that make one readable.
+ *
+ * All four are things the schema and the service already prevent, which is
+ * exactly why an audit looks for them: a budget with no valid month, or two
+ * budgets for the same month, would produce a figure nobody chose. Like every
+ * other check here this reports and never repairs — which of two duplicate plans
+ * is the real one is a question for a person.
+ */
+function checkBudgets(issues: SyncIntegrityIssue[]) {
+  const rows = db
+    .select({
+      id: budgets.id,
+      categoryId: budgets.categoryId,
+      periodMonth: budgets.periodMonth,
+      amountMinor: budgets.amountMinor,
+      currency: budgets.currency,
+    })
+    .from(budgets)
+    .where(isNull(budgets.deletedAt))
+    .all();
+
+  const invalidAmount = rows.filter(
+    (row) => !Number.isSafeInteger(row.amountMinor) || row.amountMinor <= 0,
+  ).length;
+  if (invalidAmount > 0) {
+    issues.push({ code: 'budget_invalid_amount', entityType: 'budget', count: invalidAmount });
+  }
+
+  const invalidMonth = rows.filter((row) => !PERIOD_MONTH_PATTERN.test(row.periodMonth)).length;
+  if (invalidMonth > 0) {
+    issues.push({ code: 'budget_invalid_month', entityType: 'budget', count: invalidMonth });
+  }
+
+  // A category budget must point at a live expense category. The overall
+  // budget's null category is not a missing reference.
+  const expenseCategoryIds = new Set(
+    db
+      .select({ id: categories.id })
+      .from(categories)
+      .where(and(isNull(categories.deletedAt), eq(categories.type, 'expense')))
+      .all()
+      .map((row) => row.id),
+  );
+  const invalidCategory = rows.filter(
+    (row) => row.categoryId !== null && !expenseCategoryIds.has(row.categoryId),
+  ).length;
+  if (invalidCategory > 0) {
+    issues.push({ code: 'budget_invalid_category', entityType: 'budget', count: invalidCategory });
+  }
+
+  const identities = new Set<string>();
+  let duplicates = 0;
+  for (const row of rows) {
+    const identity = `${row.periodMonth}|${row.currency}|${row.categoryId ?? 'overall'}`;
+    if (identities.has(identity)) duplicates += 1;
+    identities.add(identity);
+  }
+  if (duplicates > 0) {
+    issues.push({ code: 'budget_duplicate_period', entityType: 'budget', count: duplicates });
+  }
+}
+
 function readCounts(): SyncIntegrityReport['counts'] {
   const count = (table: (typeof SYNCABLE)[number][1]) =>
     db
@@ -323,6 +395,7 @@ function readCounts(): SyncIntegrityReport['counts'] {
     people: count(people),
     settings: count(settings),
     transactions: count(transactions),
+    budgets: count(budgets),
     pendingMutations:
       db
         .select({ total: sql<number>`count(*)` })

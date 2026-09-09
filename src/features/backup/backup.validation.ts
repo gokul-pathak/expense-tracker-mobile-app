@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { ACCOUNT_TYPES, CATEGORY_TYPES, PAYMENT_MODES } from '@/db/constants';
+import { ACCOUNT_TYPES, CATEGORY_TYPES, PAYMENT_MODES, PERIOD_MONTH_PATTERN } from '@/db/constants';
 import { isSyncId } from '@/db/schema';
 import { ValidationError } from '@/features/shared/errors';
 
@@ -10,7 +10,10 @@ import {
   BACKUP_SCHEMA_VERSION,
   LEGACY_BACKUP_FORMAT_VERSION,
   LEGACY_BACKUP_SCHEMA_VERSION,
+  SYNC_BACKUP_FORMAT_VERSION,
+  SYNC_BACKUP_SCHEMA_VERSION,
   type AnyBackupEnvelope,
+  type BackupBudget,
   type BackupEnvelope,
   type BackupPreview,
 } from './backup.types';
@@ -78,6 +81,17 @@ const legacyTransactionShape = {
   createdAt: timestamp,
   updatedAt: timestamp,
 };
+const budgetShape = {
+  id,
+  syncId,
+  // Null is the overall monthly budget.
+  categoryId: id.nullable(),
+  periodMonth: z.string().regex(PERIOD_MONTH_PATTERN),
+  amountMinor: integer.positive(),
+  currency,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+};
 const legacySettingShape = {
   id: z.literal(1),
   defaultCurrency: currency,
@@ -88,9 +102,9 @@ const metadataSchema = z
   .object({ key: z.string().startsWith('seed.'), value: z.string() })
   .strict();
 
-const dataSchema = (withSyncId: boolean) => {
+const dataSchema = (options: { withSyncId: boolean; withBudgets: boolean }) => {
   const extend = <T extends z.ZodRawShape>(shape: T) =>
-    z.object(withSyncId ? { ...shape, syncId } : shape).strict();
+    z.object(options.withSyncId ? { ...shape, syncId } : shape).strict();
   return z
     .object({
       accounts: z.array(extend(legacyAccountShape)),
@@ -98,6 +112,9 @@ const dataSchema = (withSyncId: boolean) => {
       people: z.array(extend(legacyPersonShape)),
       transactions: z.array(extend(legacyTransactionShape)),
       settings: z.array(extend(legacySettingShape)),
+      // Absent, not empty, in a backup written before budgets existed. The
+      // envelope is `.strict()`, so each version accepts exactly its own shape.
+      ...(options.withBudgets ? { budgets: z.array(z.object(budgetShape).strict()) } : {}),
       appMetadata: z.array(metadataSchema),
     })
     .strict();
@@ -110,7 +127,17 @@ const currentEnvelopeSchema = z
     schemaVersion: z.literal(BACKUP_SCHEMA_VERSION),
     createdAt: z.string().datetime(),
     appVersion: z.string().min(1),
-    data: dataSchema(true),
+    data: dataSchema({ withSyncId: true, withBudgets: true }),
+  })
+  .strict();
+const syncEnvelopeSchema = z
+  .object({
+    format: z.literal(BACKUP_FORMAT),
+    formatVersion: z.literal(SYNC_BACKUP_FORMAT_VERSION),
+    schemaVersion: z.literal(SYNC_BACKUP_SCHEMA_VERSION),
+    createdAt: z.string().datetime(),
+    appVersion: z.string().min(1),
+    data: dataSchema({ withSyncId: true, withBudgets: false }),
   })
   .strict();
 const legacyEnvelopeSchema = z
@@ -120,11 +147,12 @@ const legacyEnvelopeSchema = z
     schemaVersion: z.literal(LEGACY_BACKUP_SCHEMA_VERSION),
     createdAt: z.string().datetime(),
     appVersion: z.string().min(1),
-    data: dataSchema(false),
+    data: dataSchema({ withSyncId: false, withBudgets: false }),
   })
   .strict();
 const envelopeSchema = z.discriminatedUnion('formatVersion', [
   legacyEnvelopeSchema,
+  syncEnvelopeSchema,
   currentEnvelopeSchema,
 ]);
 
@@ -151,6 +179,7 @@ export function validateBackup(value: unknown): AnyBackupEnvelope {
   assertUnique(backup.data.people, 'people');
   assertUnique(backup.data.transactions, 'transactions');
   assertUnique(backup.data.settings, 'settings');
+  assertUnique(budgetsOf(backup), 'budgets');
   if (backup.data.settings.length !== 1)
     throw new ValidationError('Backup must contain exactly one settings record.');
   assertUniqueBy(backup.data.appMetadata, 'app metadata', (item) => item.key);
@@ -166,6 +195,11 @@ export function validateBackup(value: unknown): AnyBackupEnvelope {
 
 export function isCurrentBackup(backup: AnyBackupEnvelope): backup is BackupEnvelope {
   return backup.formatVersion === BACKUP_FORMAT_VERSION;
+}
+
+/** Budgets are the newest collection, so only the current format carries them. */
+function budgetsOf(backup: AnyBackupEnvelope): BackupBudget[] {
+  return isCurrentBackup(backup) ? backup.data.budgets : [];
 }
 
 /** Backups this app writes are always the current format. */
@@ -192,6 +226,7 @@ export function getBackupPreview(backup: AnyBackupEnvelope): BackupPreview {
     categories: backup.data.categories.length,
     people: backup.data.people.length,
     transactions: backup.data.transactions.length,
+    budgets: budgetsOf(backup).length,
     currency: backup.data.settings[0]!.defaultCurrency,
   };
 }
@@ -222,6 +257,7 @@ function assertUniqueSyncIds(backup: BackupEnvelope) {
     ['people', backup.data.people],
     ['transactions', backup.data.transactions],
     ['settings', backup.data.settings],
+    ['budgets', backup.data.budgets],
   ] as const;
   const seen = new Set<string>();
   for (const [label, items] of sets) {
@@ -307,4 +343,30 @@ function validateRelationshipsAndDomain(backup: AnyBackupEnvelope) {
   for (const total of debtTotals.values())
     if (total.received > total.lent || total.paid > total.borrowed)
       throw new ValidationError('Backup contains repayments that exceed the related debt.');
+  validateBudgets(backup, categories);
+}
+
+/**
+ * Budgets restore alongside the transactions they measure, so the same rules the
+ * service enforces on creation are checked here: a real expense category, and
+ * one plan per month, currency and category. A duplicate pair has no meaningful
+ * reading, and restoring one would produce a database the app could not have
+ * created.
+ */
+function validateBudgets(backup: AnyBackupEnvelope, categories: Map<number, { type: string }>) {
+  const identities = new Set<string>();
+  for (const budget of budgetsOf(backup)) {
+    if (budget.categoryId !== null) {
+      const category = categories.get(budget.categoryId);
+      if (category === undefined)
+        throw new ValidationError(`Budget ${budget.id} references a missing category.`);
+      if (category.type !== 'expense')
+        throw new ValidationError(`Budget ${budget.id} references a non-expense category.`);
+    }
+    // The overall budget's null category is one identity, not many.
+    const identity = `${budget.periodMonth}|${budget.currency}|${budget.categoryId ?? 'overall'}`;
+    if (identities.has(identity))
+      throw new ValidationError('Backup contains more than one budget for the same month.');
+    identities.add(identity);
+  }
 }

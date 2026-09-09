@@ -81,6 +81,18 @@ function fixture(): BackupEnvelope {
           updatedAt: 1,
         },
       ],
+      budgets: [
+        {
+          id: 1,
+          syncId: '99999999-9999-4999-8999-999999999999',
+          categoryId: 1,
+          periodMonth: '2026-09',
+          amountMinor: 1500000,
+          currency: 'NPR',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
       appMetadata: [{ key: 'seed.categories.version', value: '1' }],
       transactions: [
         {

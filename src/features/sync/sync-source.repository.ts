@@ -2,9 +2,10 @@ import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 
 import { db } from '@/db';
 import type { TransactionType } from '@/db/constants';
-import { accounts, categories, people, settings, transactions } from '@/db/schema';
+import { accounts, budgets, categories, people, settings, transactions } from '@/db/schema';
 import type { SyncEntityType } from '@/db/schema';
 import type { Account } from '@/db/schema/accounts';
+import type { Budget } from '@/db/schema/budgets';
 import type { Category } from '@/db/schema/categories';
 import type { Person } from '@/db/schema/people';
 import type { Setting } from '@/db/schema/settings';
@@ -21,6 +22,7 @@ import type { Transaction } from '@/db/schema/transactions';
 
 export type LocalSyncEntity =
   | { entityType: 'account'; row: Account }
+  | { entityType: 'budget'; row: Budget }
   | { entityType: 'category'; row: Category }
   | { entityType: 'person'; row: Person }
   | { entityType: 'settings'; row: Setting }
@@ -41,6 +43,10 @@ export function readLocalEntity(
       const row = db.select().from(categories).where(eq(categories.syncId, syncId)).get();
       return row === undefined ? null : { entityType, row };
     }
+    case 'budget': {
+      const row = db.select().from(budgets).where(eq(budgets.syncId, syncId)).get();
+      return row === undefined ? null : { entityType, row };
+    }
     case 'person': {
       const row = db.select().from(people).where(eq(people.syncId, syncId)).get();
       return row === undefined ? null : { entityType, row };
@@ -58,6 +64,7 @@ export function readLocalEntity(
 
 const TABLES = {
   account: accounts,
+  budget: budgets,
   category: categories,
   person: people,
   settings,
@@ -197,6 +204,7 @@ export function readLocalDebtRowsForPeople(personSyncIds: readonly string[]): Lo
 
 export type LocalSnapshot = {
   accounts: Account[];
+  budgets: Budget[];
   categories: Category[];
   people: Person[];
   settings: Setting[];
@@ -213,6 +221,7 @@ export type LocalSnapshot = {
 export function readLocalSnapshot(): LocalSnapshot {
   return db.transaction((tx) => ({
     accounts: tx.select().from(accounts).all(),
+    budgets: tx.select().from(budgets).all(),
     categories: tx.select().from(categories).all(),
     people: tx.select().from(people).all(),
     settings: tx.select().from(settings).all(),
@@ -223,6 +232,11 @@ export function readLocalSnapshot(): LocalSnapshot {
 /** Narrow read used when a caller already knows it needs a transaction. */
 export function readLocalTransaction(syncId: string): Transaction | null {
   return db.select().from(transactions).where(eq(transactions.syncId, syncId)).get() ?? null;
+}
+
+/** The same, for a budget. Tombstoned rows included: a deletion still uploads. */
+export function readLocalBudget(syncId: string): Budget | null {
+  return db.select().from(budgets).where(eq(budgets.syncId, syncId)).get() ?? null;
 }
 
 /**
@@ -253,7 +267,7 @@ export function readSyncIdsByLocalId(
 
 /** Development helper: confirms the local sync foundation is queryable. */
 export function countSyncableRowsWithIdentity(): number {
-  return [accounts, categories, people, settings, transactions].reduce(
+  return [accounts, budgets, categories, people, settings, transactions].reduce(
     (total, table) =>
       total + db.select({ id: table.id }).from(table).where(isNotNull(table.syncId)).all().length,
     0,

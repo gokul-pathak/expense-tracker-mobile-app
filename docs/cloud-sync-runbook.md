@@ -54,6 +54,7 @@ schema in the dashboard, or the next `db reset` silently diverges from productio
 | `supabase/tests/push.sql`           | the upload contract: idempotent replay, tombstones, one settings row                            |
 | `supabase/tests/pull.sql`           | the change feed: one change per mutation, incremental reads, exact BIGINT                       |
 | `supabase/tests/reconciliation.sql` | first-link contract: retryable upload, retirement, account isolation                            |
+| `supabase/tests/budgets.sql`        | budget isolation, ownership-safe category reference, and one live plan per month                |
 
 A failure in `rls.sql`, `rls-matrix.sql` or `integrity.sql` is a release blocker. Do not mark those
 optional in CI on an environment that can run them.
@@ -85,6 +86,10 @@ sync_state_dual_binding                 linked and mid-link at the same time
 sync_state_cursor_without_link          a cursor left behind by an unlink
 tombstoned_parent_in_use                a live transaction points at a deleted parent
 transaction_orphaned_relation           a live transaction points at a missing row
+budget_invalid_amount                   a budget amount is not a positive safe integer
+budget_invalid_month                    a budget month is not YYYY-MM with a month in 01-12
+budget_invalid_category                 a budget points at something that is not a live expense category
+budget_duplicate_period                 two live plans for one month, currency and category
 ```
 
 `verifySyncFoundation()` (`sync.verification.ts`) is the lighter development view: queue size by

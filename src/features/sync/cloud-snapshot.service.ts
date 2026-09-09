@@ -3,6 +3,7 @@ import type { SyncEntityType } from '@/db/schema';
 import { summarizeCloudInventory, type DataInventory } from './data-inventory';
 import {
   mapPulledAccountToLocal,
+  mapPulledBudgetToLocal,
   mapPulledCategoryToLocal,
   mapPulledPersonToLocal,
   mapPulledSettingsToLocal,
@@ -12,6 +13,7 @@ import { readAllCloudRows } from './initial-upload.service';
 import {
   decodePulledRow,
   type PulledAccountRow,
+  type PulledBudgetRow,
   type PulledCategoryRow,
   type PulledPersonRow,
   type PulledSettingsRow,
@@ -21,7 +23,9 @@ import type { RemoteSnapshotRepository } from './remote/supabase-sync.repository
 import type { RemoteDataset } from './remote-apply.repository';
 import {
   findDebtViolation,
+  findDuplicateBudget,
   isDebtType,
+  validateRemoteBudget,
   validateRemoteTransaction,
   type DebtContribution,
   type DebtType,
@@ -41,6 +45,7 @@ import {
 
 export type CloudSnapshot = {
   accounts: PulledAccountRow[];
+  budgets: PulledBudgetRow[];
   categories: PulledCategoryRow[];
   people: PulledPersonRow[];
   settings: PulledSettingsRow[];
@@ -89,6 +94,7 @@ export async function downloadCloudSnapshot(
       'account',
       'category',
       'person',
+      'budget',
       'transaction',
     ] as const) {
       raw[entityType] = await readAllCloudRows(snapshots, entityType);
@@ -102,6 +108,7 @@ export async function downloadCloudSnapshot(
     accounts: decodeAll('account', raw.account ?? [], linkedUserId),
     categories: decodeAll('category', raw.category ?? [], linkedUserId),
     people: decodeAll('person', raw.person ?? [], linkedUserId),
+    budgets: decodeAll('budget', raw.budget ?? [], linkedUserId),
     transactions: decodeAll('transaction', raw.transaction ?? [], linkedUserId),
     latestSequence,
   };
@@ -150,6 +157,26 @@ export function validateCloudSnapshot(snapshot: CloudSnapshot): void {
     if (problem !== undefined) throw new CloudSnapshotError(problem.code, problem.detail);
   }
 
+  for (const row of snapshot.budgets) {
+    const problem = validateRemoteBudget(row, relations, row.deleted_at !== null);
+    if (problem !== undefined) throw new CloudSnapshotError(problem.code, problem.detail);
+  }
+
+  // Tombstoned plans are excluded: only live budgets can collide.
+  const duplicateBudget = findDuplicateBudget(
+    snapshot.budgets
+      .filter((row) => row.deleted_at === null)
+      .map((row) => ({
+        key: row.sync_id,
+        categorySyncId: row.category_sync_id,
+        periodMonth: row.period_month,
+        currency: row.currency,
+      })),
+  );
+  if (duplicateBudget !== undefined) {
+    throw new CloudSnapshotError('invalid_remote_data', 'duplicate_budget_period');
+  }
+
   // Applied in a stable order so a repayment is never blamed for a principal
   // that simply sorts after it.
   const debts: DebtContribution<string>[] = [...snapshot.transactions]
@@ -178,6 +205,7 @@ function assertUniqueIdentities(snapshot: CloudSnapshot) {
     ['person', snapshot.people],
     ['transaction', snapshot.transactions],
     ['settings', snapshot.settings],
+    ['budget', snapshot.budgets],
   ];
   for (const [entityType, rows] of groups) {
     const seen = new Set<string>();
@@ -193,9 +221,9 @@ function assertUniqueIdentities(snapshot: CloudSnapshot) {
 /**
  * The validated snapshot in the shape the local apply path accepts.
  *
- * Ordering within transactions does not matter: the replacement inserts every
- * account, category and person before the first transaction, so each relation
- * resolves by identity as it lands.
+ * Ordering within transactions and budgets does not matter: the replacement
+ * inserts every account, category and person first, so each relation resolves by
+ * identity as it lands.
  */
 export function toRemoteDataset(snapshot: CloudSnapshot): RemoteDataset {
   return {
@@ -203,6 +231,7 @@ export function toRemoteDataset(snapshot: CloudSnapshot): RemoteDataset {
     accounts: snapshot.accounts.map(mapPulledAccountToLocal),
     categories: snapshot.categories.map(mapPulledCategoryToLocal),
     people: snapshot.people.map(mapPulledPersonToLocal),
+    budgets: snapshot.budgets.map(mapPulledBudgetToLocal),
     transactions: snapshot.transactions.map(mapPulledTransactionToLocal),
   };
 }
@@ -222,6 +251,7 @@ export function snapshotBaselines(snapshot: CloudSnapshot): {
     ['account', snapshot.accounts],
     ['category', snapshot.categories],
     ['person', snapshot.people],
+    ['budget', snapshot.budgets],
     ['transaction', snapshot.transactions],
   ];
   return groups.flatMap(([entityType, rows]) =>
@@ -243,6 +273,7 @@ export function cloudInventoryOf(snapshot: CloudSnapshot): DataInventory {
     transactions: live(snapshot.transactions).length,
     people: live(snapshot.people).length,
     customCategories: live(snapshot.categories).filter((row) => !row.is_default).length,
+    budgets: live(snapshot.budgets).length,
     settingsCurrency: live(snapshot.settings)[0]?.default_currency ?? null,
   });
 }

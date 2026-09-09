@@ -34,3 +34,13 @@ export const CATEGORY_TYPES = ['income', 'expense'] as const;
 export type CategoryType = (typeof CATEGORY_TYPES)[number];
 
 export const DEFAULT_CURRENCY = 'NPR' as const;
+
+/**
+ * A budget's month, `YYYY-MM`.
+ *
+ * A month is an identity rather than an instant: storing a timestamp would make
+ * two devices in different time zones disagree about which month a budget
+ * belongs to. The schema, the cloud contracts and the backup format all check
+ * against this one pattern.
+ */
+export const PERIOD_MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;

@@ -24,6 +24,7 @@ export type {
   SyncOperation,
 } from './sync.constants';
 export { accounts } from './accounts';
+export { budgets } from './budgets';
 export { categories } from './categories';
 export { settings } from './settings';
 export { people } from './people';

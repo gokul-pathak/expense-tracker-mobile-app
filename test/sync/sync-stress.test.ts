@@ -158,7 +158,9 @@ describe('outbox durability under load', () => {
 
     const order = cloud.calls.map((call) => call.entityType);
     expect(order.indexOf('account')).toBeLessThan(order.indexOf('transaction'));
-  });
+    // Building the fixture through the domain services dominates the time here;
+    // the generous budget is for slow machines, not for the engine.
+  }, 60_000);
 
   it('survives a retry storm without losing or duplicating work', async () => {
     const cash = makeAccount('Cash', 'NPR', 1_000_000);

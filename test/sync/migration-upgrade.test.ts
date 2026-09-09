@@ -10,6 +10,7 @@ vi.mock('@/lib/supabase/client', () => ({ getSupabaseClient: () => null }));
 import { runSeed } from '@/db/seed';
 import { assertSyncFoundationReady } from '@/db/sync-integrity';
 import * as accountService from '@/features/accounts/account.service';
+import * as budgetService from '@/features/budgets/budget.service';
 import * as categoryService from '@/features/categories/category.service';
 import { verifySyncIntegrity } from '@/features/sync/dev/verify-sync-integrity';
 import { countPendingSyncMutations } from '@/features/sync/sync.repository';
@@ -45,6 +46,7 @@ const MILESTONES = [
   ['M7C, sync foundation', '20260907120000_sync_foundation'],
   ['M7D, push', '20260907180000_push_sync'],
   ['M7E, pull', '20260907210000_pull_sync'],
+  ['M7F, cloud link', '20260908090000_cloud_link'],
 ] as const;
 
 function insertLegacyAccount(name: string, withSyncId: boolean) {
@@ -148,6 +150,42 @@ describe('upgrading an existing database', () => {
     expect(transactionService.listTransactions()).toHaveLength(1);
     expect(countPendingSyncMutations()).toBeGreaterThan(0);
     expect(verifySyncIntegrity().issues).toEqual([]);
+  });
+
+  it('adds budgets to an M7 database without inventing any', async () => {
+    // A device that has been in use since M7 and has never heard of budgets.
+    createTestDatabase({ through: '20260908090000_cloud_link' });
+    insertLegacyAccount('Existing', true);
+    const before = rawClient().prepare('SELECT count(*) AS total FROM accounts').get();
+
+    migrateTestDatabase();
+    assertSyncFoundationReady();
+    await runSeed();
+
+    // The financial data survives, the new table exists, and nothing created a
+    // budget nobody asked for.
+    expect(rawClient().prepare('SELECT count(*) AS total FROM accounts').get()).toEqual(before);
+    expect(budgetService.listBudgets()).toEqual([]);
+    expect(countPendingSyncMutations()).toBe(0);
+
+    // And the domain works on top of the upgraded database.
+    const budget = budgetService.createBudget({ periodMonth: '2026-09', amountMinor: 400000 });
+    expect(budget.syncId).not.toBeNull();
+    expect(countPendingSyncMutations()).toBe(1);
+    expect(verifySyncIntegrity().issues).toEqual([]);
+  });
+
+  it('gives a fresh install an empty budget table and no seeded budget work', async () => {
+    createTestDatabase();
+    await runSeed();
+
+    expect(budgetService.listBudgets()).toEqual([]);
+    expect(budgetService.getMonthlyBudgetSummary('2026-09').totalBudgetedMinor).toBeNull();
+    // The default categories are intact, and seeding queued nothing: seeding is
+    // not a user mutation, and a budget is never inferred.
+    expect(categoryService.listExpenseCategories().length).toBeGreaterThan(0);
+    expect(countPendingSyncMutations()).toBe(0);
+    expect(verifySyncIntegrity().counts.budgets).toBe(0);
   });
 
   it('ends every upgrade path with the same schema as a fresh install', async () => {
