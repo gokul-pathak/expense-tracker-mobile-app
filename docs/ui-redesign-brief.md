@@ -18,15 +18,15 @@ first-class feature, not an afterthought.
 
 It tracks seven kinds of money movement, and this is the product's real shape:
 
-| Movement | User-facing name | What it means |
-|---|---|---|
-| `expense` | Expense | Money left an account |
-| `income` | Income | Money entered an account |
-| `transfer` | Transfer | Money moved between two of your own accounts |
-| `lend` | **Money Given** | You lent money to a person |
-| `borrow` | **Money Taken** | You borrowed money from a person |
-| `repayment_received` | **Payment Received** | They paid you back |
-| `repayment_paid` | **Repayment** | You paid them back |
+| Movement             | User-facing name     | What it means                                |
+| -------------------- | -------------------- | -------------------------------------------- |
+| `expense`            | Expense              | Money left an account                        |
+| `income`             | Income               | Money entered an account                     |
+| `transfer`           | Transfer             | Money moved between two of your own accounts |
+| `lend`               | **Money Given**      | You lent money to a person                   |
+| `borrow`             | **Money Taken**      | You borrowed money from a person             |
+| `repayment_received` | **Payment Received** | They paid you back                           |
+| `repayment_paid`     | **Repayment**        | You paid them back                           |
 
 Everything the user sees is real, private, and irreversible-feeling. There is no gamification, no
 streaks, no confetti, no AI advice, no social feed. The tone is a **private banker's statement**:
@@ -75,7 +75,7 @@ factual, calm, precise, never chirpy and never alarmist. The app measures; it do
 > from people. Default currency NPR (Nepalese Rupee), also USD and INR. Data lives on the device;
 > cloud sync is optional. The user is an adult managing real money — often a professional in
 > Kathmandu, Delhi, or the diaspora — who lends to family, tracks cash alongside bank accounts, and
-> wants their finances to feel *held*, not *gamified*.
+> wants their finances to feel _held_, not _gamified_.
 >
 > **The feeling to hit: a private bank's mobile app.** Discreet, weighty, quiet, expensive. Think
 > Mercury, Copilot Money, Monzo Plus, Revolut Metal, Apple Card — not Mint, not a startup dashboard,
@@ -87,6 +87,7 @@ factual, calm, precise, never chirpy and never alarmist. The app measures; it do
 > first-class; the app follows the system theme.
 >
 > **Non-negotiables:**
+>
 > - Every monetary figure uses **tabular lining numerals** so digits align in columns down a list.
 > - The currency code is **de-emphasised** relative to the amount. Never render `NPR 12,450.00` at a
 >   single size and weight — follow the money-rendering rule below.
@@ -384,7 +385,7 @@ values on the right:
 
 - **Accounts** `landmark` — "4 active"
 - **People** `users` — "2 pending"
-- **Budgets** `target` — "3 this month"  *(new — the data layer ships, the UI is next)*
+- **Budgets** `target` — "3 this month" _(new — the data layer ships, the UI is next)_
 - **Categories** `tag` — "19"
 - **Settings** `settings`
 - **Cloud Sync** `cloud` — status text in `positive` when synced, `warning` when attention is required
@@ -650,6 +651,7 @@ Design these once as a set, since every screen uses them:
 Include these verbatim in the prompt; they prevent the failure modes design tools reach for.
 
 **Do not:**
+
 - Add a second accent colour, a gradient background, or a purple-to-blue mesh.
 - Use green and red decoratively. They mean money in and money out, and nothing else.
 - Draw a credit-card mockup with a fake number and a chip graphic on the home screen.
@@ -663,6 +665,7 @@ Include these verbatim in the prompt; they prevent the failure modes design tool
   spending score, no achievement badges.
 
 **Do:**
+
 - Leave space. If a screen looks sparse, it is probably right.
 - Let the largest number on any screen be the most important one, and let there be only one.
 - Use the hairline as the primary separator; reserve cards for genuine grouping.
@@ -690,36 +693,36 @@ Include these verbatim in the prompt; they prevent the failure modes design tool
 
 ## Appendix — Route to screen map
 
-| Route | Screen | Section |
-|---|---|---|
-| `(tabs)/index` | Home / Dashboard | A1 |
-| `(tabs)/transactions` | Transactions | A2 |
-| `(tabs)/add` | Quick Add | A3 |
-| `(tabs)/reports` | Reports | A4 |
-| `(tabs)/more` | More | A5 |
-| `transaction/expense/new` | Add Expense | B1 |
-| `transaction/income/new` | Add Income | B2 |
-| `transaction/transfer/new` | Transfer | B3 |
-| `transaction/people` | Lend / Borrow chooser | B4 |
-| `transaction/lend/new` | Record Money Given | B5 |
-| `transaction/borrow/new` | Record Money Taken | B6 |
-| `people/[id]/payment` | Record Payment | B7 |
-| `transaction/[id]` | Transaction Detail | B8 |
-| `transaction/[id]/edit` | Edit Transaction | B9 |
-| `accounts/index` | Accounts list | C1 |
-| `accounts/new` | New Account | C2 |
-| `accounts/[id]` | Edit Account | C3 |
-| `people/index` | People list | D1 |
-| `people/[id]` | Person detail | D2 |
-| `people/new` | New Person | D3 |
-| `categories/index` | Categories list | E1 |
-| `categories/new` | New Category | E2 |
-| `categories/[id]` | Edit Category | E2 |
-| *(not built)* | Budgets overview | F1 |
-| *(not built)* | Set a budget | F2 |
-| `settings/index` | Settings | G1 |
-| `AppLockGate` | App Lock | G2 |
-| `cloud-sync/index` | Cloud Sync | G3 |
-| `cloud-sync/setup` | Cloud Sync setup | G4 |
-| `cloud-sync/sign-in` | Sign In | G5 |
-| `cloud-sync/sign-up` | Create Account | G5 |
+| Route                      | Screen                | Section |
+| -------------------------- | --------------------- | ------- |
+| `(tabs)/index`             | Home / Dashboard      | A1      |
+| `(tabs)/transactions`      | Transactions          | A2      |
+| `(tabs)/add`               | Quick Add             | A3      |
+| `(tabs)/reports`           | Reports               | A4      |
+| `(tabs)/more`              | More                  | A5      |
+| `transaction/expense/new`  | Add Expense           | B1      |
+| `transaction/income/new`   | Add Income            | B2      |
+| `transaction/transfer/new` | Transfer              | B3      |
+| `transaction/people`       | Lend / Borrow chooser | B4      |
+| `transaction/lend/new`     | Record Money Given    | B5      |
+| `transaction/borrow/new`   | Record Money Taken    | B6      |
+| `people/[id]/payment`      | Record Payment        | B7      |
+| `transaction/[id]`         | Transaction Detail    | B8      |
+| `transaction/[id]/edit`    | Edit Transaction      | B9      |
+| `accounts/index`           | Accounts list         | C1      |
+| `accounts/new`             | New Account           | C2      |
+| `accounts/[id]`            | Edit Account          | C3      |
+| `people/index`             | People list           | D1      |
+| `people/[id]`              | Person detail         | D2      |
+| `people/new`               | New Person            | D3      |
+| `categories/index`         | Categories list       | E1      |
+| `categories/new`           | New Category          | E2      |
+| `categories/[id]`          | Edit Category         | E2      |
+| _(not built)_              | Budgets overview      | F1      |
+| _(not built)_              | Set a budget          | F2      |
+| `settings/index`           | Settings              | G1      |
+| `AppLockGate`              | App Lock              | G2      |
+| `cloud-sync/index`         | Cloud Sync            | G3      |
+| `cloud-sync/setup`         | Cloud Sync setup      | G4      |
+| `cloud-sync/sign-in`       | Sign In               | G5      |
+| `cloud-sync/sign-up`       | Create Account        | G5      |
