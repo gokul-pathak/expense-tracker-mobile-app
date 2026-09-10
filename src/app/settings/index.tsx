@@ -1,26 +1,27 @@
-import { useCallback, useState } from 'react';
 import { router, useFocusEffect } from 'expo-router';
-import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { View } from 'react-native';
 
-import { AppButton, AppText, Card, NativeDataNotice, Screen, ScreenState } from '@/components/ui';
-import { useCloudSync } from '@/features/sync/sync.provider';
-import { isCloudLinked } from '@/features/sync/sync-status';
-import { colors, radii, spacing } from '@/constants/theme';
 import {
-  getAppSettings,
-  isLocalFinanceDataAvailable,
-  listAccounts,
-  shareTransactionsCsv,
-  shareTransactionsJson,
-  shareFullDataJson,
-  createAndShareBackup,
-  chooseBackup,
-  restoreChosenBackup,
-  updateDefaultCurrency,
-} from '@/features/ui/data';
-import type { BackupPreview } from '@/features/backup/backup.types';
-import { getUserErrorMessage } from '@/features/ui/error-message';
-import { AUTO_LOCK_OPTIONS, type LockConfig } from '@/features/security/app-lock.types';
+  Banner,
+  BottomSheet,
+  Button,
+  Card,
+  Dialog,
+  ErrorState,
+  FormScreen,
+  ListRow,
+  NativeDataNotice,
+  PickerSheet,
+  Screen,
+  SectionHeader,
+  Skeleton,
+  Switch,
+  Text,
+  TextField,
+  useToast,
+  type PickerOption,
+} from '@/components/ui';
 import {
   changePin,
   disableAppLock,
@@ -30,449 +31,553 @@ import {
   getLockConfig,
   setAutoLockMs,
 } from '@/features/security/app-lock.service';
+import {
+  AUTO_LOCK_OPTIONS,
+  type AuthenticationResult,
+  type AutoLockTimeout,
+  type LockConfig,
+} from '@/features/security/app-lock.types';
+import { useCloudSync } from '@/features/sync/sync.provider';
+import { isCloudLinked } from '@/features/sync/sync-status';
+import {
+  chooseBackup,
+  createAndShareBackup,
+  getAppSettings,
+  isLocalFinanceDataAvailable,
+  restoreChosenBackup,
+  shareFullDataJson,
+  shareTransactionsCsv,
+  shareTransactionsJson,
+  updateDefaultCurrency,
+} from '@/features/ui/data';
+import { getUserErrorMessage } from '@/features/ui/error-message';
+import { useTheme, type ThemePreference } from '@/theme';
 
-const currencies = ['NPR', 'USD', 'INR'] as const;
+type PinMode = 'enable' | 'change' | 'disable';
+type Picker = 'currency' | 'theme' | 'autoLock' | null;
+type RestorePrompt = { text: string; message: string };
+
+const currencies: PickerOption<string>[] = [
+  { value: 'NPR', label: 'Nepalese Rupee', detail: 'NPR' },
+  { value: 'INR', label: 'Indian Rupee', detail: 'INR' },
+  { value: 'USD', label: 'US Dollar', detail: 'USD' },
+];
+
+const themes: PickerOption<ThemePreference>[] = [
+  { value: 'system', label: 'System', detail: 'Follow your device', icon: 'smartphone' },
+  { value: 'dark', label: 'Dark', icon: 'moon' },
+  { value: 'light', label: 'Light', icon: 'sun' },
+];
 
 export default function SettingsScreen() {
+  const { space, radius, size, preference, setPreference } = useTheme();
+  const toast = useToast();
   const sync = useCloudSync();
-  const cloudLinked = isCloudLinked(sync.status);
+
   const [currency, setCurrency] = useState<string>();
-  const [hasAccounts, setHasAccounts] = useState(false);
+  const [lock, setLock] = useState<LockConfig>();
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [dataOperation, setDataOperation] = useState('');
   const [error, setError] = useState('');
-  const [lockConfig, setLockConfig] = useState<LockConfig>();
-  const [securityMode, setSecurityMode] = useState<'enable' | 'change' | 'disable'>();
-  const [currentPin, setCurrentPin] = useState('');
-  const [newPin, setNewPin] = useState('');
-  const [confirmPin, setConfirmPin] = useState('');
-  const [securityBusy, setSecurityBusy] = useState(false);
+  const [picker, setPicker] = useState<Picker>(null);
+  const [pinMode, setPinMode] = useState<PinMode>();
+  const [busy, setBusy] = useState('');
+  const [restorePrompt, setRestorePrompt] = useState<RestorePrompt>();
+
   const load = useCallback(() => {
     if (!isLocalFinanceDataAvailable) return;
     setLoading(true);
     setError('');
     try {
       setCurrency(getAppSettings().defaultCurrency);
-      setHasAccounts(listAccounts().length > 0);
-      getLockConfig()
-        .then(setLockConfig)
-        .catch(() => setLockConfig(undefined));
     } catch (caught) {
       setError(getUserErrorMessage(caught));
     } finally {
       setLoading(false);
     }
+    void getLockConfig()
+      .then(setLock)
+      .catch(() => setLock(undefined));
   }, []);
   useFocusEffect(load);
-  if (!isLocalFinanceDataAvailable)
+
+  if (!isLocalFinanceDataAvailable) {
     return (
       <Screen>
         <NativeDataNotice />
       </Screen>
     );
-  if (loading)
+  }
+  if (loading) {
     return (
-      <Screen>
-        <ScreenState title="Loading settings" description="Reading your local settings..." />
-      </Screen>
+      <FormScreen title="Settings">
+        {[0, 1, 2].map((group) => (
+          <View key={group} style={{ marginTop: space.xxl }}>
+            <Skeleton width={110} height={12} radius="pill" style={{ marginBottom: space.md }} />
+            <Skeleton height={size.listRow * 2} radius={radius.card} />
+          </View>
+        ))}
+      </FormScreen>
     );
-  if (!currency)
+  }
+  if (!currency) {
     return (
-      <Screen>
-        <ScreenState
+      <FormScreen title="Settings">
+        <ErrorState
           title="Could not load settings"
-          description={error || 'Your local settings could not be read.'}
-          retry={load}
+          message={error || 'Your local settings could not be read.'}
+          onRetry={load}
         />
-      </Screen>
+      </FormScreen>
     );
-  const currentCurrency = currency;
+  }
+
+  const linked = isCloudLinked(sync.status);
+
   return (
-    <Screen scroll contentStyle={styles.content}>
-      <View style={styles.header}>
-        <AppText variant="title" weight="700">
-          Settings
-        </AppText>
-        <AppText color={colors.textMuted}>Choose the default currency for new records.</AppText>
-      </View>
-      <Card style={styles.card}>
-        <AppText weight="700">Default Currency</AppText>
-        <View style={styles.options}>
-          {currencies.map((item) => (
-            <Pressable
-              key={item}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: currentCurrency === item }}
-              onPress={() => setCurrency(item)}
-              style={[styles.option, currentCurrency === item && styles.selected]}
-            >
-              <AppText weight="600" color={currentCurrency === item ? colors.surface : colors.text}>
-                {item}
-              </AppText>
-            </Pressable>
-          ))}
+    <FormScreen title="Settings">
+      {error ? (
+        <View style={{ marginTop: space.sm }}>
+          <Banner tone="negative" message={error} />
         </View>
-      </Card>
-      <Card style={styles.card}>
-        <AppText weight="700">Privacy & Security</AppText>
-        {!lockConfig?.enabled ? (
-          <>
-            <AppText color={colors.textMuted}>
-              Set a 4 to 8 digit PIN to protect app access.
-            </AppText>
-            {securityMode === 'enable' ? (
-              securityForm('Create App Lock', 'Enable App Lock')
-            ) : (
-              <AppButton
-                label="Enable App Lock"
-                disabled={securityBusy || Boolean(dataOperation)}
-                onPress={() => beginSecurity('enable')}
-              />
-            )}
-          </>
-        ) : (
-          <>
-            <AppText color={colors.textMuted}>
-              App Lock is on. It protects app access, not the SQLite file itself.
-            </AppText>
-            <AppText weight="600">Auto-Lock</AppText>
-            <View style={styles.options}>
-              {AUTO_LOCK_OPTIONS.map((timeout) => (
-                <Pressable
-                  key={timeout}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: lockConfig.autoLockMs === timeout }}
-                  onPress={() => updateAutoLock(timeout)}
-                  style={[styles.option, lockConfig.autoLockMs === timeout && styles.selected]}
-                >
-                  <AppText
-                    weight="600"
-                    color={lockConfig.autoLockMs === timeout ? colors.surface : colors.text}
-                  >
-                    {timeout === 0 ? 'Immediately' : `${timeout / 60_000} min`}
-                  </AppText>
-                </Pressable>
-              ))}
-            </View>
-            <AppButton
-              label={lockConfig.biometricEnabled ? 'Disable Biometrics' : 'Enable Biometrics'}
-              disabled={securityBusy}
-              onPress={toggleBiometrics}
-            />
-            {securityMode === 'change' ? (
-              securityForm('Change PIN', 'Save New PIN')
-            ) : (
-              <AppButton
-                label="Change PIN"
-                disabled={securityBusy}
-                onPress={() => beginSecurity('change')}
-              />
-            )}
-            {securityMode === 'disable' ? (
-              securityForm('Disable App Lock', 'Disable App Lock')
-            ) : (
-              <AppButton
-                label="Disable App Lock"
-                disabled={securityBusy}
-                onPress={() => beginSecurity('disable')}
-              />
-            )}
-          </>
-        )}
-      </Card>
-      {hasAccounts ? (
-        <AppText color={colors.textMuted}>
-          Changing the default currency does not convert existing account amounts.
-        </AppText>
       ) : null}
-      {error ? <AppText color={colors.danger}>{error}</AppText> : null}
-      <AppButton
-        label={saving ? 'Saving...' : 'Save Settings'}
-        disabled={saving || Boolean(dataOperation)}
-        onPress={save}
-      />
-      <Card style={styles.card}>
-        <AppText weight="700">Cloud Sync</AppText>
-        <AppText color={colors.textMuted}>
-          Cloud sync is optional. Your financial data always stays on this device as well.
-        </AppText>
-        <AppButton label="Cloud Sync" onPress={() => router.push('/cloud-sync' as never)} />
-      </Card>
-      <Card style={styles.card}>
-        <AppText weight="700">Data</AppText>
-        <AppText color={colors.textMuted}>
-          Exports are read-only and include archived history.
-        </AppText>
-        <AppButton
-          label={dataOperation === 'csv' ? 'Exporting...' : 'Export Transactions (CSV)'}
-          disabled={Boolean(dataOperation)}
-          onPress={() => run('csv', shareTransactionsCsv)}
-        />
-        <AppButton
-          label={dataOperation === 'json' ? 'Exporting...' : 'Export Transactions (JSON)'}
-          disabled={Boolean(dataOperation)}
-          onPress={() => run('json', shareTransactionsJson)}
-        />
-        <AppButton
-          label={dataOperation === 'full' ? 'Exporting...' : 'Export All Data (JSON)'}
-          disabled={Boolean(dataOperation)}
-          onPress={() => run('full', shareFullDataJson)}
-        />
-      </Card>
-      <Card style={styles.card}>
-        <AppText weight="700">Backup & Restore</AppText>
-        <AppText color={colors.textMuted}>
-          Restore replaces all current local financial data. It does not merge backups.
-        </AppText>
-        {cloudLinked ? (
-          <AppText color={colors.danger}>
-            This device is linked to cloud sync. Restoring a backup unlinks it, and you will choose
-            which copy to keep before syncing again. Nothing is uploaded automatically.
-          </AppText>
+
+      <View style={{ marginTop: space.lg }}>
+        <SectionHeader title="Preferences" />
+        <Card padding="none">
+          <ListRow
+            icon="coins"
+            label="Default Currency"
+            value={currency}
+            onPress={() => setPicker('currency')}
+          />
+          <ListRow
+            icon="moon"
+            label="Theme"
+            value={themeLabel(preference)}
+            onPress={() => setPicker('theme')}
+            last
+          />
+        </Card>
+        <Text variant="caption" tone="tertiary" style={{ marginTop: space.sm }}>
+          Changing the default currency does not convert amounts you have already recorded.
+        </Text>
+      </View>
+
+      <View style={{ marginTop: space.xxl }}>
+        <SectionHeader title="Privacy & Security" />
+        <Card padding="none">
+          <ListRow
+            icon="lock"
+            label="App Lock"
+            detail={lock?.enabled ? undefined : 'A PIN is asked for when you open the app'}
+            chevron={false}
+            trailing={
+              <Switch
+                value={lock?.enabled ?? false}
+                disabled={lock === undefined || busy !== ''}
+                accessibilityLabel="App Lock"
+                onValueChange={(next) => setPinMode(next ? 'enable' : 'disable')}
+              />
+            }
+            last={!lock?.enabled}
+          />
+          {lock?.enabled ? (
+            <>
+              <ListRow
+                icon="scan-face"
+                label="Biometrics"
+                chevron={false}
+                trailing={
+                  <Switch
+                    value={lock.biometricEnabled}
+                    disabled={busy !== ''}
+                    accessibilityLabel="Biometrics"
+                    onValueChange={toggleBiometrics}
+                  />
+                }
+              />
+              <ListRow
+                icon="clock"
+                label="Auto-Lock"
+                value={autoLockLabel(lock.autoLockMs)}
+                onPress={() => setPicker('autoLock')}
+              />
+              <ListRow
+                icon="key-round"
+                label="Change PIN"
+                onPress={() => setPinMode('change')}
+                last
+              />
+            </>
+          ) : null}
+        </Card>
+      </View>
+
+      <View style={{ marginTop: space.xxl }}>
+        <SectionHeader title="Cloud Sync" />
+        <Card padding="none">
+          <ListRow
+            icon={linked ? 'cloud-check' : 'cloud'}
+            label="Cloud Sync"
+            value={linked ? 'Linked' : 'Off'}
+            valueTone={linked ? 'positive' : 'tertiary'}
+            chevron={false}
+            onPress={() => router.push('/cloud-sync' as never)}
+            last
+          />
+        </Card>
+      </View>
+
+      <View style={{ marginTop: space.xxl }}>
+        <SectionHeader title="Export" />
+        <Card padding="none">
+          <ListRow
+            icon="file-spreadsheet"
+            label="Transactions as CSV"
+            onPress={() => run('csv', shareTransactionsCsv)}
+            disabled={busy !== ''}
+          />
+          <ListRow
+            icon="file-json"
+            label="Transactions as JSON"
+            onPress={() => run('json', shareTransactionsJson)}
+            disabled={busy !== ''}
+          />
+          <ListRow
+            icon="database"
+            label="Everything as JSON"
+            onPress={() => run('full', shareFullDataJson)}
+            disabled={busy !== ''}
+            last
+          />
+        </Card>
+      </View>
+
+      <View style={{ marginTop: space.xxl }}>
+        <SectionHeader title="Backup & Restore" />
+        {linked ? (
+          <View style={{ marginBottom: space.md }}>
+            <Banner
+              tone="warning"
+              message="Restoring a backup unlinks this device from cloud sync. You choose which copy to keep afterwards."
+            />
+          </View>
         ) : null}
-        <AppButton
-          label={dataOperation === 'backup' ? 'Creating backup...' : 'Create Backup'}
-          disabled={Boolean(dataOperation)}
-          onPress={() => run('backup', createAndShareBackup)}
-        />
-        <AppButton
-          label={dataOperation === 'restore' ? 'Restoring backup...' : 'Restore Backup'}
-          disabled={Boolean(dataOperation)}
-          onPress={startRestore}
-        />
-      </Card>
-    </Screen>
+        <Card padding="none">
+          <ListRow
+            icon="download"
+            label="Create Backup"
+            onPress={() => run('backup', createAndShareBackup)}
+            disabled={busy !== ''}
+          />
+          <ListRow
+            icon="rotate-ccw"
+            label="Restore Backup"
+            onPress={pickBackup}
+            disabled={busy !== ''}
+            last
+          />
+        </Card>
+      </View>
+
+      <PickerSheet
+        visible={picker === 'currency'}
+        onClose={() => setPicker(null)}
+        title="Default currency"
+        options={currencies}
+        selected={currency}
+        onSelect={saveCurrency}
+      />
+      <PickerSheet
+        visible={picker === 'theme'}
+        onClose={() => setPicker(null)}
+        title="Theme"
+        options={themes}
+        selected={preference}
+        onSelect={setPreference}
+      />
+      <PickerSheet
+        visible={picker === 'autoLock'}
+        onClose={() => setPicker(null)}
+        title="Lock after"
+        options={AUTO_LOCK_OPTIONS.map((value) => ({
+          value,
+          label: autoLockLabel(value),
+        }))}
+        selected={lock?.autoLockMs}
+        onSelect={saveAutoLock}
+      />
+
+      <PinSheet
+        mode={pinMode}
+        busy={busy === 'pin'}
+        onClose={() => setPinMode(undefined)}
+        onSubmit={submitPin}
+      />
+
+      <Dialog
+        visible={restorePrompt !== undefined}
+        title="Restore this backup?"
+        message={restorePrompt?.message ?? ''}
+        confirmLabel="Restore"
+        destructive
+        loading={busy === 'restore'}
+        onCancel={() => setRestorePrompt(undefined)}
+        onConfirm={restore}
+      />
+    </FormScreen>
   );
-  function save() {
-    if (saving) return;
-    setSaving(true);
+
+  function saveCurrency(next: string) {
     setError('');
     try {
-      setCurrency(updateDefaultCurrency(currentCurrency).defaultCurrency);
+      setCurrency(updateDefaultCurrency(next).defaultCurrency);
+      toast.show({ message: 'Default currency set to ' + next });
     } catch (caught) {
       setError(getUserErrorMessage(caught));
-    } finally {
-      setSaving(false);
     }
   }
-  function beginSecurity(mode: 'enable' | 'change' | 'disable') {
-    setSecurityMode(mode);
-    setCurrentPin('');
-    setNewPin('');
-    setConfirmPin('');
+
+  function saveAutoLock(next: AutoLockTimeout) {
     setError('');
+    void setAutoLockMs(next)
+      .then(getLockConfig)
+      .then(setLock)
+      .catch((caught: unknown) => setError(getUserErrorMessage(caught)));
   }
-  function securityForm(title: string, submitLabel: string) {
-    const needsCurrent = securityMode === 'change' || securityMode === 'disable';
-    return (
-      <View style={styles.securityForm}>
-        <AppText weight="600">{title}</AppText>
+
+  function toggleBiometrics(next: boolean) {
+    setError('');
+    setBusy('biometrics');
+    const action = next
+      ? enableBiometrics().then((result) => {
+          if (result.status !== 'success') {
+            throw new Error(
+              result.status === 'biometric_unavailable'
+                ? 'This device has no biometrics set up.'
+                : 'Biometric authentication did not complete.',
+            );
+          }
+        })
+      : disableBiometrics();
+    void action
+      .then(getLockConfig)
+      .then(setLock)
+      .catch((caught: unknown) => setError(getUserErrorMessage(caught)))
+      .finally(() => setBusy(''));
+  }
+
+  /**
+   * Enabling, changing and disabling the lock all take a PIN, so they share one
+   * sheet and differ only in which fields it asks for.
+   */
+  function submitPin(mode: PinMode, values: { current: string; next: string }) {
+    setError('');
+    setBusy('pin');
+    const action =
+      mode === 'enable'
+        ? enableAppLock(values.next)
+        : mode === 'change'
+          ? changePin(values.current, values.next).then(assertAuthenticated)
+          : disableAppLock(values.current).then(assertAuthenticated);
+
+    void action
+      .then(getLockConfig)
+      .then((config) => {
+        setLock(config);
+        setPinMode(undefined);
+        toast.show({
+          message:
+            mode === 'enable'
+              ? 'App Lock is on'
+              : mode === 'change'
+                ? 'PIN changed'
+                : 'App Lock is off',
+        });
+      })
+      .catch((caught: unknown) => setError(getUserErrorMessage(caught)))
+      .finally(() => setBusy(''));
+  }
+
+  function run(key: string, action: () => Promise<void>) {
+    setError('');
+    setBusy(key);
+    void action()
+      .catch((caught: unknown) => setError(getUserErrorMessage(caught)))
+      .finally(() => setBusy(''));
+  }
+
+  function pickBackup() {
+    setError('');
+    setBusy('choose');
+    void chooseBackup()
+      .then((chosen) => {
+        if (!chosen) return;
+        const { preview } = chosen;
+        setRestorePrompt({
+          text: chosen.text,
+          message:
+            'Taken ' +
+            new Date(preview.createdAt).toLocaleString() +
+            ' · ' +
+            preview.accounts +
+            ' accounts, ' +
+            preview.transactions +
+            ' transactions, ' +
+            preview.people +
+            ' people, in ' +
+            preview.currency +
+            '. Everything currently on this device is replaced.',
+        });
+      })
+      .catch((caught: unknown) => setError(getUserErrorMessage(caught)))
+      .finally(() => setBusy(''));
+  }
+
+  function restore() {
+    const prompt = restorePrompt;
+    if (!prompt) return;
+    setBusy('restore');
+    try {
+      restoreChosenBackup(prompt.text);
+      setRestorePrompt(undefined);
+      load();
+      sync.refresh();
+      toast.show({
+        message: linked
+          ? 'Restored. This device is no longer linked to cloud sync.'
+          : 'Backup restored.',
+        duration: 5000,
+      });
+    } catch (caught) {
+      console.error('Backup restore failed', caught);
+      setRestorePrompt(undefined);
+      setError('Backup could not be restored. Your existing data was not changed.');
+    } finally {
+      setBusy('');
+    }
+  }
+}
+
+/** One sheet for all three PIN operations, asking only for the fields each needs. */
+function PinSheet({
+  mode,
+  busy,
+  onClose,
+  onSubmit,
+}: {
+  mode?: PinMode;
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (mode: PinMode, values: { current: string; next: string }) => void;
+}) {
+  const { space } = useTheme();
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [mismatch, setMismatch] = useState(false);
+
+  const needsCurrent = mode === 'change' || mode === 'disable';
+  const needsNew = mode === 'enable' || mode === 'change';
+  const title =
+    mode === 'enable' ? 'Set a PIN' : mode === 'change' ? 'Change your PIN' : 'Turn off App Lock';
+
+  const reset = () => {
+    setCurrent('');
+    setNext('');
+    setConfirm('');
+    setMismatch(false);
+  };
+
+  return (
+    <BottomSheet
+      visible={mode !== undefined}
+      onClose={() => {
+        reset();
+        onClose();
+      }}
+      title={title}
+      doneLabel="Cancel"
+    >
+      <View style={{ gap: space.lg }}>
         {needsCurrent ? (
-          <TextInput
-            value={currentPin}
-            onChangeText={setCurrentPin}
+          <TextField
+            label="Current PIN"
+            value={current}
+            onChangeText={setCurrent}
             secureTextEntry
             keyboardType="number-pad"
             maxLength={8}
-            autoComplete="off"
-            placeholder="Current PIN"
-            style={styles.pinInput}
           />
         ) : null}
-        {securityMode !== 'disable' ? (
+        {needsNew ? (
           <>
-            <TextInput
-              value={newPin}
-              onChangeText={setNewPin}
+            <TextField
+              label={mode === 'change' ? 'New PIN' : 'PIN'}
+              value={next}
+              onChangeText={setNext}
               secureTextEntry
               keyboardType="number-pad"
               maxLength={8}
-              autoComplete="off"
-              placeholder="New PIN"
-              style={styles.pinInput}
             />
-            <TextInput
-              value={confirmPin}
-              onChangeText={setConfirmPin}
+            <TextField
+              label="Confirm PIN"
+              value={confirm}
+              onChangeText={(value) => {
+                setConfirm(value);
+                setMismatch(false);
+              }}
               secureTextEntry
               keyboardType="number-pad"
               maxLength={8}
-              autoComplete="off"
-              placeholder="Confirm PIN"
-              style={styles.pinInput}
+              error={mismatch ? 'PIN entries do not match.' : undefined}
             />
+            <Text variant="caption" tone="tertiary">
+              Four to eight digits. The PIN is stored on this device only and never synced.
+            </Text>
           </>
         ) : null}
-        <AppButton
-          label={securityBusy ? 'Saving...' : submitLabel}
-          disabled={securityBusy}
-          onPress={submitSecurity}
-        />
-        <AppButton
-          label="Cancel"
-          disabled={securityBusy}
-          onPress={() => setSecurityMode(undefined)}
+        <Button
+          label={mode === 'disable' ? 'Turn Off' : 'Save PIN'}
+          large
+          loading={busy}
+          onPress={() => {
+            if (!mode) return;
+            if (needsNew && next !== confirm) {
+              setMismatch(true);
+              return;
+            }
+            onSubmit(mode, { current, next });
+            reset();
+          }}
         />
       </View>
-    );
-  }
-  async function submitSecurity() {
-    if (!securityMode) return;
-    if (securityMode !== 'disable' && newPin !== confirmPin) {
-      setError('PIN entries do not match.');
-      return;
-    }
-    setSecurityBusy(true);
-    setError('');
-    try {
-      if (securityMode === 'enable') await enableAppLock(newPin);
-      else if (securityMode === 'change') {
-        const result = await changePin(currentPin, newPin);
-        if (result.status !== 'success')
-          throw new Error(
-            result.status === 'rate_limited'
-              ? `Try again in ${Math.ceil(result.retryAfterMs / 1000)} seconds.`
-              : 'Current PIN is incorrect.',
-          );
-      } else {
-        const result = await disableAppLock(currentPin);
-        if (result.status !== 'success')
-          throw new Error(
-            result.status === 'rate_limited'
-              ? `Try again in ${Math.ceil(result.retryAfterMs / 1000)} seconds.`
-              : 'Current PIN is incorrect.',
-          );
-      }
-      setLockConfig(await getLockConfig());
-      setSecurityMode(undefined);
-      setCurrentPin('');
-      setNewPin('');
-      setConfirmPin('');
-    } catch (caught) {
-      setError(getUserErrorMessage(caught));
-    } finally {
-      setSecurityBusy(false);
-    }
-  }
-  async function toggleBiometrics() {
-    if (!lockConfig) return;
-    setSecurityBusy(true);
-    setError('');
-    try {
-      if (lockConfig.biometricEnabled) await disableBiometrics();
-      else {
-        const result = await enableBiometrics();
-        if (result.status !== 'success')
-          throw new Error(
-            result.status === 'cancelled'
-              ? 'Biometric authentication was cancelled.'
-              : 'Biometrics are unavailable.',
-          );
-      }
-      setLockConfig(await getLockConfig());
-    } catch (caught) {
-      setError(getUserErrorMessage(caught));
-    } finally {
-      setSecurityBusy(false);
-    }
-  }
-  async function updateAutoLock(timeout: (typeof AUTO_LOCK_OPTIONS)[number]) {
-    if (securityBusy) return;
-    setSecurityBusy(true);
-    try {
-      await setAutoLockMs(timeout);
-      setLockConfig(await getLockConfig());
-    } catch (caught) {
-      setError(getUserErrorMessage(caught));
-    } finally {
-      setSecurityBusy(false);
-    }
-  }
-  async function run(name: string, operation: () => Promise<unknown>) {
-    if (dataOperation) return;
-    setDataOperation(name);
-    setError('');
-    try {
-      await operation();
-    } catch (caught) {
-      setError(getUserErrorMessage(caught));
-    } finally {
-      setDataOperation('');
-    }
-  }
-  async function startRestore() {
-    if (dataOperation) return;
-    setDataOperation('restore');
-    setError('');
-    let awaitingConfirmation = false;
-    try {
-      const selected = await chooseBackup();
-      if (!selected) return;
-      awaitingConfirmation = true;
-      confirmRestore(selected.text, selected.preview);
-    } catch (caught) {
-      setError(getUserErrorMessage(caught));
-    } finally {
-      if (!awaitingConfirmation) setDataOperation('');
-    }
-  }
-  function confirmRestore(text: string, preview: BackupPreview) {
-    Alert.alert(
-      'Restore this backup?',
-      `Backup date: ${new Date(preview.createdAt).toLocaleString()}\nAccounts: ${preview.accounts}\nTransactions: ${preview.transactions}\nPeople: ${preview.people}\nCurrency: ${preview.currency}\n\nYour current local data will be replaced with this backup.`,
-      [
-        { text: 'Cancel', style: 'cancel', onPress: () => setDataOperation('') },
-        {
-          text: 'Restore',
-          style: 'destructive',
-          onPress: () => {
-            setDataOperation('restore');
-            try {
-              restoreChosenBackup(text);
-              load();
-              sync.refresh();
-              Alert.alert(
-                'Backup restored',
-                cloudLinked
-                  ? 'Your local financial data has been replaced. This device is no longer linked to cloud sync — open Cloud Sync to choose which copy to keep.'
-                  : 'Your local financial data has been replaced successfully.',
-              );
-            } catch (caught) {
-              setError('Backup could not be restored. Your existing data was not changed.');
-              console.error('Backup restore failed', caught);
-            } finally {
-              setDataOperation('');
-            }
-          },
-        },
-      ],
-      { onDismiss: () => setDataOperation('') },
-    );
-  }
+    </BottomSheet>
+  );
 }
-const styles = StyleSheet.create({
-  content: { gap: spacing.lg },
-  header: { gap: spacing.sm },
-  card: { gap: spacing.md },
-  options: { flexDirection: 'row', gap: spacing.sm },
-  option: {
-    flex: 1,
-    minHeight: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-  },
-  selected: { backgroundColor: colors.primary, borderColor: colors.primary },
-  securityForm: { gap: spacing.sm },
-  pinInput: {
-    minHeight: 44,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    paddingHorizontal: spacing.md,
-    color: colors.text,
-  },
-});
+
+/**
+ * The service reports a refused attempt as a result rather than throwing, so
+ * the refusal has to be turned into an error here for the promise chain to
+ * treat it as a failure rather than a success.
+ */
+function assertAuthenticated(result: AuthenticationResult) {
+  if (result.status === 'success') return;
+  if (result.status === 'invalid_pin') throw new Error('That PIN is not correct.');
+  if (result.status === 'rate_limited') {
+    throw new Error(
+      'Too many attempts. Try again in ' + Math.ceil(result.retryAfterMs / 1000) + ' seconds.',
+    );
+  }
+  throw new Error('That did not complete. Try again.');
+}
+
+function themeLabel(preference: ThemePreference) {
+  return preference === 'system' ? 'System' : preference === 'dark' ? 'Dark' : 'Light';
+}
+
+function autoLockLabel(ms: number) {
+  if (ms === 0) return 'Immediately';
+  const minutes = Math.round(ms / 60_000);
+  return minutes === 1 ? 'After 1 minute' : 'After ' + minutes + ' minutes';
+}

@@ -57,9 +57,9 @@ out on one screen.
 | E2  | New / Edit Category                     | `categories/new.tsx`, `[id].tsx` | Spec   | 4     | ☑    |
 | F1  | Budgets overview                        | `budgets/index.tsx`              | Drawn  | 5     | ☑    |
 | F2  | Set a budget                            | `budgets/new.tsx`, `[id].tsx`    | Spec   | 5     | ☑    |
-| G1  | Settings                                | `settings/index.tsx`             | Drawn  | 6     | ☐    |
-| G3  | Cloud Sync                              | `cloud-sync/index.tsx`           | Spec   | 6     | ☐    |
-| G4  | Cloud Sync setup                        | `cloud-sync/setup.tsx`           | Spec   | 6     | ☐    |
+| G1  | Settings                                | `settings/index.tsx`             | Drawn  | 6     | ☑    |
+| G3  | Cloud Sync                              | `cloud-sync/index.tsx`           | Spec   | 6     | ☑    |
+| G4  | Cloud Sync setup                        | `cloud-sync/setup.tsx`           | Spec   | 6     | ☑    |
 | G2  | App Lock (PIN)                          | `AppLockGate.native.tsx`         | Drawn  | 7     | ☐    |
 | G5a | Sign In                                 | `cloud-sync/sign-in.tsx`         | Drawn  | 7     | ☐    |
 | G5b | Create Account                          | `cloud-sync/sign-up.tsx`         | Drawn  | 7     | ☐    |
@@ -154,6 +154,36 @@ categories are not offered: a budget is a ceiling on spending, and income has no
 
 The caption explains the one thing people get wrong — an overall budget already includes the
 categories under it and is never added to them.
+
+### G1 · Settings
+
+Grouped `ListRow` lists: Preferences (currency, theme) · Privacy & Security (App Lock and Biometrics
+as `Switch`, Auto-Lock and Change PIN as rows) · Cloud Sync · Export · Backup & Restore.
+
+Choices apply as they are made; the old explicit "Save Settings" button is gone. A picker's choice
+is complete the moment it is made, and a settings screen that can be left in an unsaved state is a
+way to lose a change silently.
+
+The three PIN operations — set, change, turn off — share one sheet and differ only in which fields
+it asks for.
+
+### G3 · Cloud Sync
+
+A status card whose badge colour says only what the status supports: green means a completed cycle
+and nothing weaker. Actions change with the state (signed out, signed in but unlinked, linked), and
+the details list appears only once linked.
+
+Signing out of a linked device is a data decision, so it opens a sheet with the two outcomes named
+rather than a dialog with a yes and a no. Removing the local copy is confirmed again on its own.
+
+### G4 · Cloud Sync setup
+
+Inspect both sides, state what each side holds in full sentences, then offer one card per outcome.
+The warning belongs on the card as well as in the confirmation, so the consequence is readable
+before anything is tapped.
+
+While linking runs there is no back control at all. Once the critical section starts there is no
+safe cancel, so the screen must not appear to offer one.
 
 ### B3 · Transfer
 

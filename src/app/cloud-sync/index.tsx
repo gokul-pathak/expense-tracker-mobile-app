@@ -1,20 +1,32 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
-import { AppButton, AppText, Card, Screen } from '@/components/ui';
-import { colors, spacing } from '@/constants/theme';
+import {
+  Banner,
+  BottomSheet,
+  Button,
+  Card,
+  Dialog,
+  FormScreen,
+  Icon,
+  ListRow,
+  SectionHeader,
+  Text,
+  type IconName,
+} from '@/components/ui';
 import { useCloudAuth } from '@/features/cloud-auth/auth.provider';
 import { useCloudSync } from '@/features/sync/sync.provider';
-import { removeCloudDataFromDevice, signOutKeepingLocalData } from '@/features/sync/sync.service';
 import {
   describeLastSync,
   describePendingChanges,
   describeSyncError,
   describeSyncStatus,
 } from '@/features/sync/sync-presentation';
-import { canSyncNow, isCloudLinked } from '@/features/sync/sync-status';
+import { canSyncNow, isCloudLinked, type CloudSyncStatus } from '@/features/sync/sync-status';
+import { removeCloudDataFromDevice, signOutKeepingLocalData } from '@/features/sync/sync.service';
 import { getUserErrorMessage } from '@/features/ui/error-message';
+import { useTheme, withAlpha } from '@/theme';
 
 /**
  * Cloud Sync.
@@ -25,10 +37,14 @@ import { getUserErrorMessage } from '@/features/ui/error-message';
  * screens, from SQLite.
  */
 export default function CloudSyncScreen() {
+  const { palette, space } = useTheme();
   const { user, status: authStatus } = useCloudAuth();
   const sync = useCloudSync();
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [signOutOpen, setSignOutOpen] = useState(false);
+  const [confirmPlain, setConfirmPlain] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -43,84 +59,193 @@ export default function CloudSyncScreen() {
   const email = user?.email ?? 'Your cloud account';
   const pending = describePendingChanges(sync.pendingChanges, sync.status === 'offline');
   const linked = isCloudLinked(sync.status);
+  const problem = describeSyncError(sync.lastError);
+  const tone = statusTone(sync.status);
 
   return (
-    <Screen scroll contentStyle={styles.content}>
-      <View style={styles.header}>
-        <AppText variant="title" weight="700">
-          Cloud Sync
-        </AppText>
-        <AppText color={colors.textMuted}>
-          Your financial data can be synchronized with your cloud account across devices. It is
-          always stored on this device as well.
-        </AppText>
-      </View>
-
-      <Card style={styles.card}>
-        <View accessibilityRole="summary" accessibilityLiveRegion="polite" style={styles.status}>
-          <AppText weight="700">{copy.title}</AppText>
-          <AppText color={colors.textMuted}>{copy.description}</AppText>
-          {pending ? <AppText color={colors.textMuted}>{pending}</AppText> : null}
+    <FormScreen title="Cloud Sync">
+      {error ? (
+        <View style={{ marginTop: space.sm }}>
+          <Banner tone="negative" message={error} />
         </View>
-        {sync.status === 'unconfigured' ? null : linked ? (
-          <LinkedActions />
-        ) : authStatus === 'signed_in' ? (
-          <UnlinkedActions />
-        ) : (
-          <SignedOutActions />
+      ) : null}
+
+      <Card hero style={{ marginTop: space.lg }}>
+        <View
+          accessibilityRole="summary"
+          accessibilityLiveRegion="polite"
+          style={[styles.status, { gap: space.md + 2 }]}
+        >
+          <View
+            style={[
+              styles.badge,
+              {
+                borderRadius: 14,
+                backgroundColor: withAlpha(palette[tone.color], 0.14),
+              },
+            ]}
+          >
+            <Icon name={tone.icon} size="row" color={palette[tone.color]} />
+          </View>
+          <View style={styles.statusText}>
+            <Text variant="bodyStrong">{copy.title}</Text>
+            <Text variant="small" tone="secondary" style={{ marginTop: 2 }}>
+              {copy.description}
+            </Text>
+            {pending ? (
+              <Text variant="caption" tone="tertiary" style={{ marginTop: space.xs }}>
+                {pending}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+
+        {sync.status === 'unconfigured' ? null : (
+          <View style={{ marginTop: space.xl, gap: space.sm }}>
+            {linked ? (
+              <LinkedActions />
+            ) : authStatus === 'signed_in' ? (
+              <UnlinkedActions />
+            ) : (
+              <SignedOutActions />
+            )}
+          </View>
         )}
       </Card>
 
       {linked ? (
-        <Card style={styles.card}>
-          <AppText weight="700">Details</AppText>
-          <Detail label="Cloud account" value={email} />
-          <Detail
-            label="Last successful sync"
-            value={describeLastSync(sync.lastSuccessfulSyncAt)}
-          />
-          <Detail label="Changes waiting to upload" value={String(sync.pendingChanges)} />
-          <Detail label="Current status" value={copy.title} />
-          {describeSyncError(sync.lastError) ? (
-            <Detail label="Last problem" value={describeSyncError(sync.lastError)!} />
-          ) : null}
-        </Card>
+        <View style={{ marginTop: space.xxl }}>
+          <SectionHeader title="Details" />
+          <Card padding="none">
+            <ListRow label="Cloud account" value={email} valueTone="primary" chevron={false} />
+            <ListRow
+              label="Last successful sync"
+              value={describeLastSync(sync.lastSuccessfulSyncAt)}
+              chevron={false}
+            />
+            <ListRow
+              label="Changes waiting to upload"
+              value={String(sync.pendingChanges)}
+              chevron={false}
+              last={problem === null}
+            />
+            {problem ? (
+              <ListRow
+                label="Last problem"
+                value={problem}
+                valueTone="negative"
+                chevron={false}
+                last
+              />
+            ) : null}
+          </Card>
+        </View>
       ) : null}
 
-      {error ? (
-        <AppText color={colors.danger} accessibilityLiveRegion="polite">
-          {error}
-        </AppText>
-      ) : null}
-    </Screen>
+      <Text variant="caption" tone="tertiary" style={{ marginTop: space.xl }}>
+        Your records are always kept on this device. Sync adds a copy in your cloud account so other
+        devices can read it.
+      </Text>
+
+      <BottomSheet
+        visible={signOutOpen}
+        onClose={() => setSignOutOpen(false)}
+        title="Sign out of cloud sync?"
+        doneLabel="Cancel"
+      >
+        <View style={{ gap: space.md }}>
+          {sync.pendingChanges > 0 ? (
+            <Banner
+              tone="warning"
+              message={
+                describePendingChanges(sync.pendingChanges, false) +
+                '. Those changes have not been uploaded yet.'
+              }
+            />
+          ) : null}
+          <Text variant="body" tone="secondary">
+            Choose what happens to the financial data on this device. Your cloud data is not deleted
+            either way.
+          </Text>
+          <View style={{ marginTop: space.sm, gap: space.sm }}>
+            <Button
+              label="Keep Data on This Device"
+              onPress={() => {
+                setSignOutOpen(false);
+                void performSignOut('keep');
+              }}
+            />
+            <Button
+              label="Remove From This Device"
+              variant="destructive"
+              fullWidth
+              onPress={() => {
+                setSignOutOpen(false);
+                setConfirmRemove(true);
+              }}
+            />
+          </View>
+        </View>
+      </BottomSheet>
+
+      <Dialog
+        visible={confirmPlain}
+        title="Sign out of your cloud account?"
+        message="This device has not been linked, so no financial data is affected."
+        confirmLabel="Sign Out"
+        destructive
+        loading={busy === 'sign-out'}
+        onCancel={() => setConfirmPlain(false)}
+        onConfirm={() => {
+          setConfirmPlain(false);
+          void performSignOut('keep');
+        }}
+      />
+
+      <Dialog
+        visible={confirmRemove}
+        title="Remove this device's copy?"
+        message="This removes the local copy from this device. Your cloud data remains in your cloud account and can be downloaded again by signing in."
+        confirmLabel="Remove"
+        destructive
+        loading={busy === 'sign-out'}
+        onCancel={() => setConfirmRemove(false)}
+        onConfirm={() => {
+          setConfirmRemove(false);
+          void performSignOut('remove');
+        }}
+      />
+    </FormScreen>
   );
 
   function SignedOutActions() {
     return (
-      <View style={styles.actions}>
-        <AppText color={colors.textMuted}>
+      <>
+        <Text variant="small" tone="secondary" style={{ marginBottom: space.sm }}>
           Sign in to sync with your other devices. You can keep using the app without an account.
-        </AppText>
-        <AppButton label="Sign In" onPress={() => router.push('/cloud-sync/sign-in' as never)} />
-        <AppButton
+        </Text>
+        <Button label="Sign In" onPress={() => router.push('/cloud-sync/sign-in' as never)} />
+        <Button
           label="Create Account"
           variant="secondary"
           onPress={() => router.push('/cloud-sync/sign-up' as never)}
         />
-      </View>
+      </>
     );
   }
 
   function UnlinkedActions() {
     return (
-      <View style={styles.actions}>
-        <Detail label="Cloud account" value={email} />
-        <AppButton
+      <>
+        <Text variant="small" tone="secondary" style={{ marginBottom: space.sm }}>
+          Signed in as {email}. This device is not linked yet.
+        </Text>
+        <Button
           label="Set Up Cloud Sync"
           onPress={() => router.push('/cloud-sync/setup' as never)}
         />
-        <AppButton label="Sign Out" variant="secondary" onPress={confirmPlainSignOut} />
-      </View>
+        <Button label="Sign Out" variant="secondary" onPress={() => setConfirmPlain(true)} />
+      </>
     );
   }
 
@@ -128,32 +253,36 @@ export default function CloudSyncScreen() {
     const mismatch = sync.status === 'account_mismatch';
     const needsReconciliation = sync.status === 'reconciliation_required';
     return (
-      <View style={styles.actions}>
+      <>
         {mismatch ? (
-          <AppText color={colors.danger}>
-            Sync is paused. Sign out of this account, then sign in with the account this device is
-            linked to.
-          </AppText>
+          <View style={{ marginBottom: space.sm }}>
+            <Banner
+              tone="negative"
+              message="Sync is paused. Sign out of this account, then sign in with the account this device is linked to."
+            />
+          </View>
         ) : null}
         {needsReconciliation ? (
-          <AppButton
+          <Button
             label="Review Sync Status"
             onPress={() => router.push('/cloud-sync/setup' as never)}
           />
         ) : (
-          <AppButton
-            label={sync.syncing ? 'Syncing…' : 'Sync Now'}
+          <Button
+            label="Sync Now"
+            loading={sync.syncing}
             disabled={sync.syncing || busy !== '' || !canSyncNow(sync.status)}
-            onPress={runSyncNow}
+            onPress={() => void runSyncNow()}
           />
         )}
-        <AppButton
-          label={busy === 'sign-out' ? 'Signing out…' : 'Sign Out'}
+        <Button
+          label="Sign Out"
           variant="secondary"
+          loading={busy === 'sign-out'}
           disabled={busy !== '' || sync.syncing}
-          onPress={confirmLinkedSignOut}
+          onPress={() => setSignOutOpen(true)}
         />
-      </View>
+      </>
     );
   }
 
@@ -166,59 +295,6 @@ export default function CloudSyncScreen() {
       result.status === 'success' ? null : (result.status as string),
     );
     if (result.status !== 'success' && message !== null) setError(message);
-  }
-
-  function confirmPlainSignOut() {
-    Alert.alert(
-      'Sign out of your cloud account?',
-      'This device has not been linked, so no financial data is affected.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Sign Out', style: 'destructive', onPress: () => void performSignOut('keep') },
-      ],
-    );
-  }
-
-  /**
-   * Signing out of a linked device is a data decision, not just an auth one, so
-   * unsent work is surfaced first and the choice is made explicitly.
-   */
-  function confirmLinkedSignOut() {
-    const warning =
-      sync.pendingChanges > 0
-        ? `${describePendingChanges(sync.pendingChanges, false)}. Those changes have not been uploaded yet.\n\n`
-        : '';
-    Alert.alert(
-      'Sign out of cloud sync?',
-      `${warning}Choose what happens to the financial data on this device. Your cloud data is not deleted either way.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Keep Data on This Device',
-          onPress: () => void performSignOut('keep'),
-        },
-        {
-          text: 'Remove From This Device',
-          style: 'destructive',
-          onPress: confirmRemoveLocalCopy,
-        },
-      ],
-    );
-  }
-
-  function confirmRemoveLocalCopy() {
-    Alert.alert(
-      'Remove this device’s copy?',
-      'This removes the local copy from this device. Your cloud data remains in your cloud account and can be downloaded again by signing in.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: () => void performSignOut('remove'),
-        },
-      ],
-    );
   }
 
   async function performSignOut(mode: 'keep' | 'remove') {
@@ -237,25 +313,39 @@ export default function CloudSyncScreen() {
   }
 }
 
-function Detail({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.detail} accessible accessibilityLabel={`${label}: ${value}`}>
-      <AppText color={colors.textMuted}>{label}</AppText>
-      <AppText weight="600">{value}</AppText>
-    </View>
-  );
+/**
+ * The badge colour is the fastest read on this screen, so it says only what the
+ * status actually supports: green means a completed cycle and nothing less.
+ */
+function statusTone(status: CloudSyncStatus): {
+  icon: IconName;
+  color: 'positive' | 'negative' | 'warning' | 'textSecondary';
+} {
+  switch (status) {
+    case 'synced':
+      return { icon: 'cloud-check', color: 'positive' };
+    case 'syncing':
+    case 'linking':
+      return { icon: 'refresh-cw', color: 'textSecondary' };
+    case 'pending_changes':
+      return { icon: 'cloud-upload', color: 'warning' };
+    case 'offline':
+      return { icon: 'cloud-off', color: 'warning' };
+    case 'auth_required':
+    case 'setup_required':
+    case 'reconciliation_required':
+      return { icon: 'triangle-alert', color: 'warning' };
+    case 'attention_required':
+    case 'account_mismatch':
+    case 'error':
+      return { icon: 'circle-alert', color: 'negative' };
+    default:
+      return { icon: 'cloud', color: 'textSecondary' };
+  }
 }
 
 const styles = StyleSheet.create({
-  content: { gap: spacing.lg },
-  header: { gap: spacing.sm },
-  card: { gap: spacing.md },
-  status: { gap: spacing.xs },
-  actions: { gap: spacing.md },
-  detail: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
+  status: { flexDirection: 'row', alignItems: 'flex-start' },
+  badge: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  statusText: { flex: 1, minWidth: 0 },
 });

@@ -1,10 +1,8 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
-import { AppButton, AppText, Card, Screen, ScreenState } from '@/components/ui';
-import { colors, spacing } from '@/constants/theme';
-import { useCloudSync } from '@/features/sync/sync.provider';
+import { Banner, Button, Card, Dialog, ErrorState, FormScreen, Text } from '@/components/ui';
 import {
   inspectCloudLink,
   linkUsingCloudData,
@@ -12,6 +10,7 @@ import {
   type CloudLinkInspection,
   type ReconciliationResult,
 } from '@/features/sync/reconciliation.service';
+import { useCloudSync } from '@/features/sync/sync.provider';
 import {
   describeReconciliationFailure,
   describeUseCloudData,
@@ -19,6 +18,10 @@ import {
   SETUP_STEPS,
   type SetupStep,
 } from '@/features/sync/sync-presentation';
+import { useTheme } from '@/theme';
+
+type Choice = 'use_local' | 'use_cloud';
+type ChoiceCopy = { title: string; body: string; warning?: string; confirmLabel: string };
 
 /**
  * First cloud link.
@@ -29,12 +32,14 @@ import {
  * own: setting up is always something the person chose.
  */
 export default function CloudSyncSetupScreen() {
+  const { palette, space } = useTheme();
   const sync = useCloudSync();
   const [inspection, setInspection] = useState<CloudLinkInspection>();
   // Setup opens straight into its inspection, so the first thing shown is what
   // is actually happening rather than an empty screen.
   const [step, setStep] = useState<SetupStep | undefined>('inspecting');
   const [error, setError] = useState('');
+  const [pending, setPending] = useState<{ choice: Choice; copy: ChoiceCopy }>();
 
   const inspect = useCallback(async () => {
     const result = await inspectCloudLink();
@@ -55,26 +60,36 @@ export default function CloudSyncSetupScreen() {
     }, [inspect]),
   );
 
+  // No back control while linking: once the critical section starts there is no
+  // safe cancel, so the screen must not offer one.
   if (step !== undefined) {
     return (
-      <Screen>
-        <ScreenState title="Setting up cloud sync" description={SETUP_STEPS[step]} />
-      </Screen>
+      <FormScreen title="Cloud Sync">
+        <View style={[styles.working, { paddingVertical: space.xl6, gap: space.lg }]}>
+          <ActivityIndicator color={palette.accent} />
+          <Text variant="heading" align="center">
+            Setting up cloud sync
+          </Text>
+          <Text variant="body" tone="secondary" align="center">
+            {SETUP_STEPS[step]}
+          </Text>
+        </View>
+      </FormScreen>
     );
   }
 
   if (inspection === undefined) {
     return (
-      <Screen>
-        <ScreenState
+      <FormScreen title="Cloud Sync" backIcon="x">
+        <ErrorState
           title="Cloud sync setup"
-          description={error || 'Checking what your cloud account contains…'}
-          retry={() => {
+          message={error || 'Your cloud account could not be checked.'}
+          onRetry={() => {
             setStep('inspecting');
             void inspect();
           }}
         />
-      </Screen>
+      </FormScreen>
     );
   }
 
@@ -82,57 +97,72 @@ export default function CloudSyncSetupScreen() {
   const cloudHasData = inspection.cloud.hasMeaningfulData;
   const useLocal = describeUseLocalData(cloudHasData);
   const useCloud = describeUseCloudData(localHasData);
+  const bothHaveData = localHasData && cloudHasData;
 
   return (
-    <Screen scroll contentStyle={styles.content}>
-      <View style={styles.header}>
-        <AppText variant="title" weight="700">
-          Set Up Cloud Sync
-        </AppText>
-        <AppText color={colors.textMuted}>{summarize(inspection)}</AppText>
-      </View>
-
-      {/* Both empty: nothing can be lost, so one plain action is enough. */}
-      {!localHasData && !cloudHasData ? (
-        <Card style={styles.card}>
-          <AppText weight="700">Link This Device</AppText>
-          <AppText color={colors.textMuted}>
-            Your financial data will sync with this cloud account from now on.
-          </AppText>
-          <AppButton label="Link This Device" onPress={() => void run('use_local')} />
-        </Card>
-      ) : null}
-
-      {localHasData && !cloudHasData ? (
-        <Choice copy={useLocal} onPress={() => void confirm('use_local', useLocal)} />
-      ) : null}
-
-      {!localHasData && cloudHasData ? (
-        <Choice copy={useCloud} onPress={() => void confirm('use_cloud', useCloud)} />
-      ) : null}
-
-      {localHasData && cloudHasData ? (
-        <>
-          <Card style={styles.card}>
-            <AppText weight="700">This device and your cloud account both have data</AppText>
-            <AppText color={colors.textMuted}>
-              They are not combined. Choose which one to keep — the other copy is replaced. A backup
-              of this device is saved first either way.
-            </AppText>
-          </Card>
-          <Choice copy={useLocal} onPress={() => void confirm('use_local', useLocal)} />
-          <Choice copy={useCloud} onPress={() => void confirm('use_cloud', useCloud)} />
-        </>
-      ) : null}
+    <FormScreen title="Set Up Cloud Sync" backIcon="x">
+      <Text variant="body" tone="secondary" style={{ marginTop: space.sm }}>
+        {summarize(inspection)}
+      </Text>
 
       {error ? (
-        <AppText color={colors.danger} accessibilityLiveRegion="polite">
-          {error}
-        </AppText>
+        <View style={{ marginTop: space.lg }}>
+          <Banner tone="negative" message={error} />
+        </View>
       ) : null}
 
-      <AppButton label="Cancel" variant="secondary" onPress={() => router.back()} />
-    </Screen>
+      {bothHaveData ? (
+        <View style={{ marginTop: space.lg }}>
+          <Banner
+            tone="warning"
+            message="Both sides have records. They are not combined — you choose which one to keep, and the other is replaced. A backup of this device is saved first either way."
+          />
+        </View>
+      ) : null}
+
+      <View style={{ marginTop: space.xl, gap: space.md }}>
+        {/* Both empty: nothing can be lost, so one plain action is enough. */}
+        {!localHasData && !cloudHasData ? (
+          <ChoiceCard
+            copy={{
+              title: 'Link This Device',
+              body: 'Your financial data will sync with this cloud account from now on.',
+              confirmLabel: 'Link This Device',
+            }}
+            onPress={() => void run('use_local')}
+          />
+        ) : null}
+
+        {localHasData && !cloudHasData ? (
+          <ChoiceCard copy={useLocal} onPress={() => choose('use_local', useLocal)} />
+        ) : null}
+
+        {!localHasData && cloudHasData ? (
+          <ChoiceCard copy={useCloud} onPress={() => choose('use_cloud', useCloud)} />
+        ) : null}
+
+        {bothHaveData ? (
+          <>
+            <ChoiceCard copy={useLocal} onPress={() => choose('use_local', useLocal)} />
+            <ChoiceCard copy={useCloud} onPress={() => choose('use_cloud', useCloud)} />
+          </>
+        ) : null}
+      </View>
+
+      <Dialog
+        visible={pending !== undefined}
+        title={pending?.copy.title ?? ''}
+        message={pending ? pending.copy.body + '\n\n' + (pending.copy.warning ?? '') : ''}
+        confirmLabel={pending?.copy.confirmLabel ?? 'Continue'}
+        destructive
+        onCancel={() => setPending(undefined)}
+        onConfirm={() => {
+          const choice = pending?.choice;
+          setPending(undefined);
+          if (choice) void run(choice);
+        }}
+      />
+    </FormScreen>
   );
 
   function summarize(current: CloudLinkInspection): string {
@@ -146,24 +176,16 @@ export default function CloudSyncSetupScreen() {
   }
 
   /** A destructive choice is confirmed on its own, with the consequence restated. */
-  async function confirm(
-    choice: 'use_local' | 'use_cloud',
-    copy: { title: string; body: string; warning?: string; confirmLabel: string },
-  ) {
+  function choose(choice: Choice, copy: ChoiceCopy) {
     if (copy.warning === undefined) {
-      await run(choice);
+      void run(choice);
       return;
     }
-    Alert.alert(copy.title, `${copy.body}\n\n${copy.warning}`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: copy.confirmLabel, style: 'destructive', onPress: () => void run(choice) },
-    ]);
+    setPending({ choice, copy });
   }
 
-  async function run(choice: 'use_local' | 'use_cloud') {
+  async function run(choice: Choice) {
     setError('');
-    // Once the critical section starts there is no safe cancel: it finishes or
-    // it rolls back, so no cancel control is offered from here on.
     setStep(choice === 'use_local' ? 'uploading' : 'downloading');
     const result: ReconciliationResult =
       choice === 'use_local' ? await linkUsingLocalData() : await linkUsingCloudData();
@@ -179,25 +201,35 @@ export default function CloudSyncSetupScreen() {
   }
 }
 
-function Choice({
-  copy,
-  onPress,
-}: {
-  copy: { title: string; body: string; warning?: string; confirmLabel: string };
-  onPress: () => void;
-}) {
+/**
+ * One card per outcome, each stating what it does before the button that does
+ * it. The warning is part of the card rather than only the confirmation, so the
+ * consequence is readable before anything is tapped.
+ */
+function ChoiceCard({ copy, onPress }: { copy: ChoiceCopy; onPress: () => void }) {
+  const { space } = useTheme();
   return (
-    <Card style={styles.card}>
-      <AppText weight="700">{copy.title}</AppText>
-      <AppText color={colors.textMuted}>{copy.body}</AppText>
-      {copy.warning ? <AppText color={colors.danger}>{copy.warning}</AppText> : null}
-      <AppButton label={copy.confirmLabel} onPress={onPress} />
+    <Card style={{ gap: space.sm }}>
+      <Text variant="bodyStrong">{copy.title}</Text>
+      <Text variant="small" tone="secondary">
+        {copy.body}
+      </Text>
+      {copy.warning ? (
+        <View style={{ marginTop: space.xs }}>
+          <Banner tone="warning" message={copy.warning} />
+        </View>
+      ) : null}
+      <View style={{ marginTop: space.md }}>
+        <Button
+          label={copy.confirmLabel}
+          variant={copy.warning ? 'secondary' : 'primary'}
+          onPress={onPress}
+        />
+      </View>
     </Card>
   );
 }
 
 const styles = StyleSheet.create({
-  content: { gap: spacing.lg },
-  header: { gap: spacing.sm },
-  card: { gap: spacing.md },
+  working: { alignItems: 'center' },
 });

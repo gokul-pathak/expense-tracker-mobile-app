@@ -189,7 +189,12 @@ places — so what is on screen is always something the app can store.
 
 ### `Switch`
 
-Themed toggle. Accent when on in dark; near-black when on in light.
+44×26 track with a 20pt knob. Accent when on; a raised track with a tertiary knob when off, so an
+off switch reads as inert rather than as an error.
+
+Drawn rather than wrapping RN's `Switch`, because the platform control cannot be tinted to this
+palette on both systems and a settings list with one iOS-green switch in it is the fastest way to
+break the design.
 
 ---
 
