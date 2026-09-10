@@ -1,11 +1,33 @@
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { type ReactNode, useCallback, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { Modal, Pressable, StyleSheet, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import { useCallback, useState } from 'react';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
-import { AppButton, AppText, Card, NativeDataNotice, Screen, ScreenState } from '@/components/ui';
-import { useRefreshOnSyncedData } from '@/features/sync/use-synced-data';
-import { colors, radii, spacing } from '@/constants/theme';
+import {
+  AreaChart,
+  BottomSheet,
+  Button,
+  Card,
+  Chip,
+  DonutChart,
+  EmptyState,
+  ErrorState,
+  Icon,
+  isIconName,
+  LargeTitle,
+  ListRow,
+  Money,
+  NativeDataNotice,
+  ProgressBar,
+  Screen,
+  SectionHeader,
+  Skeleton,
+  StatTile,
+  Text,
+  type DonutSegment,
+  type IconName,
+} from '@/components/ui';
 import type {
   CategoryBreakdownItem,
   ReportInsight,
@@ -14,7 +36,9 @@ import type {
   ReportSummary,
   TrendPoint,
 } from '@/features/reports/reports.types';
+import { useRefreshOnSyncedData } from '@/features/sync/use-synced-data';
 import {
+  getAppSettings,
   getCustomRange,
   getExpenseCategoryBreakdown,
   getIncomeExpenseTrend,
@@ -22,10 +46,10 @@ import {
   getReportRange,
   getReportSummary,
   getSimpleInsights,
-  getAppSettings,
   isLocalFinanceDataAvailable,
 } from '@/features/ui/data';
-import { formatMinorUnits } from '@/utils/money';
+import { getCategoryIdentity, useTheme } from '@/theme';
+import { formatMinorUnits, splitMinorUnits } from '@/utils/money';
 
 type ReportData = {
   summary: ReportSummary;
@@ -47,6 +71,7 @@ const presets: PresetOption[] = [
 ];
 
 export default function ReportsScreen() {
+  const { palette, space } = useTheme();
   const [preset, setPreset] = useState<ReportPreset>('this_month');
   const [range, setRange] = useState<ReportRange>(() => getReportRange('this_month'));
   const [data, setData] = useState<ReportData>();
@@ -56,9 +81,9 @@ export default function ReportsScreen() {
   const [showPresets, setShowPresets] = useState(false);
   const [showCustomRange, setShowCustomRange] = useState(false);
   const [customStart, setCustomStart] = useState(
-    new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+    () => new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   );
-  const [customEnd, setCustomEnd] = useState(new Date());
+  const [customEnd, setCustomEnd] = useState(() => new Date());
   const [datePicker, setDatePicker] = useState<'start' | 'end'>();
   const [customError, setCustomError] = useState<string>();
 
@@ -85,397 +110,434 @@ export default function ReportsScreen() {
   // A sync that changes SQLite refreshes this screen even while it is open.
   useRefreshOnSyncedData(load);
 
-  if (!isLocalFinanceDataAvailable)
+  if (!isLocalFinanceDataAvailable) {
     return (
-      <Screen>
+      <Screen tabBar>
         <NativeDataNotice />
       </Screen>
     );
-  if (loading)
+  }
+  if (loading) {
     return (
-      <Screen>
-        <ScreenState
-          title="Loading your report"
-          description="Preparing your financial activity..."
+      <Screen scroll tabBar>
+        <ReportsSkeleton />
+      </Screen>
+    );
+  }
+  if (failed || !data) {
+    return (
+      <Screen tabBar>
+        <ErrorState
+          message="This report could not be built from your local data. Your data is safe."
+          onRetry={load}
         />
       </Screen>
     );
-  if (failed || !data)
-    return (
-      <Screen>
-        <ScreenState
-          title="We couldn't load this report."
-          description="Your local financial data could not be read."
-          retry={load}
-        />
-      </Screen>
-    );
+  }
 
   const empty = data.summary.incomeMinor === 0 && data.summary.expenseMinor === 0;
+
   return (
-    <Screen scroll contentStyle={styles.content}>
-      <View style={styles.header}>
-        <AppText variant="heading" weight="700">
-          Reports
-        </AppText>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Choose report range"
-          onPress={() => setShowPresets(true)}
-          style={styles.rangeButton}
-        >
-          <AppText color={colors.primary} weight="700">
-            {rangeLabel(preset, range)}
-          </AppText>
-          <AppText color={colors.primary}>Change</AppText>
-        </Pressable>
+    <Screen scroll tabBar>
+      <LargeTitle title="Reports" />
+      <View style={{ marginTop: space.md }}>
+        <PeriodPill label={rangeLabel(preset, range)} onPress={() => setShowPresets(true)} />
       </View>
 
-      <Card style={styles.summaryCard}>
-        <Metric
+      <Card style={[styles.summary, { marginTop: space.lg }]}>
+        <StatTile
           label="Income"
-          value={data.summary.incomeMinor}
+          minorUnits={data.summary.incomeMinor}
           currency={currency}
-          color={colors.success}
+          direction="income"
+          size="row"
         />
-        <Metric
+        <StatTile
           label="Expense"
-          value={data.summary.expenseMinor}
+          minorUnits={data.summary.expenseMinor}
           currency={currency}
-          color={colors.danger}
+          direction="expense"
+          size="row"
         />
-        <View style={styles.savings}>
-          <Metric
-            label="Savings"
-            value={data.summary.savingsMinor}
-            currency={currency}
-            color={data.summary.savingsMinor < 0 ? colors.danger : colors.text}
-          />
-        </View>
+        <StatTile
+          label="Savings"
+          minorUnits={data.summary.savingsMinor}
+          currency={currency}
+          size="row"
+          align="right"
+        />
       </Card>
 
       {empty ? (
-        <Card>
-          <AppText color={colors.textMuted}>
-            No income or expenses recorded for this period.
-          </AppText>
-        </Card>
-      ) : null}
+        <EmptyState
+          illustration="arcs"
+          title="Nothing in this period"
+          body="No income or expenses were recorded between these dates. Choose a wider period to see more."
+          action={{ label: 'Change Period', onPress: () => setShowPresets(true) }}
+        />
+      ) : (
+        <>
+          <View style={{ marginTop: space.xxl }}>
+            <SectionHeader title="Income vs Expense" />
+            <Card>
+              {data.trend.length === 0 ? (
+                <Text variant="body" tone="secondary">
+                  This period is too short to plot a trend.
+                </Text>
+              ) : (
+                <AreaChart
+                  labels={data.trend.map((point) => point.label)}
+                  series={[
+                    {
+                      key: 'income',
+                      label: 'Income',
+                      color: palette.positive,
+                      values: data.trend.map((point) => point.incomeMinor),
+                    },
+                    {
+                      key: 'expense',
+                      label: 'Expense',
+                      color: palette.negative,
+                      values: data.trend.map((point) => point.expenseMinor),
+                    },
+                  ]}
+                  formatValue={(value) => splitMinorUnits(value, currency).integer}
+                  accessibilityLabel={
+                    'Income against expense over ' + data.trend.length + ' periods. Touch to scrub.'
+                  }
+                />
+              )}
+            </Card>
+          </View>
 
-      <Section title="Income vs Expense">
-        <Trend trend={data.trend} currency={currency} />
-      </Section>
+          <View style={{ marginTop: space.xxl }}>
+            <SectionHeader title="Spending by Category" />
+            <CategoryCard
+              categories={data.categories}
+              totalMinor={data.summary.expenseMinor}
+              currency={currency}
+            />
+          </View>
 
-      <Section title="Spending by Category">
-        {data.categories.length === 0 ? (
-          <Card>
-            <AppText color={colors.textMuted}>No spending recorded for this period.</AppText>
-          </Card>
-        ) : (
-          <Card style={styles.categories}>
-            {data.categories.map((category) => (
-              <CategoryRow key={category.categoryId} category={category} currency={currency} />
-            ))}
-          </Card>
-        )}
-      </Section>
+          {data.insights.length > 0 ? (
+            <View style={{ marginTop: space.xxl }}>
+              <SectionHeader title="Insights" />
+              <Card padding="none">
+                {data.insights.map((insight, index) => {
+                  const presentation = presentInsight(insight, currency, data.categories);
+                  return (
+                    <ListRow
+                      key={insight.type + '-' + index}
+                      icon={presentation.icon}
+                      iconColor={
+                        presentation.tone === 'negative'
+                          ? palette.negative
+                          : presentation.tone === 'positive'
+                            ? palette.positive
+                            : palette.textSecondary
+                      }
+                      label={presentation.text}
+                      chevron={false}
+                      last={index === data.insights.length - 1}
+                    />
+                  );
+                })}
+              </Card>
+            </View>
+          ) : null}
+        </>
+      )}
 
-      {data.insights.length > 0 ? (
-        <Section title="Insights">
-          <Card style={styles.insights}>
-            {data.insights.map((insight, index) => (
-              <AppText key={`${insight.type}-${index}`} color={colors.textMuted}>
-                {insightText(insight, currency)}
-              </AppText>
-            ))}
-          </Card>
-        </Section>
-      ) : null}
-
-      <PresetModal
+      <BottomSheet
         visible={showPresets}
         onClose={() => setShowPresets(false)}
-        onSelect={(nextPreset) => {
-          setShowPresets(false);
-          if (nextPreset === 'custom') setShowCustomRange(true);
-          else {
-            setPreset(nextPreset);
-            setRange(getReportRange(nextPreset));
-          }
-        }}
-      />
-      <CustomRangeModal
+        title="Report period"
+      >
+        <View style={[styles.presets, { gap: space.sm }]}>
+          {presets.map((option) => (
+            <Chip
+              key={option.value}
+              label={option.label}
+              selected={preset === option.value}
+              onPress={() => {
+                setShowPresets(false);
+                if (option.value === 'custom') {
+                  setShowCustomRange(true);
+                  return;
+                }
+                setPreset(option.value);
+                setRange(getReportRange(option.value));
+              }}
+            />
+          ))}
+        </View>
+      </BottomSheet>
+
+      <BottomSheet
         visible={showCustomRange}
-        start={customStart}
-        end={customEnd}
-        error={customError}
-        picker={datePicker}
         onClose={() => {
           setShowCustomRange(false);
           setCustomError(undefined);
         }}
-        onPick={setDatePicker}
-        onDateChange={(which, value) => {
-          if (which === 'start') setCustomStart(value);
-          else setCustomEnd(value);
-        }}
-        onApply={() => {
-          try {
-            const nextRange = getCustomRange(customStart, customEnd);
-            setRange(nextRange);
-            setPreset('custom');
-            setCustomError(undefined);
-            setShowCustomRange(false);
-          } catch (error) {
-            setCustomError(error instanceof Error ? error.message : 'Choose a valid date range.');
-          }
-        }}
-      />
+        title="Custom range"
+        doneLabel="Cancel"
+      >
+        <Card padding="none">
+          <ListRow
+            label="Start date"
+            value={formatDate(customStart)}
+            valueTone="primary"
+            onPress={() => setDatePicker('start')}
+            chevron={false}
+          />
+          <ListRow
+            label="End date"
+            value={formatDate(customEnd)}
+            valueTone="primary"
+            onPress={() => setDatePicker('end')}
+            chevron={false}
+            last
+          />
+        </Card>
+        {customError ? (
+          <Text variant="small" tone="negative" style={{ marginTop: space.md }}>
+            {customError}
+          </Text>
+        ) : null}
+        {datePicker ? (
+          <DateTimePicker
+            mode="date"
+            value={datePicker === 'start' ? customStart : customEnd}
+            onChange={(_event, value) => {
+              if (value) {
+                if (datePicker === 'start') setCustomStart(value);
+                else setCustomEnd(value);
+              }
+              setDatePicker(undefined);
+            }}
+          />
+        ) : null}
+        <View style={{ marginTop: space.xl }}>
+          <Button
+            label="Apply Range"
+            onPress={() => {
+              try {
+                setRange(getCustomRange(customStart, customEnd));
+                setPreset('custom');
+                setCustomError(undefined);
+                setShowCustomRange(false);
+              } catch (error) {
+                setCustomError(
+                  error instanceof Error ? error.message : 'Choose a valid date range.',
+                );
+              }
+            }}
+          />
+        </View>
+      </BottomSheet>
     </Screen>
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <View style={styles.section}>
-      <AppText variant="subheading" weight="700">
-        {title}
-      </AppText>
-      {children}
-    </View>
-  );
-}
-
-function Metric({
-  label,
-  value,
-  currency,
-  color,
-}: {
-  label: string;
-  value: number;
-  currency: string;
-  color: string;
-}) {
-  return (
-    <View
-      accessible
-      accessibilityLabel={`${label} ${formatMinorUnits(value, currency)}`}
-      style={styles.metric}
-    >
-      <AppText variant="caption" color={colors.textMuted} weight="600">
-        {label}
-      </AppText>
-      <AppText weight="700" color={color}>
-        {formatMinorUnits(value, currency)}
-      </AppText>
-    </View>
-  );
-}
-
-function Trend({ trend, currency }: { trend: TrendPoint[]; currency: string }) {
-  const maximum = Math.max(1, ...trend.flatMap((point) => [point.incomeMinor, point.expenseMinor]));
-  if (trend.length === 0)
-    return (
-      <Card>
-        <AppText color={colors.textMuted}>No trend data for this period.</AppText>
-      </Card>
-    );
-  return (
-    <Card style={styles.trend}>
-      {trend.map((point) => (
-        <View
-          key={point.start.getTime()}
-          accessible
-          accessibilityLabel={`${point.label}: Income ${formatMinorUnits(point.incomeMinor, currency)}, Expense ${formatMinorUnits(point.expenseMinor, currency)}`}
-          style={styles.trendRow}
-        >
-          <AppText variant="caption" weight="600" style={styles.trendLabel}>
-            {point.label}
-          </AppText>
-          <View style={styles.trendBars}>
-            <Bar
-              label="Income"
-              value={point.incomeMinor}
-              maximum={maximum}
-              color={colors.success}
-            />
-            <Bar
-              label="Expense"
-              value={point.expenseMinor}
-              maximum={maximum}
-              color={colors.danger}
-            />
-          </View>
-        </View>
-      ))}
-    </Card>
-  );
-}
-
-function Bar({
-  label,
-  value,
-  maximum,
-  color,
-}: {
-  label: string;
-  value: number;
-  maximum: number;
-  color: string;
-}) {
-  return (
-    <View style={styles.barLine}>
-      <AppText variant="caption" color={colors.textMuted} style={styles.barLabel}>
-        {label}
-      </AppText>
-      <View style={styles.barTrack}>
-        <View
-          style={[styles.barFill, { backgroundColor: color, width: `${(value / maximum) * 100}%` }]}
-        />
-      </View>
-    </View>
-  );
-}
-
-function CategoryRow({
-  category,
-  currency,
-}: {
-  category: CategoryBreakdownItem;
-  currency: string;
-}) {
-  return (
-    <View
-      accessible
-      accessibilityLabel={`${category.categoryName}, ${formatMinorUnits(category.amountMinor, currency)}, ${Math.round(category.percentage)} percent of spending`}
-      style={styles.category}
-    >
-      <View style={styles.categoryHeader}>
-        <View>
-          <AppText weight="600">{category.categoryName}</AppText>
-          <AppText variant="caption" color={colors.textMuted}>
-            {formatMinorUnits(category.amountMinor, currency)}
-          </AppText>
-        </View>
-        <AppText weight="700">{Math.round(category.percentage)}%</AppText>
-      </View>
-      <View style={styles.categoryTrack}>
-        <View style={[styles.categoryFill, { width: `${category.percentage}%` }]} />
-      </View>
-    </View>
-  );
-}
-
-function PresetModal({
-  visible,
-  onClose,
-  onSelect,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onSelect: (preset: PresetOption['value']) => void;
-}) {
-  return (
-    <Modal animationType="slide" transparent visible={visible} onRequestClose={onClose}>
-      <Pressable style={styles.modalBackdrop} onPress={onClose}>
-        <Pressable style={styles.modal} onPress={() => undefined}>
-          <AppText variant="subheading" weight="700">
-            Report period
-          </AppText>
-          {presets.map((option) => (
-            <Pressable
-              key={option.value}
-              accessibilityRole="button"
-              accessibilityLabel={option.label}
-              onPress={() => onSelect(option.value)}
-              style={styles.option}
-            >
-              <AppText weight="600">{option.label}</AppText>
-            </Pressable>
-          ))}
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
-
-function CustomRangeModal({
-  visible,
-  start,
-  end,
-  error,
-  picker,
-  onClose,
-  onPick,
-  onDateChange,
-  onApply,
-}: {
-  visible: boolean;
-  start: Date;
-  end: Date;
-  error?: string;
-  picker?: 'start' | 'end';
-  onClose: () => void;
-  onPick: (value: 'start' | 'end' | undefined) => void;
-  onDateChange: (which: 'start' | 'end', value: Date) => void;
-  onApply: () => void;
-}) {
-  return (
-    <Modal animationType="slide" transparent visible={visible} onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.modal}>
-          <AppText variant="subheading" weight="700">
-            Custom range
-          </AppText>
-          <DateButton label="Start date" value={start} onPress={() => onPick('start')} />
-          <DateButton label="End date" value={end} onPress={() => onPick('end')} />
-          {error ? <AppText color={colors.danger}>{error}</AppText> : null}
-          {picker ? (
-            <DateTimePicker
-              mode="date"
-              value={picker === 'start' ? start : end}
-              onChange={(_event, value) => {
-                if (value) onDateChange(picker, value);
-                onPick(undefined);
-              }}
-            />
-          ) : null}
-          <AppButton label="Apply range" onPress={onApply} />
-          <AppButton label="Cancel" variant="secondary" onPress={onClose} />
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-function DateButton({
-  label,
-  value,
-  onPress,
-}: {
-  label: string;
-  value: Date;
-  onPress: () => void;
-}) {
+/**
+ * The period this report covers, as a pill that opens the picker. It sits
+ * directly under the title because every figure below it is meaningless
+ * without knowing which dates produced them.
+ */
+function PeriodPill({ label, onPress }: { label: string; onPress: () => void }) {
+  const { palette, space, radius, motion } = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Choose ${label}`}
-      onPress={onPress}
-      style={styles.dateButton}
+      accessibilityLabel={'Report period, ' + label + '. Change'}
+      onPress={() => {
+        if (Platform.OS !== 'web') void Haptics.selectionAsync();
+        onPress();
+      }}
+      style={({ pressed }) => [
+        styles.pill,
+        {
+          borderRadius: radius.pill,
+          paddingVertical: space.sm,
+          paddingHorizontal: space.md + 2,
+          gap: space.sm,
+          backgroundColor: palette.surfaceRaised,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: palette.hairline,
+        },
+        pressed && { transform: [{ scale: motion.press.scale }] },
+      ]}
     >
-      <AppText color={colors.textMuted}>{label}</AppText>
-      <AppText weight="600">{formatDate(value)}</AppText>
+      <Icon name="calendar" size="inline" color={palette.accent} />
+      <Text variant="smallStrong">{label}</Text>
+      <Icon name="chevron-down" size="inline" color={palette.textTertiary} />
     </Pressable>
   );
 }
 
-function rangeLabel(preset: ReportPreset, range: ReportRange) {
-  if (preset !== 'custom')
-    return presets.find((item) => item.value === preset)?.label ?? 'This Month';
-  return `${formatDate(range.start)} - ${formatDate(range.end)}`;
+/** The donut answers "what is the shape of this", the ranked bars answer "how much, exactly". */
+function CategoryCard({
+  categories,
+  totalMinor,
+  currency,
+}: {
+  categories: CategoryBreakdownItem[];
+  totalMinor: number;
+  currency: string;
+}) {
+  const { palette, space } = useTheme();
+
+  if (categories.length === 0) {
+    return (
+      <Card>
+        <Text variant="body" tone="secondary">
+          No spending was recorded in this period.
+        </Text>
+      </Card>
+    );
+  }
+
+  const segments: DonutSegment[] = categories.map((category) => ({
+    key: category.categoryId,
+    value: category.amountMinor,
+    color: getCategoryIdentity(category.icon).hue,
+  }));
+
+  return (
+    <Card>
+      <View style={styles.donut}>
+        <DonutChart
+          segments={segments}
+          accessibilityLabel={'Spending by category, ' + formatMinorUnits(totalMinor, currency)}
+        >
+          <Text variant="tab" tone="tertiary">
+            Total
+          </Text>
+          <Text variant="bodyStrong" tabular>
+            {splitMinorUnits(totalMinor, currency).integer}
+          </Text>
+        </DonutChart>
+      </View>
+      <View
+        style={[
+          styles.divider,
+          {
+            backgroundColor: palette.divider,
+            marginTop: space.xl,
+            marginBottom: space.lg + 2,
+          },
+        ]}
+      />
+      <View style={{ gap: space.md + 1 }}>
+        {categories.map((category) => (
+          <View key={category.categoryId} style={{ gap: space.sm - 2 }}>
+            <View style={styles.categoryRow}>
+              <Text variant="smallStrong" numberOfLines={1} style={styles.categoryName}>
+                {category.categoryName}
+              </Text>
+              <Money
+                minorUnits={category.amountMinor}
+                currency={currency}
+                size="row"
+                showCode={false}
+                muted
+              />
+              <Text variant="caption" tone="tertiary" tabular style={styles.percent}>
+                {Math.round(category.percentage)}%
+              </Text>
+            </View>
+            <ProgressBar
+              value={category.percentage}
+              max={100}
+              color={getCategoryIdentity(category.icon).hue}
+              accessibilityLabel={
+                category.categoryName +
+                ', ' +
+                formatMinorUnits(category.amountMinor, currency) +
+                ', ' +
+                Math.round(category.percentage) +
+                ' percent of spending'
+              }
+            />
+          </View>
+        ))}
+      </View>
+    </Card>
+  );
 }
+
+function ReportsSkeleton() {
+  const { space, radius, size } = useTheme();
+  return (
+    <View>
+      <Skeleton width={140} height={30} radius="pill" style={{ marginTop: space.xs }} />
+      <Skeleton width={132} height={size.chip} radius="pill" style={{ marginTop: space.md }} />
+      <Skeleton height={76} radius={radius.card} style={{ marginTop: space.lg }} />
+      {[0, 1].map((section) => (
+        <View key={section} style={{ marginTop: space.xxl }}>
+          <Skeleton width={140} height={12} radius="pill" style={{ marginBottom: space.md }} />
+          <Skeleton height={section === 0 ? 190 : 240} radius={radius.card} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/**
+ * Insights are plain factual sentences. The app measures; it does not praise or
+ * scold, so none of these congratulate and none of them warn.
+ */
+function presentInsight(
+  insight: ReportInsight,
+  currency: string,
+  categories: CategoryBreakdownItem[],
+): { text: string; icon: IconName; tone: 'positive' | 'negative' | 'neutral' } {
+  switch (insight.type) {
+    case 'biggest_expense_category': {
+      const match = categories.find((item) => item.categoryId === insight.categoryId);
+      const identity = getCategoryIdentity(match?.icon ?? null);
+      return {
+        text: insight.categoryName + ' was your biggest expense category.',
+        icon: isIconName(identity.icon) ? identity.icon : 'chart-pie',
+        tone: 'neutral',
+      };
+    }
+    case 'expense_increase':
+      return {
+        text: 'You spent ' + Math.round(insight.percentage) + '% more than last month.',
+        icon: 'trending-up',
+        tone: 'negative',
+      };
+    case 'expense_decrease':
+      return {
+        text: 'You spent ' + Math.abs(Math.round(insight.percentage)) + '% less than last month.',
+        icon: 'trending-down',
+        tone: 'positive',
+      };
+    case 'savings':
+      return {
+        text:
+          'You saved ' + formatMinorUnits(insight.amountMinor, currency) + ' during this period.',
+        icon: 'wallet',
+        tone: 'positive',
+      };
+    case 'expense_exceeded_income':
+      return {
+        text:
+          'Expenses exceeded income by ' + formatMinorUnits(insight.amountMinor, currency) + '.',
+        icon: 'triangle-alert',
+        tone: 'negative',
+      };
+  }
+}
+
+function rangeLabel(preset: ReportPreset, range: ReportRange) {
+  if (preset !== 'custom') {
+    return presets.find((item) => item.value === preset)?.label ?? 'This Month';
+  }
+  return formatDate(range.start) + ' – ' + formatDate(range.end);
+}
+
 function formatDate(date: Date) {
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
@@ -483,85 +545,14 @@ function formatDate(date: Date) {
     year: 'numeric',
   }).format(date);
 }
-function insightText(insight: ReportInsight, currency: string) {
-  switch (insight.type) {
-    case 'biggest_expense_category':
-      return `${insight.categoryName} was your biggest expense category.`;
-    case 'expense_increase':
-      return `You spent ${Math.round(insight.percentage)}% more than last month.`;
-    case 'expense_decrease':
-      return `You spent ${Math.abs(Math.round(insight.percentage))}% less than last month.`;
-    case 'savings':
-      return `You saved ${formatMinorUnits(insight.amountMinor, currency)} during this period.`;
-    case 'expense_exceeded_income':
-      return `Expenses exceeded income by ${formatMinorUnits(insight.amountMinor, currency)}.`;
-  }
-}
 
 const styles = StyleSheet.create({
-  content: { gap: spacing.xl },
-  header: { gap: spacing.md },
-  rangeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderRadius: radii.md,
-    backgroundColor: colors.surfaceMuted,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  summaryCard: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.lg },
-  metric: { flexGrow: 1, gap: spacing.xs },
-  savings: {
-    width: '100%',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    paddingTop: spacing.md,
-  },
-  section: { gap: spacing.md },
-  trend: { gap: spacing.md },
-  trendRow: { flexDirection: 'row', gap: spacing.sm },
-  trendLabel: { width: 38, paddingTop: 1 },
-  trendBars: { flex: 1, gap: spacing.xs },
-  barLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  barLabel: { width: 52 },
-  barTrack: {
-    flex: 1,
-    height: 7,
-    overflow: 'hidden',
-    borderRadius: radii.pill,
-    backgroundColor: colors.surfaceMuted,
-  },
-  barFill: { height: '100%', borderRadius: radii.pill },
-  categories: { gap: spacing.lg },
-  category: { gap: spacing.sm },
-  categoryHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  categoryTrack: {
-    height: 7,
-    overflow: 'hidden',
-    borderRadius: radii.pill,
-    backgroundColor: colors.surfaceMuted,
-  },
-  categoryFill: { height: '100%', borderRadius: radii.pill, backgroundColor: colors.primary },
-  insights: { gap: spacing.md },
-  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0, 0, 0, 0.35)' },
-  modal: {
-    gap: spacing.md,
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
-    backgroundColor: colors.background,
-    padding: spacing.lg,
-  },
-  option: {
-    minHeight: 48,
-    justifyContent: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-  },
-  dateButton: {
-    gap: spacing.xs,
-    borderRadius: radii.md,
-    backgroundColor: colors.surfaceMuted,
-    padding: spacing.md,
-  },
+  summary: { flexDirection: 'row', justifyContent: 'space-between' },
+  pill: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start' },
+  presets: { flexDirection: 'row', flexWrap: 'wrap' },
+  donut: { alignItems: 'center' },
+  divider: { height: StyleSheet.hairlineWidth },
+  categoryRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  categoryName: { flex: 1 },
+  percent: { width: 34, textAlign: 'right' },
 });

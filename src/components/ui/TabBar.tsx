@@ -1,7 +1,7 @@
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import type { Tabs } from 'expo-router';
-import type { ComponentProps } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -9,10 +9,13 @@ import { tabIcon, useTheme, withAlpha } from '@/theme';
 
 import { Icon, isIconName, type IconName } from './Icon';
 
-type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0];
-
-/** The route that renders as the centre FAB rather than a tab. */
-const FAB_ROUTE = 'add';
+type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0] & {
+  /**
+   * The centre button opens a sheet rather than navigating, so it is a callback
+   * rather than a route. See `QuickAddProvider`.
+   */
+  onFabPress: () => void;
+};
 
 /**
  * A floating pill 20pt above the bottom safe area with a 16pt side inset:
@@ -20,12 +23,10 @@ const FAB_ROUTE = 'add';
  * its top edge. The active icon takes the accent with a 3pt dot beneath; the
  * canvas draws no labels, so none are drawn here either.
  */
-export function TabBar({ state, descriptors, navigation }: TabBarProps) {
+export function TabBar({ state, descriptors, navigation, onFabPress }: TabBarProps) {
   const { palette, scheme, space, size, radius, elevation } = useTheme();
   const insets = useSafeAreaInsets();
-  const barBottom = insets.bottom + space.xl;
 
-  const routes = state.routes;
   const press = (routeKey: string, routeName: string, focused: boolean) => {
     const event = navigation.emit({ type: 'tabPress', target: routeKey, canPreventDefault: true });
     if (!focused && !event.defaultPrevented) {
@@ -34,10 +35,39 @@ export function TabBar({ state, descriptors, navigation }: TabBarProps) {
     }
   };
 
-  const fab = routes.find((route) => route.name === FAB_ROUTE);
+  const tabs: ReactNode[] = state.routes.map((route, index) => {
+    const focused = state.index === index;
+    const title = descriptors[route.key]?.options.title;
+    const iconKey = (tabIcon as Record<string, string>)[route.name];
+    const icon: IconName = isIconName(iconKey) ? iconKey : 'circle-dashed';
+    return (
+      <Pressable
+        key={route.key}
+        accessibilityRole="tab"
+        accessibilityLabel={typeof title === 'string' ? title : route.name}
+        accessibilityState={{ selected: focused }}
+        onPress={() => press(route.key, route.name, focused)}
+        style={[styles.tab, { minWidth: size.touchTarget, minHeight: size.touchTarget }]}
+      >
+        <Icon name={icon} size={23} color={focused ? palette.accent : palette.textTertiary} />
+        <View
+          style={[
+            styles.dot,
+            { marginTop: space.xs + 1 },
+            focused && { backgroundColor: palette.accent },
+          ]}
+        />
+      </Pressable>
+    );
+  });
+
+  // The FAB overlaps the bar's top edge, so the row leaves a hole for it rather
+  // than the button covering a tab the user might be aiming at.
+  const middle = Math.ceil(tabs.length / 2);
+  tabs.splice(middle, 0, <View key="fab-gap" style={styles.fabGap} />);
 
   return (
-    <View pointerEvents="box-none" style={[styles.host, { bottom: barBottom }]}>
+    <View pointerEvents="box-none" style={[styles.host, { bottom: insets.bottom + space.xl }]}>
       <View
         style={[
           styles.bar,
@@ -52,41 +82,9 @@ export function TabBar({ state, descriptors, navigation }: TabBarProps) {
         ]}
       >
         <Surface />
-        {routes.map((route, index) => {
-          if (route.name === FAB_ROUTE) return <View key={route.key} style={styles.fabGap} />;
-          const focused = state.index === index;
-          const title = descriptors[route.key]?.options.title;
-          const iconKey = (tabIcon as Record<string, string>)[route.name];
-          const icon: IconName = isIconName(iconKey) ? iconKey : 'circle-dashed';
-          const label = typeof title === 'string' ? title : route.name;
-          return (
-            <Pressable
-              key={route.key}
-              accessibilityRole="tab"
-              accessibilityLabel={label}
-              accessibilityState={{ selected: focused }}
-              onPress={() => press(route.key, route.name, focused)}
-              style={[styles.tab, { minWidth: size.touchTarget, minHeight: size.touchTarget }]}
-            >
-              <Icon name={icon} size={23} color={focused ? palette.accent : palette.textTertiary} />
-              <View
-                style={[
-                  styles.dot,
-                  { marginTop: space.xs + 1 },
-                  focused && { backgroundColor: palette.accent },
-                ]}
-              />
-            </Pressable>
-          );
-        })}
+        {tabs}
       </View>
-      {fab ? (
-        <FAB
-          onPress={() => press(fab.key, fab.name, false)}
-          bottom={size.tabBar - 18}
-          accessibilityLabel="Add"
-        />
-      ) : null}
+      <FAB onPress={onFabPress} bottom={size.tabBar - 18} accessibilityLabel="Add transaction" />
     </View>
   );
 }

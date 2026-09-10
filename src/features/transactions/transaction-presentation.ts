@@ -102,3 +102,55 @@ export function getTransactionDirection(
       return 'neutral';
   }
 }
+
+export type TransactionDayGroup = {
+  /** Local calendar day, YYYY-MM-DD. */
+  key: string;
+  label: string;
+  currency: string;
+  /**
+   * The day's effect on net worth. Transfers count as zero: money moved between
+   * two of your own accounts changes nothing overall, and a day total that said
+   * otherwise would be wrong rather than merely noisy.
+   */
+  netMinor: number;
+  transactions: TransactionView[];
+};
+
+/**
+ * Split a list into calendar days, preserving the order it arrived in. The list
+ * is already sorted newest-first by the query, so grouping must not re-sort or
+ * a day would surface in the wrong place.
+ */
+export function groupTransactionsByDay(transactions: TransactionView[]): TransactionDayGroup[] {
+  const groups: TransactionDayGroup[] = [];
+  const byKey = new Map<string, TransactionDayGroup>();
+
+  for (const transaction of transactions) {
+    const key = toDayKey(transaction.transactionDate);
+    let group = byKey.get(key);
+    if (!group) {
+      group = {
+        key,
+        label: formatTransactionDateSection(transaction.transactionDate),
+        currency: transaction.currency,
+        netMinor: 0,
+        transactions: [],
+      };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    const direction = getTransactionDirection(transaction);
+    if (direction === 'expense') group.netMinor -= transaction.amountMinor;
+    else if (direction === 'income') group.netMinor += transaction.amountMinor;
+    group.transactions.push(transaction);
+  }
+
+  return groups;
+}
+
+function toDayKey(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return date.getFullYear() + '-' + month + '-' + day;
+}

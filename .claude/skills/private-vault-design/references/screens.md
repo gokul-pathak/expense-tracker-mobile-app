@@ -34,10 +34,10 @@ out on one screen.
 | #   | Screen                                  | Route                            | Canvas | Phase | Done |
 | --- | --------------------------------------- | -------------------------------- | ------ | ----- | ---- |
 | A1  | Home / Dashboard                        | `(tabs)/index.tsx`               | Drawn  | 1     | ☑    |
-| A2  | Transactions                            | `(tabs)/transactions.tsx`        | Drawn  | 2     | ☐    |
-| A3  | Quick Add                               | `(tabs)/add.tsx`                 | Drawn  | 2     | ☐    |
-| A4  | Reports                                 | `(tabs)/reports.tsx`             | Drawn  | 2     | ☐    |
-| A5  | More                                    | `(tabs)/more.tsx`                | Spec   | 2     | ☐    |
+| A2  | Transactions                            | `(tabs)/transactions.tsx`        | Drawn  | 2     | ☑    |
+| A3  | Quick Add                               | `features/quick-add/QuickAdd`    | Drawn  | 2     | ☑    |
+| A4  | Reports                                 | `(tabs)/reports.tsx`             | Drawn  | 2     | ☑    |
+| A5  | More                                    | `(tabs)/more.tsx`                | Spec   | 2     | ☑    |
 | B1  | Add Expense                             | `transaction/expense/new.tsx`    | Drawn  | 3     | ☐    |
 | B2  | Add Income                              | `transaction/income/new.tsx`     | Spec   | 3     | ☐    |
 | B3  | Transfer                                | `transaction/transfer/new.tsx`   | Spec   | 3     | ☐    |
@@ -98,12 +98,19 @@ Where the old design fails hardest — seven flat percentage-width bars become a
 `DonutChart`. Period pill → summary card → Income vs Expense area chart with scrubber → category
 donut + ranked list → Insights as plain factual sentences with leading icons.
 
+The canvas artboard drew only the ranked bars under "Spending by Category", with no donut — it ran
+out of artboard height rather than dropping it. Built as spec: donut with the period total in its
+centre, a hairline, then the ranked bars beneath it in the same card.
+
 ### A5 · More
 
 Not drawn. Grouped `ListRow` list with real icons and right-hand values: Accounts ("4 active"),
 People ("2 pending"), Budgets ("3 this month"), Categories ("19"), Settings, Cloud Sync (status,
 colour-coded). Above it, a compact identity card — account email, or "Local only — not synced" with
 a "Set up sync" action.
+
+Budgets has no route until phase 5, so its row is not on the screen yet. Add it to the "Your Money"
+group when `F1` lands.
 
 ### B3 · Transfer
 

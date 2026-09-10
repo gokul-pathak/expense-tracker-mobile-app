@@ -18,6 +18,12 @@ type Props = {
   direction?: MoneyDirection;
   /** Defaults to true, except at `row` size where the list already states the currency. */
   showCode?: boolean;
+  /**
+   * Render every part in the tertiary tone while keeping the sign. For a
+   * subordinate figure that is still an amount — a day total above a list, a
+   * legend value — where direction colour would outshout the rows beneath it.
+   */
+  muted?: boolean;
   align?: 'left' | 'right' | 'center';
   style?: StyleProp<TextStyle>;
 };
@@ -40,6 +46,7 @@ export function Money({
   size = 'row',
   direction,
   showCode = size !== 'row',
+  muted = false,
   align = 'left',
   style,
 }: Props) {
@@ -60,7 +67,8 @@ export function Money({
     color = palette.negative;
   }
 
-  const coloured = color !== palette.textPrimary;
+  if (muted) color = palette.textTertiary;
+  const coloured = !muted && color !== palette.textPrimary;
   const spokenSign = sign === MINUS ? 'minus ' : sign === '+' ? 'plus ' : '';
   const spoken = spokenSign + parts.code + ' ' + parts.integer + '.' + parts.decimals;
 

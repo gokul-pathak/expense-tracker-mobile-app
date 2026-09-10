@@ -1,21 +1,26 @@
+import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { useTheme } from '@/theme';
 
-import { Text } from './Text';
+import { Text, type TextTone } from './Text';
 
 type Props = {
   title: string;
+  /** Eyebrow tone. Tertiary for a section of a page, secondary for a date group heading. */
+  tone?: TextTone;
   action?: { label: string; onPress: () => void; accessibilityLabel?: string };
+  /** Anything other than a text action on the right: a day total, a count. */
+  trailing?: ReactNode;
   style?: StyleProp<ViewStyle>;
 };
 
-/** Eyebrow label left, optional text action right, 8pt below. */
-export function SectionHeader({ title, action, style }: Props) {
+/** Eyebrow label left, optional text action or value right, 8pt below. */
+export function SectionHeader({ title, tone = 'tertiary', action, trailing, style }: Props) {
   const { space, size } = useTheme();
   return (
     <View style={[styles.row, { marginBottom: space.sm }, style]}>
-      <Text variant="eyebrow" tone="tertiary">
+      <Text variant="eyebrow" tone={tone}>
         {title}
       </Text>
       {action ? (
@@ -34,7 +39,9 @@ export function SectionHeader({ title, action, style }: Props) {
             {action.label}
           </Text>
         </Pressable>
-      ) : null}
+      ) : (
+        trailing
+      )}
     </View>
   );
 }

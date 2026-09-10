@@ -28,6 +28,11 @@ applies tabular numerals, sign, and semantic colour. Full spec in `tokens.md` �
 | `size`       | `hero` `stat` `row`          | See the size table in `tokens.md`                                  |
 | `direction`  | `expense` `income` `neutral` | Sets sign and colour; omit for a plain total                       |
 | `showCode`   | boolean                      | Default true; false inside a card that already states the currency |
+| `muted`      | boolean                      | Every part in `tertiary`, sign kept. Day totals, legend values     |
+
+`muted` exists so a subordinate amount stays a `Money` rather than becoming a hand-built string. A
+day total above a transaction list is still an amount, but rendering it in full direction colour
+would outshout the rows it summarises.
 
 Amounts are stored as integer minor units throughout the app. Never convert to float for display —
 `parseMoneyToMinorUnits` and `formatMinorUnits` in `src/utils/money.ts` exist to avoid exactly that.
@@ -97,7 +102,9 @@ takes a value string, a `Switch`, or a chevron.
 
 ### `SectionHeader`
 
-Eyebrow label left, optional text action right, 8pt below.
+Eyebrow label left, optional text action right, 8pt below. A `trailing` slot takes a value instead
+of an action — a day total, a count. `tone` lifts the eyebrow from `tertiary` to `secondary` for a
+date-group heading, which sits closer to the content than a page section does.
 
 ### `Timeline`
 
@@ -128,6 +135,12 @@ category chips, quick-amount chips.
 ### `SegmentedControl`
 
 2–3 options. `surfaceSunken` track, `surface` thumb, spring slide. Active/Archived, Expense/Income.
+
+### `SearchField`
+
+44pt field on `surfaceSunken` behind a hairline, leading magnifier, trailing clear button once
+there is a value. Sunken rather than raised so it reads as a well cut into the page, which is what
+separates it from the cards below it.
 
 ### `SelectorField`
 
@@ -181,7 +194,10 @@ Replaces the current plain text "Back" link in `FormScreen`.
 
 ### `LargeTitle`
 
-28pt `title` in the content flow, collapsing into the NavBar on scroll.
+28pt `title` in the content flow, collapsing into the NavBar on scroll. Takes an optional round
+40pt icon action on the right — `surfaceRaised` behind a hairline, with an optional 7pt accent
+badge for "filters are active". The accessible label is required there, since the icon is the only
+thing naming the control.
 
 ### `TabBar`
 
@@ -190,6 +206,10 @@ hairline. Four icons plus a centre FAB overlapping the top edge by 12pt. Active 
 with a 3pt dot beneath. Labels 10pt.
 
 Icons: `house` `arrow-left-right` `plus` `chart-pie` `menu`.
+
+The centre `plus` is not a route. Quick Add is a sheet over whatever screen you were on, so the tab
+bar takes an `onFabPress` callback and the navigator registers four tabs, not five. The row leaves a
+gap at its midpoint for the FAB to overlap rather than letting the button cover a tab.
 
 ### `FAB`
 
@@ -208,7 +228,15 @@ Segments use category hues. Draws in at `motion.chartDraw` with a 40ms stagger.
 ### `AreaChart`
 
 Income against expense over time. Two smoothed lines, gradient fill fading to 0%, draggable scrubber
-with a value tooltip and vertical hairline. Positive and negative colours.
+with a vertical hairline and dots on each series. Positive and negative colours.
+
+The scrubbed figures replace the axis labels beneath the plot rather than floating over it: a
+tooltip inside a 130pt plot covers the very line the reader is reading. Touch anywhere in the plot
+picks the nearest point — the lines themselves are a 2.5pt target and unusable with a finger.
+
+Curves are Catmull-Rom through every point, so the line passes through the data rather than near it.
+Path length cannot be measured in React Native, so the draw-in dash uses the polyline length plus a
+margin.
 
 ### `ProgressBar`
 

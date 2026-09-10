@@ -1,24 +1,55 @@
-import { useCallback, useState } from 'react';
-import { useFocusEffect, router } from 'expo-router';
-import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 
-import { AppButton, AppText, NativeDataNotice, Screen, ScreenState } from '@/components/ui';
-import { useRefreshOnSyncedData } from '@/features/sync/use-synced-data';
-import { colors, radii, spacing } from '@/constants/theme';
 import {
-  formatTransactionDateSection,
+  BottomSheet,
+  Card,
+  Chip,
+  EmptyState,
+  ErrorState,
+  LargeTitle,
+  ListRow,
+  Money,
+  NativeDataNotice,
+  Screen,
+  SearchField,
+  SectionHeader,
+  Skeleton,
+  Text,
+  TransactionRow,
+} from '@/components/ui';
+import { useQuickAdd } from '@/features/quick-add/QuickAdd';
+import { useRefreshOnSyncedData } from '@/features/sync/use-synced-data';
+import { filterTransactionViews } from '@/features/transactions/transaction-list-filter';
+import {
   getTransactionAccountLabel,
   getTransactionLabel,
+  groupTransactionsByDay,
 } from '@/features/transactions/transaction-presentation';
-import { TransactionListRow } from '@/features/transactions/TransactionListRow';
-import { filterTransactionViews } from '@/features/transactions/transaction-list-filter';
 import type { TransactionView } from '@/features/transactions/transaction.types';
 import { isLocalFinanceDataAvailable, listTransactionViews } from '@/features/ui/data';
+import { useTheme } from '@/theme';
 
 type TypeFilter = 'all' | 'expense' | 'income';
 type DateFilter = 'all' | 'today' | 'week' | 'month';
 
+const typeFilters: { value: TypeFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'expense', label: 'Expense' },
+  { value: 'income', label: 'Income' },
+];
+
+const dateFilters: { value: DateFilter; label: string }[] = [
+  { value: 'all', label: 'All Time' },
+  { value: 'today', label: 'Today' },
+  { value: 'week', label: 'This Week' },
+  { value: 'month', label: 'This Month' },
+];
+
 export default function TransactionsScreen() {
+  const { space } = useTheme();
+  const quickAdd = useQuickAdd();
   const [transactions, setTransactions] = useState<TransactionView[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -28,6 +59,7 @@ export default function TransactionsScreen() {
   const [categoryId, setCategoryId] = useState<number>();
   const [accountId, setAccountId] = useState<number>();
   const [showFilters, setShowFilters] = useState(false);
+
   const load = useCallback(() => {
     if (!isLocalFinanceDataAvailable) return;
     setLoading(true);
@@ -45,257 +77,300 @@ export default function TransactionsScreen() {
   // A sync that changes SQLite refreshes this screen even while it is open.
   useRefreshOnSyncedData(load);
 
-  if (!isLocalFinanceDataAvailable)
+  const visible = useMemo(
+    () => filterTransactionViews(transactions, { search, type, date, categoryId, accountId }),
+    [transactions, search, type, date, categoryId, accountId],
+  );
+  const groups = useMemo(() => groupTransactionsByDay(visible), [visible]);
+
+  const clearFilters = useCallback(() => {
+    setType('all');
+    setDate('all');
+    setCategoryId(undefined);
+    setAccountId(undefined);
+  }, []);
+
+  const narrowed =
+    type !== 'all' || date !== 'all' || categoryId !== undefined || accountId !== undefined;
+
+  if (!isLocalFinanceDataAvailable) {
     return (
-      <Screen>
+      <Screen tabBar>
         <NativeDataNotice />
       </Screen>
     );
-  if (loading)
+  }
+  if (loading) {
     return (
-      <Screen>
-        <ScreenState
-          title="Loading transactions"
-          description="Reading your local transaction history..."
+      <Screen scroll tabBar>
+        <TransactionsSkeleton />
+      </Screen>
+    );
+  }
+  if (failed) {
+    return (
+      <Screen tabBar>
+        <ErrorState
+          message="Your local transaction history could not be read. Your data is safe."
+          onRetry={load}
         />
       </Screen>
     );
-  if (failed)
-    return (
-      <Screen>
-        <ScreenState
-          title="Could not load transactions"
-          description="Your local transaction history could not be read."
-          retry={load}
-        />
-      </Screen>
-    );
+  }
 
-  const visible = filterTransactionViews(transactions, {
-    search,
-    type,
-    date,
-    categoryId,
-    accountId,
-  });
-  const categoryCandidates =
+  const filterSheet = (
+    <FilterSheet
+      visible={showFilters}
+      onClose={() => setShowFilters(false)}
+      transactions={transactions}
+      type={type}
+      date={date}
+      setDate={setDate}
+      categoryId={categoryId}
+      setCategoryId={setCategoryId}
+      accountId={accountId}
+      setAccountId={setAccountId}
+      narrowed={narrowed}
+      onClear={clearFilters}
+    />
+  );
+
+  const header = (
+    <>
+      <LargeTitle
+        title="Transactions"
+        action={{
+          icon: 'sliders-horizontal',
+          onPress: () => setShowFilters(true),
+          accessibilityLabel: 'Filter transactions',
+          badge: narrowed,
+        }}
+      />
+      <View style={{ marginTop: space.lg }}>
+        <SearchField
+          accessibilityLabel="Search transactions"
+          placeholder="Search transactions"
+          value={search}
+          onChangeText={setSearch}
+        />
+      </View>
+      <View style={[styles.chips, { marginTop: space.md + 2, gap: space.sm }]}>
+        {typeFilters.map((filter) => (
+          <Chip
+            key={filter.value}
+            label={filter.label}
+            selected={type === filter.value}
+            onPress={() => setType(filter.value)}
+          />
+        ))}
+      </View>
+    </>
+  );
+
+  // An empty database and an empty result are different problems with different
+  // exits: one wants a first transaction, the other wants its filters back.
+  if (transactions.length === 0) {
+    return (
+      <Screen scroll tabBar>
+        {header}
+        <EmptyState
+          illustration="ledger"
+          title="No transactions yet"
+          body="Every expense, income, transfer and loan you record shows up here, newest first."
+          action={{ label: 'Add Transaction', onPress: quickAdd.open }}
+        />
+        {filterSheet}
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen scroll tabBar>
+      {header}
+      {groups.length === 0 ? (
+        <EmptyState
+          illustration="arcs"
+          title="Nothing matches"
+          body={
+            narrowed
+              ? 'No transaction fits the filters you have set.'
+              : 'No transaction matches that search.'
+          }
+          action={narrowed ? { label: 'Clear Filters', onPress: clearFilters } : undefined}
+        />
+      ) : (
+        groups.map((group) => (
+          <View key={group.key} style={{ marginTop: space.xxl - 2 }}>
+            <SectionHeader
+              title={group.label}
+              tone="secondary"
+              style={{ marginBottom: space.xs + 2 }}
+              trailing={
+                <Money
+                  minorUnits={Math.abs(group.netMinor)}
+                  currency={group.currency}
+                  size="row"
+                  direction={group.netMinor < 0 ? 'expense' : 'income'}
+                  muted
+                  style={styles.dayTotal}
+                />
+              }
+            />
+            <Card padding="none">
+              {group.transactions.map((transaction, index) => (
+                <TransactionRow
+                  key={transaction.id}
+                  transaction={transaction}
+                  last={index === group.transactions.length - 1}
+                  onPress={() => router.push(('/transaction/' + transaction.id) as never)}
+                />
+              ))}
+            </Card>
+          </View>
+        ))
+      )}
+      {filterSheet}
+    </Screen>
+  );
+}
+
+type FilterSheetProps = {
+  visible: boolean;
+  onClose: () => void;
+  transactions: TransactionView[];
+  type: TypeFilter;
+  date: DateFilter;
+  setDate: (value: DateFilter) => void;
+  categoryId?: number;
+  setCategoryId: (value: number | undefined) => void;
+  accountId?: number;
+  setAccountId: (value: number | undefined) => void;
+  narrowed: boolean;
+  onClear: () => void;
+};
+
+/**
+ * Period, category and account. The type chips stay on the screen itself
+ * because they are the filter people reach for constantly, and burying them one
+ * tap deeper would be the wrong trade.
+ *
+ * Category and account options come from the transactions that exist rather
+ * than from the full seeded lists, so the sheet never offers a filter that
+ * would return nothing.
+ */
+function FilterSheet({
+  visible,
+  onClose,
+  transactions,
+  type,
+  date,
+  setDate,
+  categoryId,
+  setCategoryId,
+  accountId,
+  setAccountId,
+  narrowed,
+  onClear,
+}: FilterSheetProps) {
+  const { space } = useTheme();
+  const categoryPool =
     type === 'all' ? transactions : transactions.filter((item) => item.type === type);
-  const categories = uniqueBy(categoryCandidates, (item) => item.categoryId).filter(
+  const categories = uniqueBy(categoryPool, (item) => item.categoryId).filter(
     (item) => item.categoryId !== null,
   );
   const accounts = uniqueBy(transactions, (item) => item.accountId).filter(
     (item) => item.accountId !== null,
   );
-  const filtersActive =
-    type !== 'all' || date !== 'all' || categoryId !== undefined || accountId !== undefined;
 
   return (
-    <Screen scroll contentStyle={styles.content}>
-      <View style={styles.header}>
-        <AppText variant="title" weight="700">
-          Transactions
-        </AppText>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Filter transactions"
-          onPress={() => setShowFilters(true)}
-        >
-          <AppText color={colors.primary} weight="600">
-            Filter
-          </AppText>
-        </Pressable>
-      </View>
-      <TextInput
-        accessibilityLabel="Search transactions"
-        onChangeText={setSearch}
-        placeholder="Search transactions..."
-        placeholderTextColor={colors.textMuted}
-        style={styles.search}
-        value={search}
+    <BottomSheet scroll visible={visible} onClose={onClose} title="Filters">
+      <SectionHeader
+        title="Period"
+        action={narrowed ? { label: 'Clear all', onPress: onClear } : undefined}
       />
-      <View style={styles.typeFilters}>
-        <FilterChip label="All" selected={type === 'all'} onPress={() => setType('all')} />
-        <FilterChip
-          label="Expense"
-          selected={type === 'expense'}
-          onPress={() => setType('expense')}
-        />
-        <FilterChip label="Income" selected={type === 'income'} onPress={() => setType('income')} />
+      <View style={[styles.chips, { gap: space.sm, marginBottom: space.xxl }]}>
+        {dateFilters.map((filter) => (
+          <Chip
+            key={filter.value}
+            label={filter.label}
+            selected={date === filter.value}
+            onPress={() => setDate(filter.value)}
+          />
+        ))}
       </View>
-      {filtersActive ? (
-        <AppButton label="Clear Filters" variant="secondary" onPress={clearFilters} />
-      ) : null}
 
-      {transactions.length === 0 ? (
-        <>
-          <ScreenState
-            title="No transactions yet."
-            description="Tap + to add your first expense or income."
+      <SectionHeader title="Category" />
+      <Card padding="none" style={{ marginBottom: space.xxl }}>
+        <ListRow
+          label="Any category"
+          chevron={false}
+          trailing={categoryId === undefined ? <Selected /> : undefined}
+          onPress={() => setCategoryId(undefined)}
+          last={categories.length === 0}
+        />
+        {categories.map((item, index) => (
+          <ListRow
+            key={item.categoryId}
+            label={getTransactionLabel(item)}
+            chevron={false}
+            trailing={categoryId === item.categoryId ? <Selected /> : undefined}
+            onPress={() => setCategoryId(item.categoryId ?? undefined)}
+            last={index === categories.length - 1}
           />
-          <AppButton label="Quick Add" onPress={() => router.navigate('/add' as never)} />
-        </>
-      ) : visible.length === 0 ? (
-        <>
-          <ScreenState
-            title="No transactions found."
-            description="Try a different search or clear your filters."
+        ))}
+      </Card>
+
+      <SectionHeader title="Account" />
+      <Card padding="none">
+        <ListRow
+          label="Any account"
+          chevron={false}
+          trailing={accountId === undefined ? <Selected /> : undefined}
+          onPress={() => setAccountId(undefined)}
+          last={accounts.length === 0}
+        />
+        {accounts.map((item, index) => (
+          <ListRow
+            key={item.accountId}
+            label={getTransactionAccountLabel(item)}
+            chevron={false}
+            trailing={accountId === item.accountId ? <Selected /> : undefined}
+            onPress={() => setAccountId(item.accountId ?? undefined)}
+            last={index === accounts.length - 1}
           />
-          {filtersActive ? <AppButton label="Clear Filters" onPress={clearFilters} /> : null}
-        </>
-      ) : (
-        <View style={styles.list}>
-          {visible.map((transaction, index) => {
-            const previous = visible[index - 1];
-            const showHeading =
-              !previous ||
-              formatTransactionDateSection(previous.transactionDate) !==
-                formatTransactionDateSection(transaction.transactionDate);
-            return (
-              <View key={transaction.id} style={styles.itemWrap}>
-                {showHeading ? (
-                  <AppText weight="700" color={colors.textMuted}>
-                    {formatTransactionDateSection(transaction.transactionDate)}
-                  </AppText>
-                ) : null}
-                <TransactionListRow transaction={transaction} />
-              </View>
-            );
-          })}
-        </View>
-      )}
-
-      <Modal
-        animationType="slide"
-        onRequestClose={() => setShowFilters(false)}
-        transparent
-        visible={showFilters}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modal}>
-            <View style={styles.modalHeader}>
-              <AppText variant="heading" weight="700">
-                Filters
-              </AppText>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Close filters"
-                onPress={() => setShowFilters(false)}
-              >
-                <AppText color={colors.primary} weight="600">
-                  Done
-                </AppText>
-              </Pressable>
-            </View>
-            <ScrollView contentContainerStyle={styles.modalContent}>
-              <AppText weight="600">Date</AppText>
-              <View style={styles.filterOptions}>
-                <FilterChip
-                  label="All Time"
-                  selected={date === 'all'}
-                  onPress={() => setDate('all')}
-                />
-                <FilterChip
-                  label="Today"
-                  selected={date === 'today'}
-                  onPress={() => setDate('today')}
-                />
-                <FilterChip
-                  label="This Week"
-                  selected={date === 'week'}
-                  onPress={() => setDate('week')}
-                />
-                <FilterChip
-                  label="This Month"
-                  selected={date === 'month'}
-                  onPress={() => setDate('month')}
-                />
-              </View>
-              <AppText weight="600">Category</AppText>
-              <FilterOption
-                label="Any category"
-                selected={categoryId === undefined}
-                onPress={() => setCategoryId(undefined)}
-              />
-              {categories.map((item) => (
-                <FilterOption
-                  key={item.categoryId}
-                  label={getTransactionLabel(item)}
-                  selected={categoryId === item.categoryId}
-                  onPress={() => setCategoryId(item.categoryId ?? undefined)}
-                />
-              ))}
-              <AppText weight="600">Account</AppText>
-              <FilterOption
-                label="Any account"
-                selected={accountId === undefined}
-                onPress={() => setAccountId(undefined)}
-              />
-              {accounts.map((item) => (
-                <FilterOption
-                  key={item.accountId}
-                  label={getTransactionAccountLabel(item)}
-                  selected={accountId === item.accountId}
-                  onPress={() => setAccountId(item.accountId ?? undefined)}
-                />
-              ))}
-              <AppButton label="Clear Filters" variant="secondary" onPress={clearFilters} />
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-    </Screen>
-  );
-
-  function clearFilters() {
-    setType('all');
-    setDate('all');
-    setCategoryId(undefined);
-    setAccountId(undefined);
-  }
-}
-
-function FilterChip({
-  label,
-  selected,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="radio"
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={[styles.chip, selected && styles.chipSelected]}
-    >
-      <AppText weight="600" color={selected ? colors.surface : colors.textMuted}>
-        {label}
-      </AppText>
-    </Pressable>
+        ))}
+      </Card>
+    </BottomSheet>
   );
 }
 
-function FilterOption({
-  label,
-  selected,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-}) {
+/** The chosen option in a picker list. A tick in the accent, never a filled row. */
+function Selected() {
   return (
-    <Pressable
-      accessibilityRole="radio"
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={styles.option}
-    >
-      <AppText weight={selected ? '700' : '400'}>{label}</AppText>
-      {selected ? <AppText color={colors.primary}>Selected</AppText> : null}
-    </Pressable>
+    <Text variant="smallStrong" tone="accent">
+      Selected
+    </Text>
+  );
+}
+
+function TransactionsSkeleton() {
+  const { space, radius, size } = useTheme();
+  return (
+    <View>
+      <Skeleton width={190} height={30} radius="pill" style={{ marginTop: space.xs }} />
+      <Skeleton height={size.touchTarget} radius={radius.control} style={{ marginTop: space.lg }} />
+      <View style={[styles.chips, { marginTop: space.md + 2, gap: space.sm }]}>
+        <Skeleton width={64} height={size.chip} radius="pill" />
+        <Skeleton width={92} height={size.chip} radius="pill" />
+        <Skeleton width={84} height={size.chip} radius="pill" />
+      </View>
+      {[0, 1].map((group) => (
+        <View key={group} style={{ marginTop: space.xxl - 2 }}>
+          <Skeleton width={86} height={12} radius="pill" style={{ marginBottom: space.md }} />
+          <Skeleton height={size.transactionRow * 3} radius={radius.card} />
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -310,49 +385,6 @@ function uniqueBy<T>(items: T[], key: (item: T) => number | null) {
 }
 
 const styles = StyleSheet.create({
-  content: { gap: spacing.md },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  search: {
-    minHeight: 48,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    backgroundColor: colors.surface,
-    color: colors.text,
-    paddingHorizontal: spacing.md,
-  },
-  typeFilters: { flexDirection: 'row', gap: spacing.sm },
-  chip: {
-    minHeight: 38,
-    justifyContent: 'center',
-    borderRadius: radii.pill,
-    backgroundColor: colors.surfaceMuted,
-    paddingHorizontal: spacing.md,
-  },
-  chipSelected: { backgroundColor: colors.primary },
-  list: { gap: spacing.md },
-  itemWrap: { gap: spacing.sm },
-  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0, 0, 0, 0.32)' },
-  modal: {
-    maxHeight: '80%',
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
-    backgroundColor: colors.background,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: spacing.lg,
-  },
-  modalContent: { gap: spacing.md, paddingHorizontal: spacing.lg, paddingBottom: spacing.xxxl },
-  filterOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  option: {
-    minHeight: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
+  chips: { flexDirection: 'row', flexWrap: 'wrap' },
+  dayTotal: { opacity: 0.9 },
 });

@@ -76,7 +76,6 @@ export const accountTypeIcon: Record<string, string> = {
 export const tabIcon = {
   index: 'house',
   transactions: 'arrow-left-right',
-  add: 'plus',
   reports: 'chart-pie',
   more: 'menu',
 } as const;
