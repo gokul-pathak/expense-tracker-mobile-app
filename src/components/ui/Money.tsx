@@ -77,7 +77,12 @@ export function Money({
       accessible
       accessibilityLabel={spoken}
       numberOfLines={1}
-      style={[{ lineHeight: spec.integer.lineHeight, textAlign: align }, style]}
+      // The wrapper carries the integer's own metrics, not just its leading.
+      // Android sizes a line box from the font on the Text itself, so a bare
+      // wrapper measures at the default 14pt while its children draw at 44pt,
+      // and the glyphs are then clipped through the middle. Giving the parent
+      // the largest child's size and family makes the box fit what is drawn.
+      style={[spec.integer, { textAlign: align }, style]}
     >
       {showCode ? (
         <RNText
