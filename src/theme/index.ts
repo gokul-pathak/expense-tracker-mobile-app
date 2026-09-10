@@ -10,6 +10,7 @@
 export { ThemeProvider, useTheme } from './ThemeProvider';
 export { type ThemePreference } from './preference';
 export { dark, light, type Elevation, type Palette } from './palettes';
+export { withAlpha } from './color';
 export {
   accountTypeIcon,
   categoryIdentity,

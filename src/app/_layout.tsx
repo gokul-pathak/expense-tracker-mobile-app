@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { AppErrorBoundary, Text } from '@/components/ui';
+import { AppErrorBoundary, Text, ToastProvider } from '@/components/ui';
 import { initializeDatabase } from '@/db/migrations';
 import { CloudAuthProvider } from '@/features/cloud-auth/auth.provider';
 import { AppLockGate } from '@/features/security/AppLockGate';
@@ -18,7 +18,9 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <Boot />
+        <ToastProvider>
+          <Boot />
+        </ToastProvider>
       </ThemeProvider>
     </SafeAreaProvider>
   );

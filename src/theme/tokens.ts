@@ -82,6 +82,11 @@ export const type = {
   amount: { fontSize: 16, lineHeight: 20, fontFamily: fonts.semibold, letterSpacing: 0 },
   eyebrow: { fontSize: 12, lineHeight: 16, fontFamily: fonts.semibold, letterSpacing: 0.72 },
   caption: { fontSize: 12, lineHeight: 16, fontFamily: fonts.regular, letterSpacing: 0 },
+  /** Caption weight for a number that must read as a value: legend amounts, deltas, day totals. */
+  captionStrong: { fontSize: 12, lineHeight: 16, fontFamily: fonts.semibold, letterSpacing: 0 },
+  /** Secondary line in rows and tiles: 13pt sits between caption and body. */
+  small: { fontSize: 13, lineHeight: 18, fontFamily: fonts.regular, letterSpacing: 0 },
+  smallStrong: { fontSize: 13, lineHeight: 18, fontFamily: fonts.semibold, letterSpacing: 0 },
   tab: { fontSize: 10, lineHeight: 12, fontFamily: fonts.semibold, letterSpacing: 0.2 },
 } as const;
 
@@ -94,6 +99,12 @@ export type TypeVariant = keyof typeof type;
  */
 export const moneySize = {
   hero: { integer: type.display, decimals: 26, gap: space.xs + 2 },
+  /** The success screen's figure: larger than a stat, smaller than the hero, and not serif. */
+  feature: {
+    integer: { ...type.title, fontSize: 32, lineHeight: 36 },
+    decimals: 19,
+    gap: space.xs,
+  },
   stat: { integer: { ...type.title, fontSize: 24, lineHeight: 28 }, decimals: 15, gap: space.xs },
   row: { integer: type.amount, decimals: 11, gap: space.xs },
 } as const;

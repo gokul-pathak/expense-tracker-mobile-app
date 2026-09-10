@@ -33,7 +33,7 @@ out on one screen.
 
 | #   | Screen                                  | Route                            | Canvas | Phase | Done |
 | --- | --------------------------------------- | -------------------------------- | ------ | ----- | ---- |
-| A1  | Home / Dashboard                        | `(tabs)/index.tsx`               | Drawn  | 1     | ☐    |
+| A1  | Home / Dashboard                        | `(tabs)/index.tsx`               | Drawn  | 1     | ☑    |
 | A2  | Transactions                            | `(tabs)/transactions.tsx`        | Drawn  | 2     | ☐    |
 | A3  | Quick Add                               | `(tabs)/add.tsx`                 | Drawn  | 2     | ☐    |
 | A4  | Reports                                 | `(tabs)/reports.tsx`             | Drawn  | 2     | ☐    |
@@ -68,7 +68,7 @@ out on one screen.
 | H3  | Terms & Conditions                      | _not built_                      | Drawn  | 7     | ☐    |
 | H4  | Forgot Password                         | _not built_                      | Drawn  | 7     | ☐    |
 | H5  | Use Face ID                             | _not built_                      | Drawn  | 7     | ☐    |
-| —   | Feedback states (Success, Toast, Error) | shared                           | Drawn  | 1     | ☐    |
+| —   | Feedback states (Success, Toast, Error) | shared                           | Drawn  | 1     | ☑    |
 
 Tick the box when a screen is done in **both themes** with **all its states**.
 

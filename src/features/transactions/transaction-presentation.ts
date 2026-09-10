@@ -51,3 +51,54 @@ export function formatTransactionDateSection(date: Date) {
 function startOfDay(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
+
+/**
+ * The secondary line of a transaction row: what the amount was for and where it
+ * came from, in one line. The label already says the category or kind, so this
+ * line never repeats it.
+ */
+export function getTransactionSecondaryLine(transaction: TransactionView) {
+  const account = transaction.accountName ?? 'Unknown account';
+  if (transaction.type === 'transfer') {
+    return (
+      (transaction.sourceAccountName ?? 'Unknown account') +
+      ' → ' +
+      (transaction.destinationAccountName ?? 'Unknown account')
+    );
+  }
+  if (transaction.type === 'lend' || transaction.type === 'borrow') {
+    return [transaction.personName ?? 'Person', account].join(' · ');
+  }
+  if (transaction.type === 'repayment_received') {
+    return [
+      transaction.personName ? transaction.personName + ' paid' : 'Payment received',
+      account,
+    ].join(' · ');
+  }
+  if (transaction.type === 'repayment_paid') {
+    return [
+      transaction.personName ? 'Paid ' + transaction.personName : 'Repayment paid',
+      account,
+    ].join(' · ');
+  }
+  const detail = transaction.title || transaction.note;
+  return detail ? [detail, account].join(' · ') : account;
+}
+
+/** Money direction for colour and sign. Transfers are neutral: nothing changes overall. */
+export function getTransactionDirection(
+  transaction: Pick<TransactionView, 'type'>,
+): 'expense' | 'income' | 'neutral' {
+  switch (transaction.type) {
+    case 'expense':
+    case 'lend':
+    case 'repayment_paid':
+      return 'expense';
+    case 'income':
+    case 'borrow':
+    case 'repayment_received':
+      return 'income';
+    default:
+      return 'neutral';
+  }
+}

@@ -1,27 +1,36 @@
 import { StyleSheet, View } from 'react-native';
 
-import { colors, spacing } from '@/constants/theme';
+import { useTheme } from '@/theme';
 
-import { AppButton } from './AppButton';
-import { AppText } from './AppText';
+import { Button } from './Button';
+import { Text } from './Text';
 
 type Props = { title: string; description: string; retry?: () => void; retryLabel?: string };
 
+/**
+ * A short inline status inside a screen that is otherwise fine: a section that
+ * could not load, a notice. Full-screen states use `EmptyState`, `ErrorState`
+ * and `Skeleton`.
+ */
 export function ScreenState({ title, description, retry, retryLabel = 'Try Again' }: Props) {
+  const { space } = useTheme();
   return (
-    <View style={styles.container} accessibilityRole="alert" accessibilityLiveRegion="polite">
-      <AppText variant="subheading" weight="700">
-        {title}
-      </AppText>
-      <AppText color={colors.textMuted} style={styles.description}>
+    <View
+      style={[styles.container, { gap: space.md, paddingVertical: space.xxl }]}
+      accessibilityRole="alert"
+      accessibilityLiveRegion="polite"
+    >
+      <Text variant="subheading">{title}</Text>
+      <Text variant="body" tone="secondary">
         {description}
-      </AppText>
-      {retry ? <AppButton label={retryLabel} onPress={retry} variant="secondary" /> : null}
+      </Text>
+      {retry ? (
+        <Button label={retryLabel} onPress={retry} variant="secondary" fullWidth={false} />
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { gap: spacing.md, paddingVertical: spacing.xxl },
-  description: { lineHeight: 22 },
+  container: { alignItems: 'flex-start' },
 });

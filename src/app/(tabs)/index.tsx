@@ -1,24 +1,38 @@
-import { useCallback, useState } from 'react';
 import { router, useFocusEffect } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 
-import { AppButton, AppText, Card, NativeDataNotice, Screen, ScreenState } from '@/components/ui';
-import { useRefreshOnSyncedData } from '@/features/sync/use-synced-data';
-import { colors, radii, spacing } from '@/constants/theme';
+import {
+  BalanceCard,
+  Card,
+  DonutChart,
+  type DonutSegment,
+  EmptyState,
+  ErrorState,
+  Icon,
+  Money,
+  NativeDataNotice,
+  Screen,
+  SectionHeader,
+  Skeleton,
+  Text,
+  TransactionRow,
+} from '@/components/ui';
 import type { DashboardSummary } from '@/features/dashboard/dashboard.types';
-import { TransactionListRow } from '@/features/transactions/TransactionListRow';
+import { useRefreshOnSyncedData } from '@/features/sync/use-synced-data';
 import {
   getAppSettings,
   getDashboardSummary,
   isLocalFinanceDataAvailable,
   listActiveAccounts,
 } from '@/features/ui/data';
-import { formatMinorUnits } from '@/utils/money';
+import { getCategoryIdentity, useTheme } from '@/theme';
+import { formatMinorUnits, splitMinorUnits } from '@/utils/money';
 
 export default function HomeScreen() {
   const [summary, setSummary] = useState<DashboardSummary>();
   const [currency, setCurrency] = useState('NPR');
-  const [hasAccounts, setHasAccounts] = useState(false);
+  const [accountCount, setAccountCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
 
@@ -29,7 +43,7 @@ export default function HomeScreen() {
     try {
       setSummary(getDashboardSummary());
       setCurrency(getAppSettings().defaultCurrency);
-      setHasAccounts(listActiveAccounts().length > 0);
+      setAccountCount(listActiveAccounts().length);
     } catch (error) {
       console.error('Could not load dashboard.', error);
       setFailed(true);
@@ -41,216 +55,276 @@ export default function HomeScreen() {
   // A sync that changes SQLite refreshes this screen even while it is open.
   useRefreshOnSyncedData(load);
 
-  if (!isLocalFinanceDataAvailable)
+  if (!isLocalFinanceDataAvailable) {
     return (
-      <Screen>
+      <Screen tabBar>
         <NativeDataNotice />
       </Screen>
     );
-  if (loading)
+  }
+  if (loading) {
     return (
-      <Screen>
-        <ScreenState
-          title="Loading your summary"
-          description="Reading your financial overview..."
+      <Screen scroll tabBar>
+        <HomeSkeleton />
+      </Screen>
+    );
+  }
+  if (failed || !summary) {
+    return (
+      <Screen tabBar>
+        <ErrorState
+          message="Something went wrong reading the local database. Your data is safe."
+          onRetry={load}
         />
       </Screen>
     );
-  if (failed || !summary)
+  }
+  if (accountCount === 0) {
     return (
-      <Screen>
-        <ScreenState
-          title="Could not load your financial summary"
-          description="Your local financial data could not be read."
-          retry={load}
+      <Screen tabBar>
+        <EmptyState
+          illustration="card"
+          title="Start with an account"
+          body="Add the account you keep money in. Income and expenses are recorded against it."
+          action={{ label: 'Add Account', onPress: () => router.push('/accounts/new' as never) }}
         />
       </Screen>
     );
-  if (!hasAccounts)
-    return (
-      <Screen>
-        <ScreenState
-          title="Start tracking your money"
-          description="Add an account to begin recording income and expenses."
-        />
-        <AppButton label="Add Account" onPress={() => router.push('/accounts/new' as never)} />
-      </Screen>
-    );
+  }
 
   return (
-    <Screen scroll contentStyle={styles.content}>
-      <AppText variant="heading" weight="700">
-        {getGreeting()}
-      </AppText>
+    <Screen scroll tabBar>
+      <Header />
+      <View style={styles.hero}>
+        <BalanceCard
+          minorUnits={summary.totalBalanceMinor}
+          currency={currency}
+          caption={accountCount === 1 ? 'Across 1 account' : 'Across ' + accountCount + ' accounts'}
+        />
+      </View>
 
-      <Card
-        style={styles.balanceCard}
-        accessible
-        accessibilityLabel={`Total balance ${formatMinorUnits(summary.totalBalanceMinor, currency)}`}
-      >
-        <AppText color={colors.textMuted} weight="600">
-          Total Balance
-        </AppText>
-        <AppText variant="title" weight="700" style={styles.balanceAmount}>
-          {formatMinorUnits(summary.totalBalanceMinor, currency)}
-        </AppText>
-      </Card>
+      <MonthCard summary={summary} currency={currency} />
 
       <View style={styles.section}>
-        <AppText variant="subheading" weight="700">
-          This Month
-        </AppText>
-        <Card style={styles.monthlyCard}>
-          <Metric
-            label="Income"
-            value={summary.monthlyIncomeMinor}
-            currency={currency}
-            color={colors.success}
-          />
-          <Metric
-            label="Expense"
-            value={summary.monthlyExpenseMinor}
-            currency={currency}
-            color={colors.danger}
-          />
-          <View style={styles.savings}>
-            <Metric label="Saved" value={summary.monthlySavingsMinor} currency={currency} />
-            {summary.monthlySavingsMinor < 0 ? (
-              <AppText variant="caption" color={colors.textMuted}>
-                Spent more than earned
-              </AppText>
-            ) : null}
-          </View>
-        </Card>
+        <SectionHeader
+          title="Spending"
+          action={{
+            label: 'This month',
+            onPress: () => router.navigate('/reports' as never),
+            accessibilityLabel: 'Open reports for this month',
+          }}
+        />
+        <SpendingCard summary={summary} currency={currency} />
       </View>
 
       <View style={styles.section}>
-        <AppText variant="subheading" weight="700">
-          Spending
-        </AppText>
-        {summary.categorySpending.length === 0 ? (
-          <Card>
-            <AppText color={colors.textMuted}>No spending recorded this month.</AppText>
-          </Card>
-        ) : (
-          <Card style={styles.categories}>
-            {summary.categorySpending.map((category) => (
-              <View
-                key={category.categoryId}
-                accessible
-                accessibilityLabel={`${category.categoryName}, ${formatMinorUnits(category.amountMinor, currency)}, ${category.percentage}% of spending`}
-                style={styles.category}
-              >
-                <View style={styles.categoryHeader}>
-                  <View>
-                    <AppText weight="600">{category.categoryName}</AppText>
-                    <AppText variant="caption" color={colors.textMuted}>
-                      {formatMinorUnits(category.amountMinor, currency)}
-                    </AppText>
-                  </View>
-                  <AppText weight="700">{category.percentage}%</AppText>
-                </View>
-                <View style={styles.barTrack}>
-                  <View style={[styles.barFill, { width: `${category.percentage}%` }]} />
-                </View>
-              </View>
-            ))}
-          </Card>
-        )}
-      </View>
-
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <AppText variant="subheading" weight="700">
-            Recent Transactions
-          </AppText>
-          {summary.recentTransactions.length > 0 ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="View all transactions"
-              onPress={() => router.navigate('/transactions' as never)}
-            >
-              <AppText color={colors.primary} weight="600">
-                View All
-              </AppText>
-            </Pressable>
-          ) : null}
-        </View>
+        <SectionHeader
+          title="Recent"
+          action={
+            summary.recentTransactions.length > 0
+              ? {
+                  label: 'View all',
+                  onPress: () => router.navigate('/transactions' as never),
+                  accessibilityLabel: 'View all transactions',
+                }
+              : undefined
+          }
+        />
         {summary.recentTransactions.length === 0 ? (
           <Card>
-            <AppText color={colors.textMuted}>
-              No transactions yet. Tap + to add your first expense or income.
-            </AppText>
+            <Text variant="body" tone="secondary">
+              No transactions yet. Tap the plus button to record your first one.
+            </Text>
           </Card>
         ) : (
-          <View style={styles.transactions}>
-            {summary.recentTransactions.map((transaction) => (
-              <TransactionListRow key={transaction.id} transaction={transaction} />
+          <Card padding="none">
+            {summary.recentTransactions.map((transaction, index) => (
+              <TransactionRow
+                key={transaction.id}
+                transaction={transaction}
+                last={index === summary.recentTransactions.length - 1}
+                onPress={() => router.push(('/transaction/' + transaction.id) as never)}
+              />
             ))}
-          </View>
+          </Card>
         )}
       </View>
     </Screen>
   );
 }
 
-function Metric({
-  label,
-  value,
-  currency,
-  color,
-}: {
-  label: string;
-  value: number;
-  currency: string;
-  color?: string;
-}) {
+function Header() {
+  const { space } = useTheme();
+  const now = new Date();
+  const date = new Intl.DateTimeFormat('en-US', {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+  }).format(now);
   return (
-    <View
-      accessible
-      accessibilityLabel={`${label} ${formatMinorUnits(value, currency)}`}
-      style={styles.metric}
-    >
-      <AppText variant="caption" color={colors.textMuted} weight="600">
-        {label}
-      </AppText>
-      <AppText weight="700" color={color}>
-        {formatMinorUnits(value, currency)}
-      </AppText>
+    <View style={{ gap: 2, marginTop: space.xs }}>
+      <Text variant="body" tone="secondary">
+        {getGreeting(now)}
+      </Text>
+      <Text variant="heading">{date}</Text>
     </View>
   );
 }
 
-function getGreeting() {
-  const hour = new Date().getHours();
+/** Income, expense, and what was left, in one card divided by hairlines. */
+function MonthCard({ summary, currency }: { summary: DashboardSummary; currency: string }) {
+  const { palette, space, gutter } = useTheme();
+  const overspent = summary.monthlySavingsMinor < 0;
+  const rowStyle = { paddingVertical: space.md + 1, paddingHorizontal: gutter - 2 };
+  return (
+    <Card padding="none" style={styles.month}>
+      <View style={[styles.monthRow, rowStyle]}>
+        <View style={[styles.monthLabel, { gap: space.sm + 2 }]}>
+          <Icon name="arrow-down-left" size={17} color={palette.positive} />
+          <Text variant="body" tone="secondary">
+            Income
+          </Text>
+        </View>
+        <Money minorUnits={summary.monthlyIncomeMinor} currency={currency} direction="income" />
+      </View>
+      <View style={[styles.divider, { backgroundColor: palette.divider }]} />
+      <View style={[styles.monthRow, rowStyle]}>
+        <View style={[styles.monthLabel, { gap: space.sm + 2 }]}>
+          <Icon name="arrow-up-right" size={17} color={palette.negative} />
+          <Text variant="body" tone="secondary">
+            Expense
+          </Text>
+        </View>
+        <Money minorUnits={summary.monthlyExpenseMinor} currency={currency} direction="expense" />
+      </View>
+      <View style={[styles.divider, { backgroundColor: palette.hairline }]} />
+      <View style={[styles.monthRow, rowStyle]}>
+        <Text variant="bodyStrong">{overspent ? 'Overspent this month' : 'Saved this month'}</Text>
+        <Money
+          minorUnits={Math.abs(summary.monthlySavingsMinor)}
+          currency={currency}
+          direction={overspent ? 'expense' : 'neutral'}
+        />
+      </View>
+    </Card>
+  );
+}
+
+/** The month's category split: a donut with the total in its centre and a legend. */
+function SpendingCard({ summary, currency }: { summary: DashboardSummary; currency: string }) {
+  const { space } = useTheme();
+  const categories = summary.categorySpending;
+
+  if (categories.length === 0) {
+    return (
+      <Card>
+        <Text variant="body" tone="secondary">
+          No spending recorded this month.
+        </Text>
+      </Card>
+    );
+  }
+
+  const segments: DonutSegment[] = categories.map((category) => ({
+    key: category.categoryId,
+    value: category.amountMinor,
+    color: getCategoryIdentity(category.categoryIcon).hue,
+  }));
+  const shownTotal = categories.reduce((sum, c) => sum + c.amountMinor, 0);
+  const remainder = summary.monthlyExpenseMinor - shownTotal;
+  if (remainder > 0) {
+    segments.push({ key: 'other', value: remainder, color: getCategoryIdentity('other').hue });
+  }
+
+  return (
+    <Card padding="lg" style={[styles.spending, { gap: space.lg + 2 }]}>
+      <DonutChart
+        segments={segments}
+        accessibilityLabel={
+          'Spending this month ' + formatMinorUnits(summary.monthlyExpenseMinor, currency)
+        }
+      >
+        <Text variant="tab" tone="tertiary" style={styles.donutCaption}>
+          Total
+        </Text>
+        <Text variant="bodyStrong" tabular>
+          {splitMinorUnits(summary.monthlyExpenseMinor, currency).integer}
+        </Text>
+      </DonutChart>
+      <View style={[styles.legend, { gap: space.sm + 1 }]}>
+        {categories.map((category) => (
+          <View
+            key={category.categoryId}
+            accessible
+            accessibilityLabel={
+              category.categoryName +
+              ', ' +
+              formatMinorUnits(category.amountMinor, currency) +
+              ', ' +
+              category.percentage +
+              '% of spending'
+            }
+            style={[styles.legendRow, { gap: space.sm }]}
+          >
+            <View
+              style={[
+                styles.swatch,
+                { backgroundColor: getCategoryIdentity(category.categoryIcon).hue },
+              ]}
+            />
+            <Text variant="small" tone="secondary" numberOfLines={1} style={styles.legendLabel}>
+              {category.categoryName}
+            </Text>
+            <Text variant="smallStrong" tabular>
+              {splitMinorUnits(category.amountMinor, currency).integer}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </Card>
+  );
+}
+
+function HomeSkeleton() {
+  const { space, radius } = useTheme();
+  return (
+    <View style={{ gap: space.md }}>
+      <View style={{ gap: space.sm, marginTop: space.xs, marginBottom: space.sm }}>
+        <Skeleton width={110} height={14} radius="pill" />
+        <Skeleton width={180} height={22} radius="pill" />
+      </View>
+      <Skeleton height={150} radius={radius.heroCard} />
+      <Skeleton height={148} radius={radius.card} />
+      <View style={{ marginTop: space.md, gap: space.sm }}>
+        <Skeleton width={90} height={12} radius="pill" />
+        <Skeleton height={140} radius={radius.card} />
+      </View>
+      <View style={{ marginTop: space.md, gap: space.sm }}>
+        <Skeleton width={70} height={12} radius="pill" />
+        <Skeleton height={68 * 3} radius={radius.card} />
+      </View>
+    </View>
+  );
+}
+
+function getGreeting(now: Date) {
+  const hour = now.getHours();
   if (hour < 12) return 'Good morning';
   if (hour < 18) return 'Good afternoon';
   return 'Good evening';
 }
 
 const styles = StyleSheet.create({
-  content: { gap: spacing.xl },
-  balanceCard: { gap: spacing.xs, paddingVertical: spacing.xl },
-  balanceAmount: { fontSize: 34 },
-  section: { gap: spacing.md },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  monthlyCard: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.lg },
-  metric: { flexGrow: 1, gap: spacing.xs },
-  savings: {
-    width: '100%',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    paddingTop: spacing.md,
-  },
-  categories: { gap: spacing.lg },
-  category: { gap: spacing.sm },
-  categoryHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  barTrack: {
-    height: 7,
-    overflow: 'hidden',
-    borderRadius: radii.pill,
-    backgroundColor: colors.surfaceMuted,
-  },
-  barFill: { height: '100%', borderRadius: radii.pill, backgroundColor: colors.primary },
-  transactions: { gap: spacing.sm },
+  hero: { marginTop: 18 },
+  month: { marginTop: 12 },
+  monthRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  monthLabel: { flexDirection: 'row', alignItems: 'center' },
+  divider: { height: StyleSheet.hairlineWidth },
+  section: { marginTop: 24 },
+  spending: { flexDirection: 'row', alignItems: 'center' },
+  donutCaption: { marginBottom: 1 },
+  legend: { flex: 1 },
+  legendRow: { flexDirection: 'row', alignItems: 'center' },
+  legendLabel: { flex: 1 },
+  swatch: { width: 8, height: 8, borderRadius: 2 },
 });

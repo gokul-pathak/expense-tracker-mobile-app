@@ -1,10 +1,11 @@
-import { ScreenState } from './ScreenState';
+import { EmptyState } from './EmptyState';
 
 export function NativeDataNotice() {
   return (
-    <ScreenState
+    <EmptyState
+      illustration="card"
       title="Available in the mobile app"
-      description="Local finance data is currently available in the Android/iOS app."
+      body="Your local finance data is read on this device. Open the Android or iOS app to see it."
     />
   );
 }

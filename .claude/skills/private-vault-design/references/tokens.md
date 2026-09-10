@@ -109,7 +109,14 @@ amount      16 / 20   600    0      Inter tabular      amounts in list rows
 eyebrow     12 / 16   600   +6%     Inter UPPERCASE    section labels
 caption     12 / 16   400    0      Inter              metadata, timestamps
 tab         10 / 12   600   +2%     Inter              tab bar labels
+captionStrong 12 / 16 600    0      Inter tabular      legend amounts, deltas, day totals
+small       13 / 18   400    0      Inter              chip labels, legend labels, tile captions
+smallStrong 13 / 18   600    0      Inter              chip labels selected, section actions
 ```
+
+`captionStrong`, `small` and `smallStrong` were added when the canvas was reconciled with the
+scale: the artboards use 13pt for legend labels, chip text and section actions, and a semibold 12pt
+for small numbers. Without named tokens those would have become inline sizes.
 
 Each token carries size, lineHeight, weight, and letterSpacing **together**, because those four are
 one decision. A component that sets `fontSize` alone will have the wrong leading and tracking.
@@ -136,6 +143,7 @@ The most important rule in the system. Three parts, three treatments:
 | `hero` | 44pt Instrument Serif | 26pt tertiary | Balance card, budget hero, person outstanding |
 | `stat` | 24pt Inter            | 15pt tertiary | Stat tiles, summary cards                     |
 | `row`  | 16pt Inter            | 11pt tertiary | Transaction rows, list items                  |
+| `feature` | 32pt Inter         | 19pt tertiary | Success screen figure                         |
 
 Rules `<Money>` encodes:
 
@@ -298,3 +306,10 @@ The System / Light / Dark choice is a **device** preference, like App Lock. It i
 SQLite key-value store (`expo-sqlite/kv-store`, `localStorage` on web) rather than in the synced
 `settings` row, because syncing it would force every device onto one scheme. The store is
 synchronous, so the first frame renders in the chosen scheme with no flash.
+
+## Toast colours
+
+The toast is a note laid on top of the page, so it does not follow the surface rules of the page
+beneath it. In dark it is `surfaceRaised` at 96% with a slightly stronger hairline; in light it is
+**ink** with white text. The action stays champagne in both schemes because it always sits on a
+dark ground. These live in `palette.toast`.

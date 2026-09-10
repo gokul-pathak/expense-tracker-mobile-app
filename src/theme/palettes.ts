@@ -54,6 +54,12 @@ export type Palette = {
   info: string;
   warning: string;
 
+  /**
+   * The toast is a note laid on top of the page: raised surface in dark, ink in
+   * light. Its action stays champagne in both, because it sits on ink either way.
+   */
+  toast: { surface: string; text: string; action: string; hairline: string };
+
   elevation: { card: Elevation; sheet: Elevation };
 };
 
@@ -92,6 +98,13 @@ export const dark: Palette = {
   negative: '#F4726A',
   info: '#7AA2F7',
   warning: '#E8B84B',
+
+  toast: {
+    surface: 'rgba(26,31,42,0.96)',
+    text: '#F2F4F7',
+    action: '#D8C08A',
+    hairline: 'rgba(255,255,255,0.10)',
+  },
 
   elevation: {
     card: {
@@ -148,6 +161,13 @@ export const light: Palette = {
   negative: '#C64236',
   info: '#3C63C8',
   warning: '#A8761A',
+
+  toast: {
+    surface: '#12151A',
+    text: '#FFFFFF',
+    action: '#D8C08A',
+    hairline: 'rgba(255,255,255,0.10)',
+  },
 
   elevation: {
     card: {

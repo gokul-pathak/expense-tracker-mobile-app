@@ -1,10 +1,9 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { colors, spacing } from '@/constants/theme';
+import { useTheme } from '@/theme';
 
-import { AppButton } from './AppButton';
-import { AppText } from './AppText';
+import { ErrorState } from './ErrorState';
 
 type Props = { children: ReactNode };
 type State = { error: Error | null };
@@ -19,23 +18,21 @@ export class AppErrorBoundary extends Component<Props, State> {
   }
   render() {
     if (!this.state.error) return this.props.children;
-    return (
-      <View style={styles.container} accessibilityRole="alert">
-        <AppText variant="heading" weight="700">
-          Something went wrong.
-        </AppText>
-        <AppText color={colors.textMuted}>Your financial data is still stored locally.</AppText>
-        <AppButton label="Try Again" onPress={() => this.setState({ error: null })} />
-      </View>
-    );
+    return <Fallback onRetry={() => this.setState({ error: null })} />;
   }
 }
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    gap: spacing.lg,
-    padding: spacing.lg,
-    backgroundColor: colors.background,
-  },
-});
+
+function Fallback({ onRetry }: { onRetry: () => void }) {
+  const { palette, gutter } = useTheme();
+  return (
+    <View style={[styles.fill, { backgroundColor: palette.canvas, paddingHorizontal: gutter }]}>
+      <ErrorState
+        title="Something went wrong"
+        message="Your financial data is still stored on this device."
+        onRetry={onRetry}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({ fill: { flex: 1 } });
