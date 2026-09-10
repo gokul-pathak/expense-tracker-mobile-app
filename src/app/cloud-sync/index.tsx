@@ -70,6 +70,11 @@ export default function CloudSyncScreen() {
         </View>
       ) : null}
 
+      <Text variant="body" tone="secondary" style={{ marginTop: space.sm }}>
+        Your financial data can be synchronized with your cloud account across devices. It is always
+        stored on this device as well.
+      </Text>
+
       <Card hero style={{ marginTop: space.lg }}>
         <View
           accessibilityRole="summary"
@@ -141,11 +146,6 @@ export default function CloudSyncScreen() {
           </Card>
         </View>
       ) : null}
-
-      <Text variant="caption" tone="tertiary" style={{ marginTop: space.xl }}>
-        Your records are always kept on this device. Sync adds a copy in your cloud account so other
-        devices can read it.
-      </Text>
 
       <BottomSheet
         visible={signOutOpen}
