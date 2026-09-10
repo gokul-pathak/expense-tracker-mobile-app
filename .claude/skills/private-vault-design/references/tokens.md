@@ -183,10 +183,14 @@ heroCard   24   balance card, budget hero
 sheet      28   bottom sheets, top corners only
 ```
 
-The hero's leading is 56 rather than the 48 the rest of the scale would imply. Instrument Serif at
-44pt has tall enough ascenders that a 48pt line box clips the tops of the digits — visible on every
-balance, and worse on Android. Measured in a browser at several magnitudes before settling on 56.
-A serif needs more leading than the sans steps around it; do not "correct" this back into line.
+**`<Money>` ignores the leading in this table and takes the font's natural vertical box instead.**
+Android measures a `Text` from its line height and then clips whatever the glyphs draw outside that
+box. Instrument Serif at 44pt needs more room than any figure the scale would give it, so forcing
+leading sliced every amount horizontally through the middle — the small currency code and decimals
+along with the digits. An amount is always one line, so there is no leading to control anyway.
+
+The consequence for anything else: do not set an explicit `lineHeight` on large text in a custom
+font, especially the serif. If you need `display` somewhere new, let it size itself.
 
 Radii step up with the element's importance and size. A 20pt radius on a 44pt-tall button looks
 bulbous; a 14pt radius on a full-width hero card looks stingy. `button` exists because the pinned

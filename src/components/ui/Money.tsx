@@ -53,6 +53,15 @@ export function Money({
   const { palette, moneySize, type } = useTheme();
   const parts = splitMinorUnits(minorUnits, currency);
   const spec = moneySize[size];
+  /**
+   * The figure takes the font's own vertical box, with no leading forced onto
+   * it. Android measures a `Text` from its line height and then clips whatever
+   * the glyphs draw outside that box, and Instrument Serif at 44pt needs more
+   * room than the 56pt the scale asks for — which sliced every amount through
+   * the middle, the small currency code and decimals along with it. An amount
+   * is always one line, so there is no leading to control here anyway.
+   */
+  const integerFont = { ...spec.integer, lineHeight: undefined };
 
   let sign = '';
   let color = palette.textPrimary;
@@ -77,12 +86,7 @@ export function Money({
       accessible
       accessibilityLabel={spoken}
       numberOfLines={1}
-      // The wrapper carries the integer's own metrics, not just its leading.
-      // Android sizes a line box from the font on the Text itself, so a bare
-      // wrapper measures at the default 14pt while its children draw at 44pt,
-      // and the glyphs are then clipped through the middle. Giving the parent
-      // the largest child's size and family makes the box fit what is drawn.
-      style={[spec.integer, { textAlign: align }, style]}
+      style={[integerFont, { textAlign: align }, style]}
     >
       {showCode ? (
         <RNText
@@ -95,13 +99,13 @@ export function Money({
           {CODE_GAP}
         </RNText>
       ) : null}
-      <RNText style={[spec.integer, tabular, { color }]}>
+      <RNText style={[integerFont, tabular, { color }]}>
         {sign}
         {parts.integer}
       </RNText>
       <RNText
         style={[
-          spec.integer,
+          integerFont,
           tabular,
           {
             fontSize: spec.decimals,
