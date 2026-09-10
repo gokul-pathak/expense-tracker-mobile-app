@@ -272,3 +272,29 @@ Add (FAB)      plus
 Reports        chart-pie
 More           menu
 ```
+
+## Size
+
+Fixed dimensions that recur across components, in `size`:
+
+```
+touchTarget      44   minimum on either axis
+categoryChip     36   rounded square, radius 12 (categoryChipRadius)
+button           48   buttonSmall 40
+control          52   selector fields, inputs
+chip             32
+listRow          56   transactionRow 68
+navBar           56   tabBar 64   fab 56
+progressBar       6
+sheetHandle      38 x 4
+```
+
+These are named so a row height is one decision rather than a number retyped per screen. When a
+new component needs a fixed dimension, add it here rather than inlining it.
+
+## Theme preference persistence
+
+The System / Light / Dark choice is a **device** preference, like App Lock. It is stored in the
+SQLite key-value store (`expo-sqlite/kv-store`, `localStorage` on web) rather than in the synced
+`settings` row, because syncing it would force every device onto one scheme. The store is
+synchronous, so the first frame renders in the chosen scheme with no flash.

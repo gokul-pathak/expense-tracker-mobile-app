@@ -7,7 +7,8 @@
  * The system is documented in `.claude/skills/private-vault-design/`.
  */
 
-export { ThemeProvider, useTheme, type ThemePreference } from './ThemeProvider';
+export { ThemeProvider, useTheme } from './ThemeProvider';
+export { type ThemePreference } from './preference';
 export { dark, light, type Elevation, type Palette } from './palettes';
 export {
   accountTypeIcon,
@@ -26,6 +27,7 @@ export {
   motion,
   radius,
   SCREEN_GUTTER,
+  size,
   space,
   type,
   type MoneySize,

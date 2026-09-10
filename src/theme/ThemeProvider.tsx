@@ -9,6 +9,8 @@ import {
 import { useColorScheme, type ColorSchemeName } from 'react-native';
 
 import { dark, light, type Palette } from './palettes';
+import type { ThemePreference } from './preference';
+import { loadThemePreference, saveThemePreference } from './preference.storage';
 import {
   backdrop,
   fonts,
@@ -17,17 +19,11 @@ import {
   moneySize,
   motion,
   radius,
+  size,
   space,
   SCREEN_GUTTER,
   type,
 } from './tokens';
-
-/**
- * What the user chose, which is not the same as what is showing. `system` defers
- * to the OS, and is the default because a finance app that ignores the device's
- * appearance setting feels like it was ported from somewhere else.
- */
-export type ThemePreference = 'system' | 'light' | 'dark';
 
 type ThemeValue = {
   palette: Palette;
@@ -39,6 +35,7 @@ type ThemeValue = {
   space: typeof space;
   gutter: typeof SCREEN_GUTTER;
   radius: typeof radius;
+  size: typeof size;
   type: typeof type;
   fonts: typeof fonts;
   moneySize: typeof moneySize;
@@ -64,16 +61,16 @@ function resolveScheme(preference: ThemePreference, system: ColorSchemeName): 'd
 
 export function ThemeProvider({
   children,
-  initialPreference = 'system',
+  initialPreference,
 }: PropsWithChildren<{ initialPreference?: ThemePreference }>) {
   const system = useColorScheme();
-  const [preference, setPreferenceState] = useState<ThemePreference>(initialPreference);
+  const [preference, setPreferenceState] = useState<ThemePreference>(
+    () => initialPreference ?? loadThemePreference() ?? 'system',
+  );
 
   const setPreference = useCallback((next: ThemePreference) => {
     setPreferenceState(next);
-    // Persistence is wired to the settings repository when the Settings screen
-    // is rebuilt. Until then the choice lives for the session, which is enough
-    // to develop and review both schemes.
+    saveThemePreference(next);
   }, []);
 
   const value = useMemo<ThemeValue>(() => {
@@ -87,6 +84,7 @@ export function ThemeProvider({
       space,
       gutter: SCREEN_GUTTER,
       radius,
+      size,
       type,
       fonts,
       moneySize,

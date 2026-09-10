@@ -16,7 +16,8 @@
         {
           "faceIDPermission": "Use Face ID to unlock your personal finance data."
         }
-      ]
+      ],
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true,

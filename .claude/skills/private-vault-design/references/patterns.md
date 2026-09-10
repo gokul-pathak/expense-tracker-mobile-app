@@ -66,8 +66,10 @@ const { palette, space, radius, type } = useTheme();
 one theme and broken in the other. The only file that imports both is `ThemeProvider`.
 
 Resolution order: an explicit user choice from settings, else the system scheme from RN's
-`useColorScheme()`. Settings offers System / Light / Dark and persists via the existing
-`settings.repository` — do not add a second storage mechanism.
+`useColorScheme()`. Settings offers System / Light / Dark. The choice persists through
+`src/theme/preference.storage.*` (SQLite key-value store on native, `localStorage` on web) —
+**not** the synced `settings` row, because the scheme is a device preference and syncing it would
+force every device onto one look. `ThemeProvider` reads it synchronously at mount.
 
 **Styles.** `StyleSheet.create` cannot read the theme, so static styles hold only layout (flex,
 spacing, radii) and colour is applied inline from the palette:
@@ -80,6 +82,10 @@ This keeps the structural styles memoised while letting colour follow the theme.
 factory is also fine for heavier screens.
 
 ## Money
+
+`<Money>` renders the three parts as nested `Text` spans inside one parent `Text`, which is the
+one layout RN baseline-aligns reliably on both platforms at mixed font sizes. The 6pt code gap is
+whitespace inside the code span rather than a margin, for the same reason.
 
 Tabular numerals in RN:
 
@@ -95,8 +101,9 @@ Amounts are integer minor units everywhere. `src/utils/money.ts` already has
 `parseMoneyToMinorUnits` and `formatMinorUnits` — `<Money>` should build on those rather than doing
 its own arithmetic. Never convert to float for display.
 
-Lakh grouping is locale-driven. `Intl.NumberFormat('en-IN')` produces `1,24,500`; the current
-`formatMinorUnits` hardcodes `en-US`, so it needs a currency-aware locale map as part of Phase 0.
+Lakh grouping is by currency, not device locale: `groupInteger` in `src/utils/money.ts` groups
+NPR and INR in the lakh form and everything else in thousands, by hand rather than through `Intl`
+so Hermes, web and Node tests agree. `splitMinorUnits` returns the three parts `<Money>` renders.
 
 ## Icons
 

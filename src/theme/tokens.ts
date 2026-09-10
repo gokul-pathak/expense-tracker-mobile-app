@@ -120,10 +120,33 @@ export const motion = {
   tabChange: { duration: 180 },
 } as const;
 
+/**
+ * Fixed dimensions that recur across components. Named so a row height or a
+ * touch target is one decision rather than a number retyped per screen.
+ */
+export const size = {
+  /** Minimum touch target on either axis. */
+  touchTarget: 44,
+  /** Category chip: a rounded square holding the category icon. */
+  categoryChip: 36,
+  categoryChipRadius: 12,
+  button: 48,
+  buttonSmall: 40,
+  control: 52,
+  chip: 32,
+  listRow: 56,
+  transactionRow: 68,
+  navBar: 56,
+  tabBar: 64,
+  fab: 56,
+  progressBar: 6,
+  sheetHandle: { width: 38, height: 4 },
+} as const;
+
 /** Backdrop behind a presented sheet. */
 export const backdrop = { opacity: 0.55, blur: 12 } as const;
 
 /** Lucide stroke width, fixed system-wide. */
 export const ICON_STROKE = 1.5;
 
-export const iconSize = { inline: 16, row: 20, tab: 24 } as const;
+export const iconSize = { inline: 16, chip: 18, row: 20, tab: 24 } as const;
