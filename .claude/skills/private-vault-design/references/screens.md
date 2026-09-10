@@ -60,14 +60,14 @@ out on one screen.
 | G1  | Settings                                | `settings/index.tsx`             | Drawn  | 6     | ☑    |
 | G3  | Cloud Sync                              | `cloud-sync/index.tsx`           | Spec   | 6     | ☑    |
 | G4  | Cloud Sync setup                        | `cloud-sync/setup.tsx`           | Spec   | 6     | ☑    |
-| G2  | App Lock (PIN)                          | `AppLockGate.native.tsx`         | Drawn  | 7     | ☐    |
-| G5a | Sign In                                 | `cloud-sync/sign-in.tsx`         | Drawn  | 7     | ☐    |
-| G5b | Create Account                          | `cloud-sync/sign-up.tsx`         | Drawn  | 7     | ☐    |
-| H1  | Splash                                  | _not built_                      | Drawn  | 7     | ☐    |
-| H2  | Onboarding (1 of 3)                     | _not built_                      | Drawn  | 7     | ☐    |
-| H3  | Terms & Conditions                      | _not built_                      | Drawn  | 7     | ☐    |
-| H4  | Forgot Password                         | _not built_                      | Drawn  | 7     | ☐    |
-| H5  | Use Face ID                             | _not built_                      | Drawn  | 7     | ☐    |
+| G2  | App Lock (PIN)                          | `AppLockGate.native.tsx`         | Drawn  | 7     | ☑    |
+| G5a | Sign In                                 | `cloud-sync/sign-in.tsx`         | Drawn  | 7     | ☑    |
+| G5b | Create Account                          | `cloud-sync/sign-up.tsx`         | Drawn  | 7     | ☑    |
+| H1  | Splash                                  | `app/_layout.tsx`                | Drawn  | 7     | ☑    |
+| H2  | Onboarding (1 of 3)                     | `first-run/FirstRunGate.tsx`     | Drawn  | 7     | ☑    |
+| H3  | Terms & Conditions                      | `first-run/FirstRunGate.tsx`     | Drawn  | 7     | ☑    |
+| H4  | Forgot Password                         | `cloud-sync/forgot-password.tsx` | Drawn  | 7     | ☑    |
+| H5  | Use Face ID                             | lock screen + Settings switch    | Drawn  | 7     | ☑    |
 | —   | Feedback states (Success, Toast, Error) | shared                           | Drawn  | 1     | ☑    |
 
 Tick the box when a screen is done in **both themes** with **all its states**.
@@ -185,6 +185,48 @@ before anything is tapped.
 While linking runs there is no back control at all. Once the critical section starts there is no
 safe cancel, so the screen must not appear to offer one.
 
+### G2 · App Lock (PIN)
+
+Mark, "Enter your PIN", four dots, a drawn keypad, and a Face ID action when biometrics are on.
+
+The keypad is drawn rather than raising the system numeric keyboard. A system keyboard puts the
+digits somewhere different on every device and covers half the screen doing it; a drawn one keeps
+the targets where they were last time. A wrong PIN clears the field and fires an error haptic, so
+the failure is felt as well as read.
+
+The same mark on the canvas is what shows in the recents switcher, so a shoulder-glance or a
+screenshot reveals no figures.
+
+### H1 · Splash
+
+The mark on the canvas and nothing that moves. Waits on migrations and fonts, which is what boot
+already waited on, and nothing else. No spinner: a sub-second wait feels longer with one.
+
+### H2 / H3 · Onboarding and Terms
+
+Both live in `FirstRunGate`, above the navigator and inside `AppLockGate` — an existing user with a
+lock unlocks before seeing either.
+
+Terms comes first and needs its checkbox ticked, but it is a soft gate: three plain points about
+where the data lives, who is responsible for the device, and that the app measures rather than
+advises. Onboarding is three panels with line illustrations and a Skip that is always visible.
+
+Their flags are device-local, set **only when the user finishes or skips**, never on display. An
+interrupted first launch sees them again, which is the right failure: showing onboarding twice is a
+far smaller harm than skipping it. An unreadable flag reads as "not done" for the same reason.
+
+### H4 · Forgot Password
+
+Built, reachable from Sign In, and honest: it says resetting from inside the app is not available
+yet and points the user at their email. It shows no field, because a field that silently sends
+nothing is worse than no field.
+
+### H5 · Use Face ID
+
+Not a screen of its own. There is nowhere in an optional-auth flow for a standalone biometric
+prompt to live, so the affordance is the "Use Face ID" action on the lock screen and the Biometrics
+switch in Settings, which appears directly under App Lock the moment it is turned on.
+
 ### B3 · Transfer
 
 `From` and `To` selectors stacked with a circular swap button on the hairline between them.
@@ -266,21 +308,36 @@ Phase 7 adds surface that does not exist today. The app currently boots straight
 `AppLockGate` into the tabs; cloud auth is optional and lives in Settings. These are **product**
 decisions, not styling ones — settle them with the user before building, and record the answers here.
 
-| Question                    | Options                                                                         | Decided |
-| --------------------------- | ------------------------------------------------------------------------------- | ------- |
-| When does Onboarding show?  | First launch only · until dismissed · never again after Terms accepted          | ☐       |
-| Does Terms gate entry?      | Hard gate before first use · soft, dismissible · shown only at sign-up          | ☐       |
-| What does Splash wait on?   | DB migration only · migration + session restore · minimum display time          | ☐       |
-| Is Forgot Password wired?   | Supabase reset email · deep link back into the app · out of scope for now       | ☐       |
-| Does auth become mandatory? | Stays optional (local-first) · required for sync only · required to use the app | ☐       |
+| Question                    | Decided                                                     |
+| --------------------------- | ----------------------------------------------------------- |
+| When does Onboarding show?  | **Until dismissed** — repeats until finished or skipped ☑   |
+| Does Terms gate entry?      | **Soft, dismissible** — shown once, with a way past it ☑    |
+| What does Splash wait on?   | **Migration + fonts** — current boot behaviour, unchanged ☑ |
+| Is Forgot Password wired?   | **Out of scope for now** — screen explains, does not send ☑ |
+| Does auth become mandatory? | **Stays optional** — local-first, sign-in only offered ☑    |
 
-**Strong recommendation on the last one: auth stays optional.** The app's whole architecture is
-local-first — SQLite is the source of truth and sync is additive. An onboarding flow that implies an
-account is required would contradict the product and break the offline promise. Splash and
-Onboarding should lead into the app, with sign-in offered rather than demanded.
+Settled with the user on 2026-09-10. Build against these, and do not re-litigate them.
 
-Forgot Password needs real Supabase work (reset email template, redirect URL, deep link handling in
-`expo-linking`). It is the one Phase 7 item that is not mostly UI — budget for it separately.
+What each decision means in practice:
+
+- **Onboarding until dismissed** needs a device-local flag set only when the user finishes or skips,
+  never merely on display. An interrupted first launch must still get it. Store it beside the theme
+  preference in `theme/preference.storage.*`-style device-local storage, never in SQLite — it must
+  not sync, because it describes this device's user rather than their money.
+- **Terms soft and dismissible** means a visible way past on the screen itself, and the same
+  device-local flag treatment. It is not a blocking modal.
+- **Splash unchanged** means H1 is a visual pass over the existing boot screen in `app/_layout.tsx`
+  and nothing more. It must not start waiting on session restore — that would put a network-shaped
+  delay in front of an app whose whole promise is working offline.
+- **Forgot Password out of scope** means H4 is built and reachable, and says plainly that resetting
+  is not available yet. It must not pretend to send anything.
+- **Auth optional** means Splash and Onboarding lead into the app. No screen in this phase may
+  block use, and none may imply an account is required.
+
+The reasoning behind the last one, kept because it is the decision most likely to be questioned
+later: the app's architecture is local-first, SQLite is the source of truth, and sync is additive.
+An onboarding flow implying an account is required would contradict the product and break the
+offline promise.
 
 ## Sample data
 

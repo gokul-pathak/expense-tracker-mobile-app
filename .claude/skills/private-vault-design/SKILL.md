@@ -216,16 +216,9 @@ thing a reasonable person would otherwise do.
 
 ## Migration state
 
-The old system (`src/constants/theme.ts`) and the new one (`src/theme/`) coexist on purpose. 39
-files still import the old one; migrating them in one commit would be a 429-call change with no way
-to review it.
+**Finished.** `src/constants/theme.ts` is deleted and every screen reads from `src/theme/`. The
+legacy primitives it fed — `AppText`, `AppButton`, `FormField`, `ScreenState` and
+`PlaceholderScreen` — are deleted too.
 
-**Migrate a screen when you touch it**, not speculatively:
-
-1. Switch its imports from `@/constants/theme` to `@/theme`.
-2. Replace raw values with tokens.
-3. Verify it in both themes.
-4. Tick it off in `references/screens.md`.
-
-When the last screen migrates, delete `src/constants/theme.ts`. Until then, **new code always uses
-`src/theme/`** — never add a usage to the old file.
+If you find a raw hex code, font size or spacing number inline in a component, it is a regression,
+not a leftover. Move it into `src/theme/` and record the reasoning in `references/tokens.md`.

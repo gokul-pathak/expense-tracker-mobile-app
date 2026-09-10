@@ -2,7 +2,7 @@
  * The Private Vault design system.
  *
  * Import visual values from here and nowhere else. The old `@/constants/theme`
- * still exists while 39 screens migrate off it — do not add new usages of it.
+ * is gone: every screen now reads its colours, spacing and type from this module.
  *
  * The system is documented in `.claude/skills/private-vault-design/`.
  */

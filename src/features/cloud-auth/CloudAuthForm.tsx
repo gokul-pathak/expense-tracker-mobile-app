@@ -1,10 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { View } from 'react-native';
 import { z } from 'zod';
 
-import { AppButton, FormField } from '@/components/ui';
-import { spacing } from '@/constants/theme';
+import { Button, TextField } from '@/components/ui';
+import { useTheme } from '@/theme';
 
 const signInSchema = z.object({
   email: z.string().trim().email('Enter a valid email address.'),
@@ -30,6 +30,7 @@ type Props = {
 };
 
 export function CloudAuthForm({ mode, saving, onSubmit }: Props) {
+  const { space } = useTheme();
   const schema = mode === 'sign_in' ? signInSchema : signUpSchema;
   const {
     control,
@@ -45,39 +46,65 @@ export function CloudAuthForm({ mode, saving, onSubmit }: Props) {
   });
 
   return (
-    <View style={{ gap: spacing.lg }}>
-      <FormField
+    <View style={{ gap: space.lg }}>
+      <Controller
         control={control}
         name="email"
-        label="Email"
-        autoCapitalize="none"
-        keyboardType="email-address"
-        autoComplete="email"
-        error={errors.email?.message}
+        render={({ field: { onBlur, onChange, value } }) => (
+          <TextField
+            label="Email"
+            placeholder="you@example.com"
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+            autoComplete="email"
+            value={value}
+            onChangeText={onChange}
+            onBlur={onBlur}
+            error={errors.email?.message}
+          />
+        )}
       />
-      <FormField
+      <Controller
         control={control}
         name="password"
-        label="Password"
-        secureTextEntry
-        autoComplete={mode === 'sign_in' ? 'current-password' : 'new-password'}
-        error={errors.password?.message}
+        render={({ field: { onBlur, onChange, value } }) => (
+          <TextField
+            label="Password"
+            secureTextEntry
+            autoComplete={mode === 'sign_in' ? 'current-password' : 'new-password'}
+            value={value}
+            onChangeText={onChange}
+            onBlur={onBlur}
+            error={errors.password?.message}
+          />
+        )}
       />
       {mode === 'sign_up' ? (
-        <FormField
+        <Controller
           control={control}
           name="confirmPassword"
-          label="Confirm Password"
-          secureTextEntry
-          autoComplete="new-password"
-          error={'confirmPassword' in errors ? errors.confirmPassword?.message : undefined}
+          render={({ field: { onBlur, onChange, value } }) => (
+            <TextField
+              label="Confirm Password"
+              secureTextEntry
+              autoComplete="new-password"
+              value={typeof value === 'string' ? value : ''}
+              onChangeText={onChange}
+              onBlur={onBlur}
+              error={'confirmPassword' in errors ? errors.confirmPassword?.message : undefined}
+            />
+          )}
         />
       ) : null}
-      <AppButton
-        label={saving ? 'Please wait...' : mode === 'sign_in' ? 'Sign In' : 'Create Account'}
-        disabled={saving}
-        onPress={handleSubmit(onSubmit)}
-      />
+      <View style={{ marginTop: space.sm }}>
+        <Button
+          label={mode === 'sign_in' ? 'Sign In' : 'Create Account'}
+          large
+          loading={saving}
+          onPress={handleSubmit(onSubmit)}
+        />
+      </View>
     </View>
   );
 }

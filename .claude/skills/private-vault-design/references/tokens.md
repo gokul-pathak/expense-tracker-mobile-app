@@ -138,12 +138,17 @@ The most important rule in the system. Three parts, three treatments:
   baseline-aligned, 6pt gap between code and integer
 ```
 
-| Size   | Integer               | Decimals      | Used in                                       |
-| ------ | --------------------- | ------------- | --------------------------------------------- |
-| `hero` | 44pt Instrument Serif | 26pt tertiary | Balance card, budget hero, person outstanding |
-| `stat` | 24pt Inter            | 15pt tertiary | Stat tiles, summary cards                     |
-| `row`  | 16pt Inter            | 11pt tertiary | Transaction rows, list items                  |
-| `feature` | 32pt Inter         | 19pt tertiary | Success screen figure                         |
+| Size      | Integer               | Decimals      | Used in                                       |
+| --------- | --------------------- | ------------- | --------------------------------------------- |
+| `hero`    | 44pt Instrument Serif | 26pt tertiary | Balance card, budget hero, person outstanding |
+| `stat`    | 24pt Inter            | 15pt tertiary | Stat tiles, summary cards                     |
+| `row`     | 16pt Inter            | 11pt tertiary | Transaction rows, list items                  |
+| `feature` | 32pt Inter            | 19pt tertiary | Success screen figure                         |
+| `entry`   | 44pt Inter            | 26pt at 60%   | The figure being typed into an entry form     |
+
+`entry` is the same 44pt as `hero` but in Inter, not Instrument Serif. The serif is reserved for a
+settled balance; a serif digit changing under a caret reads as decorative rather than as a number
+being entered.
 
 Rules `<Money>` encodes:
 
@@ -172,13 +177,24 @@ Rules `<Money>` encodes:
 ```
 pill      999   chips, segmented thumbs, progress tracks, FAB
 control    14   buttons, inputs, selector fields
+button     16   the pinned action at the foot of an entry form; account rows
 card       20   standard cards
 heroCard   24   balance card, budget hero
 sheet      28   bottom sheets, top corners only
 ```
 
 Radii step up with the element's importance and size. A 20pt radius on a 44pt-tall button looks
-bulbous; a 14pt radius on a full-width hero card looks stingy.
+bulbous; a 14pt radius on a full-width hero card looks stingy. `button` exists because the pinned
+form action is 54pt rather than 48pt, and a taller button carries a slightly rounder corner.
+
+## Sizes
+
+Fixed dimensions that recur, named so a row height or a touch target is one decision rather than a
+number retyped per screen. Values live in `size` in `src/theme/tokens.ts`.
+
+The ones worth knowing: `touchTarget` 44 (the floor on both axes, never go under it), `listRow` 56,
+`transactionRow` 68, `control` 52, `button` 48, `buttonLarge` 54, `buttonSmall` 40, `navBar` 56,
+`tabBar` 64, `fab` 56, `chip` 32, `categoryChip` 36, `progressBar` 6.
 
 ## Elevation
 

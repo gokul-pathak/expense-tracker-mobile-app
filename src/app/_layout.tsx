@@ -7,12 +7,13 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { AppErrorBoundary, Text, ToastProvider } from '@/components/ui';
+import { AppErrorBoundary, Icon, Text, ToastProvider } from '@/components/ui';
 import { initializeDatabase } from '@/db/migrations';
 import { CloudAuthProvider } from '@/features/cloud-auth/auth.provider';
+import { FirstRunGate } from '@/features/first-run/FirstRunGate';
 import { AppLockGate } from '@/features/security/AppLockGate';
 import { SyncProvider } from '@/features/sync/sync.provider';
-import { ThemeProvider, useTheme } from '@/theme';
+import { ThemeProvider, useTheme, withAlpha } from '@/theme';
 
 export default function RootLayout() {
   return (
@@ -76,20 +77,22 @@ function Boot() {
 
   return (
     <AppLockGate>
-      <CloudAuthProvider>
-        {/*
+      <FirstRunGate>
+        <CloudAuthProvider>
+          {/*
           Sync lives inside the lock gate, so a locked device performs no
           synchronization and the first foreground sync happens after unlock.
         */}
-        <SyncProvider>
-          <AppErrorBoundary>
-            <ThemedStatusBar />
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="(tabs)" />
-            </Stack>
-          </AppErrorBoundary>
-        </SyncProvider>
-      </CloudAuthProvider>
+          <SyncProvider>
+            <AppErrorBoundary>
+              <ThemedStatusBar />
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="(tabs)" />
+              </Stack>
+            </AppErrorBoundary>
+          </SyncProvider>
+        </CloudAuthProvider>
+      </FirstRunGate>
     </AppLockGate>
   );
 }
@@ -100,16 +103,39 @@ function ThemedStatusBar() {
 }
 
 /**
- * Deliberately empty while loading: the canvas colour and nothing else. A
- * spinner or a "Loading" line would make a sub-second wait feel longer.
+ * The splash: the mark on the canvas, and nothing that moves.
+ *
+ * It waits on exactly what it already waited on — migrations and fonts — and
+ * nothing else. Adding a session restore would put a network-shaped delay in
+ * front of an app whose whole promise is working offline, and a minimum display
+ * time would make it slower on purpose.
+ *
+ * No spinner. A sub-second wait feels longer with one, not shorter.
  */
 function BootScreen({ message }: { message?: string }) {
-  const { palette, gutter } = useTheme();
+  const { palette, gutter, space, radius } = useTheme();
   return (
     <View style={[styles.boot, { backgroundColor: palette.canvas, padding: gutter }]}>
       <ThemedStatusBar />
+      <View
+        style={[
+          styles.mark,
+          { borderRadius: radius.button, backgroundColor: withAlpha(palette.accent, 0.14) },
+        ]}
+      >
+        <Icon name="shield-check" size={28} color={palette.accent} />
+      </View>
+      <Text variant="heading" style={{ marginTop: space.lg }}>
+        Private Vault
+      </Text>
       {message ? (
-        <Text variant="body" tone="secondary" accessibilityRole="alert">
+        <Text
+          variant="body"
+          tone="secondary"
+          align="center"
+          accessibilityRole="alert"
+          style={{ marginTop: space.lg }}
+        >
           {message}
         </Text>
       ) : null}
@@ -118,5 +144,6 @@ function BootScreen({ message }: { message?: string }) {
 }
 
 const styles = StyleSheet.create({
-  boot: { flex: 1, justifyContent: 'center' },
+  boot: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  mark: { width: 56, height: 56, alignItems: 'center', justifyContent: 'center' },
 });
