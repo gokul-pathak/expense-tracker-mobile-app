@@ -152,44 +152,96 @@ Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
 Not on scroll, not on every tap. Over-used haptics feel cheap, which is the opposite of the goal.
 
-## Migrating a screen
+## The migration (finished)
 
-The old (`src/constants/theme.ts`) and new (`src/theme/`) systems coexist. 39 files import the old
-one across 429 call sites; migrating them at once produces an unreviewable diff.
+`src/constants/theme.ts` is **deleted**, and so are the primitives it fed: `AppText`, `AppButton`,
+`FormField`, `ScreenState` and `PlaceholderScreen`. Every screen reads from `src/theme/`. If you find
+a raw hex code, font size or spacing number inline in a component, it is a regression rather than a
+leftover — move it into `src/theme/` and record why in `tokens.md`.
 
-**Migrate a screen when you touch it.** Procedure:
+The mapping below is kept only for reading old commits. Nothing in the working tree uses the left
+column:
 
-1. Swap `@/constants/theme` → `@/theme`; replace the top-level import with a `useTheme()` call.
-2. Map the old tokens. They do not correspond one-to-one — this is a redesign, not a rename:
+| Old                         | New                                        | Note                                                  |
+| --------------------------- | ------------------------------------------ | ----------------------------------------------------- |
+| `colors.background`         | `palette.canvas`                           |                                                       |
+| `colors.surface`            | `palette.surface`                          |                                                       |
+| `colors.surfaceMuted`       | `palette.surfaceSunken` or `surfaceRaised` | Depends on whether it reads recessed or raised        |
+| `colors.text`               | `palette.textPrimary`                      |                                                       |
+| `colors.textMuted`          | `palette.textSecondary` or `textTertiary`  | Metadata and placeholders go tertiary                 |
+| `colors.border`             | `palette.hairline`                         |                                                       |
+| `colors.primary`            | `palette.accent`                           | Check button variants — light mode uses `primaryFill` |
+| `colors.success` / `danger` | `palette.positive` / `negative`            |                                                       |
+| `spacing.lg` (16)           | `space.lg` (16)                            | Gutter moves to `space.xl` (20)                       |
+| `radii.lg` (18)             | `radius.card` (20)                         |                                                       |
+| `typography.*`              | `type.*`                                   | Now carries lineHeight, weight, tracking too          |
 
-   | Old                         | New                                        | Note                                                  |
-   | --------------------------- | ------------------------------------------ | ----------------------------------------------------- |
-   | `colors.background`         | `palette.canvas`                           |                                                       |
-   | `colors.surface`            | `palette.surface`                          |                                                       |
-   | `colors.surfaceMuted`       | `palette.surfaceSunken` or `surfaceRaised` | Depends on whether it reads recessed or raised        |
-   | `colors.text`               | `palette.textPrimary`                      |                                                       |
-   | `colors.textMuted`          | `palette.textSecondary` or `textTertiary`  | Metadata and placeholders go tertiary                 |
-   | `colors.border`             | `palette.hairline`                         |                                                       |
-   | `colors.primary`            | `palette.accent`                           | Check button variants — light mode uses `primaryFill` |
-   | `colors.success` / `danger` | `palette.positive` / `negative`            |                                                       |
-   | `spacing.lg` (16)           | `space.lg` (16)                            | Gutter moves to `space.xl` (20)                       |
-   | `radii.lg` (18)             | `radius.card` (20)                         |                                                       |
-   | `typography.*`              | `type.*`                                   | Now carries lineHeight, weight, tracking too          |
-
-3. Replace hand-rolled views with primitives — most screens shed 30–50% of their code here. The
-   four hand-rolled `Modal` implementations all become `BottomSheet`.
-4. Replace glyph icons (`⌂ ≡ ▥ ••• ▣ ◉ ◇ ⚙ ›`) with Lucide.
-5. Wrap every amount in `<Money>`.
-6. Verify in **both themes** and all states.
-7. Tick the screen in `screens.md`.
-
-Run `npm run typecheck` after each screen. Do not add new usages of `src/constants/theme.ts` — when
-the last screen migrates, delete it.
+The rules that outlived it: compose from primitives rather than hand-rolling a view, icons come from
+Lucide and never from a glyph, every amount goes through `<Money>`, and a screen is done only when it
+works in both themes with all its states.
 
 ## Web parity
 
-The app has `.web.ts` variants for storage, migrations, and app-lock, and most data screens render a
-`NativeDataNotice` on web. The redesign does not change that split — but the shared components
-(`Money`, `Text`, `Card`) must still render on web, since `NativeDataNotice` and the shell use them.
+The web bundle boots and renders, but **it will never show a figure**. `expo-sqlite` runs SQLite as
+WebAssembly and its synchronous API blocks the caller with `Atomics.wait`, which browsers forbid on
+the main thread and which throws a `TypeError` there whatever headers are served. This app reads
+SQLite synchronously everywhere, so the database cannot open on a page. `src/db/index.web.ts` keeps it
+shut deliberately; without it the native module throws at import time and takes the whole bundle down
+before React renders.
 
-`BlurView`, haptics, and `fontVariant` degrade gracefully on web. Guard anything that does not.
+Do not try to fix this with cross-origin isolation headers. They are necessary but nowhere near
+sufficient, and Expo's documented `metro.config` hook for adding them is inert anyway — Metro still
+reads `server.enhanceMiddleware`, but the Expo CLI runs its own dev server and never calls it. Both
+were measured before being ruled out.
+
+What web is still good for: terms, onboarding, the tab shell, empty states, and any component you can
+render in isolation. `.web.ts` variants exist for storage, migrations and app-lock. `BlurView`,
+haptics and `fontVariant` degrade gracefully; guard anything that does not.
+
+## Verifying a screen
+
+**A browser is not evidence about a device.** This is the most expensive lesson in this project: the
+hero balance rendered as a horizontal band with its top and bottom sliced off on Android while
+`npm run typecheck`, `npm run lint`, 548 tests and a browser were all green. Three fixes were made
+against browser evidence before the real cause was found.
+
+So calibrate what each check can actually tell you:
+
+| Check            | Catches                                   | Cannot catch                            |
+| ---------------- | ----------------------------------------- | --------------------------------------- |
+| typecheck / lint | wrong props, dead code                    | anything about how it looks             |
+| tests            | domain logic, copy guards on screen files | any layout or type rendering            |
+| browser          | structure, colour, theme flips, states    | text metrics, blur, haptics, safe areas |
+| device           | all of it                                 | —                                       |
+
+Text layout in a custom font is the sharpest divergence: web is forgiving about a box that is too
+short for its glyphs, and Android clips them. Treat anything touching fonts, blur, haptics or
+safe-area insets as unverified until it has run on hardware.
+
+Two practical notes that cost real time here. Expo Go falls back to its **last cached bundle** when it
+cannot reach Metro, so a device with no dev server running will keep replaying old code and every
+screenshot will look like the fix failed — check the app's own "Cannot connect" notice before
+believing a bug survived. And `CI=1` disables Metro's watch mode entirely, so edits appear to do
+nothing.
+
+## React Native layout traps
+
+Two bugs in this codebase came from RN behaving unlike the web, and both were found by reading
+computed values rather than by looking harder at the screen. **When a layout looks wrong, measure it**
+— print the element widths and computed styles. Both of these took several wrong guesses by eye and
+then fell out immediately once measured.
+
+**A forced `lineHeight` clips glyphs.** Android measures a `Text` from its line height and then clips
+whatever draws outside that box. Instrument Serif at 44pt needs more room than the type scale would
+give it, and the give-away was that the 12pt currency code and the decimals were sliced at the same
+height as the 44pt digits — a font overflowing its own metrics would only clip the large glyphs, so
+the whole box was too short. `<Money>` now takes the font's natural box at every size. Do not set an
+explicit `lineHeight` on large text in a custom font.
+
+**`flexShrink` governs the main axis, which in a column is height.** A control that stacks a value
+over a detail line is a column, so `flexShrink` there does nothing about width, and right-aligning it
+with `alignItems: 'flex-end'` sizes children to their own content and lets them spill sideways over
+whatever sits beside them. Stretch the rows to the wrapper instead and let each push its own content
+right with `justifyContent`. Related: every level from wrapper down to the text itself needs
+`minWidth: 0`, because a text node defaults to `auto` — its own content width — and one such node
+anywhere in the chain pushes the whole row wider than its parent.

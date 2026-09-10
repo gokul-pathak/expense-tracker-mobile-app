@@ -33,7 +33,7 @@ design. Reference points are Mercury, Copilot Money, and Apple Card — not Mint
 
 ## The rules that matter most
 
-If you read nothing else, read these six. Everything in `references/` elaborates on them.
+If you read nothing else, read these seven. Everything in `references/` elaborates on them.
 
 1. **Never hardcode a visual value.** No hex codes, no raw font sizes, no magic spacing numbers in
    a component. Import from `src/theme`. If a value you need isn't there, add it to the theme rather
@@ -48,6 +48,10 @@ If you read nothing else, read these six. Everything in `references/` elaborates
    (`⌂ ≡ ▥ ••• ▣ ◉ ◇ ⚙`). Those are being deleted. No emoji, no glyphs, no filled 3D icons.
 6. **Leave space.** If a screen looks sparse, it is probably right. The most common way to make this
    design cheap is to fill the gaps.
+7. **A browser is not evidence about a device.** The hero balance shipped sliced through the middle on
+   Android while typecheck, lint, 548 tests and a browser were all green. Text in a custom font is
+   where web and native diverge most, and web is the forgiving one. See **Verifying a screen** in
+   `references/patterns.md` for what each check can and cannot tell you.
 
 ## Where things live
 
@@ -57,7 +61,7 @@ If you read nothing else, read these six. Everything in `references/` elaborates
 | Token reasoning            | `references/tokens.md`                    | Why each value is what it is              |
 | Component specs            | `references/components.md`                | The 22 primitives                         |
 | Screen specs + roadmap     | `references/screens.md`                   | All 36 screens, status, build order       |
-| RN implementation patterns | `references/patterns.md`                  | Fonts, theming, Money, charts, migration  |
+| RN implementation patterns | `references/patterns.md`                  | Fonts, theming, Money, charts, verifying  |
 | Visual ground truth        | `design/private-vault-canvas.source.html` | 41 rendered artboards                     |
 | Original brief             | `docs/ui-redesign-brief.md`               | The prose brief the canvas was drawn from |
 
