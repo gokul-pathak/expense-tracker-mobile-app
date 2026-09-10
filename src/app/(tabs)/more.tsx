@@ -19,11 +19,13 @@ import { useCloudAuth } from '@/features/cloud-auth/auth.provider';
 import { useCloudSync } from '@/features/sync/sync.provider';
 import type { CloudSyncStatus } from '@/features/sync/sync-status';
 import { useRefreshOnSyncedData } from '@/features/sync/use-synced-data';
+import { formatPeriodMonth } from '@/features/budgets/budget.period';
 import {
   getPeopleFinancialSummary,
   isLocalFinanceDataAvailable,
   listActiveAccounts,
   listActivePeople,
+  listBudgetsForMonth,
   listCategories,
 } from '@/features/ui/data';
 import { useTheme } from '@/theme';
@@ -32,6 +34,7 @@ type Counts = {
   accounts: number;
   people: number;
   peoplePending: number;
+  budgets: number;
   categories: number;
 };
 
@@ -49,6 +52,7 @@ export default function MoreScreen() {
         accounts: listActiveAccounts().length,
         people: listActivePeople().length,
         peoplePending: summary.people.filter((person) => person.status !== 'settled').length,
+        budgets: listBudgetsForMonth(formatPeriodMonth(new Date())).length,
         categories: listCategories().length,
       });
     } catch (error) {
@@ -102,6 +106,13 @@ export default function MoreScreen() {
             value={counts ? peopleLabel(counts) : undefined}
             trailing={counts ? undefined : <ValueSkeleton />}
             onPress={() => router.push('/people' as never)}
+          />
+          <ListRow
+            icon="target"
+            label="Budgets"
+            value={counts ? budgetLabel(counts.budgets) : undefined}
+            trailing={counts ? undefined : <ValueSkeleton />}
+            onPress={() => router.push('/budgets' as never)}
           />
           <ListRow
             icon="tag"
@@ -251,6 +262,12 @@ function presentSyncStatus(status: CloudSyncStatus): {
 
 function countLabel(count: number, suffix: string) {
   return count + ' ' + suffix;
+}
+
+/** Budgets are counted for this month, since a budget only ever describes one. */
+function budgetLabel(count: number) {
+  if (count === 0) return 'None set';
+  return count === 1 ? '1 this month' : count + ' this month';
 }
 
 /** People are counted by what needs doing when anything does, and by size when nothing does. */

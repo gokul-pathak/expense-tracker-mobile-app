@@ -47,16 +47,16 @@ out on one screen.
 | B7  | Record Payment                          | `people/[id]/payment.tsx`        | Spec   | 3     | ☑    |
 | B8  | Transaction Detail                      | `transaction/[id].tsx`           | Spec   | 3     | ☑    |
 | B9  | Edit Transaction                        | `transaction/[id]/edit.tsx`      | Spec   | 3     | ☑    |
-| C1  | Accounts list                           | `accounts/index.tsx`             | Drawn  | 4     | ☐    |
-| C2  | New Account                             | `accounts/new.tsx`               | Spec   | 4     | ☐    |
-| C3  | Edit Account                            | `accounts/[id].tsx`              | Spec   | 4     | ☐    |
-| D1  | People list                             | `people/index.tsx`               | Spec   | 4     | ☐    |
-| D2  | Person detail                           | `people/[id].tsx`                | Drawn  | 4     | ☐    |
-| D3  | New Person                              | `people/new.tsx`                 | Spec   | 4     | ☐    |
-| E1  | Categories list                         | `categories/index.tsx`           | Spec   | 4     | ☐    |
-| E2  | New / Edit Category                     | `categories/new.tsx`, `[id].tsx` | Spec   | 4     | ☐    |
-| F1  | Budgets overview                        | _not built_                      | Drawn  | 5     | ☐    |
-| F2  | Set a budget                            | _not built_                      | Spec   | 5     | ☐    |
+| C1  | Accounts list                           | `accounts/index.tsx`             | Drawn  | 4     | ☑    |
+| C2  | New Account                             | `accounts/new.tsx`               | Spec   | 4     | ☑    |
+| C3  | Edit Account                            | `accounts/[id].tsx`              | Spec   | 4     | ☑    |
+| D1  | People list                             | `people/index.tsx`               | Spec   | 4     | ☑    |
+| D2  | Person detail                           | `people/[id].tsx`                | Drawn  | 4     | ☑    |
+| D3  | New Person                              | `people/new.tsx`                 | Spec   | 4     | ☑    |
+| E1  | Categories list                         | `categories/index.tsx`           | Spec   | 4     | ☑    |
+| E2  | New / Edit Category                     | `categories/new.tsx`, `[id].tsx` | Spec   | 4     | ☑    |
+| F1  | Budgets overview                        | `budgets/index.tsx`              | Drawn  | 5     | ☑    |
+| F2  | Set a budget                            | `budgets/new.tsx`, `[id].tsx`    | Spec   | 5     | ☑    |
 | G1  | Settings                                | `settings/index.tsx`             | Drawn  | 6     | ☐    |
 | G3  | Cloud Sync                              | `cloud-sync/index.tsx`           | Spec   | 6     | ☐    |
 | G4  | Cloud Sync setup                        | `cloud-sync/setup.tsx`           | Spec   | 6     | ☐    |
@@ -109,8 +109,51 @@ People ("2 pending"), Budgets ("3 this month"), Categories ("19"), Settings, Clo
 colour-coded). Above it, a compact identity card — account email, or "Local only — not synced" with
 a "Set up sync" action.
 
-Budgets has no route until phase 5, so its row is not on the screen yet. Add it to the "Your Money"
-group when `F1` lands.
+Budgets sits in the "Your Money" group, counted for the current month only — a budget never
+describes more than one.
+
+### C1 · Accounts
+
+Segmented Active/Archived → total balance card → one card per account with a monochrome type icon,
+the name, the type, and the current balance. A negative balance takes `negative` and nothing else:
+no badge, no warning.
+
+The type icon is monochrome rather than a category hue. An account is a container, not a kind of
+spending, and a coloured chip would put it in competition with the balance beside it.
+
+Balances are real, not opening balances. `getAccountBalance` already existed in
+`features/transactions/account-balance.service.ts` but was not re-exported from `features/ui/data`;
+this phase exports it. The total card appears **only when every listed account shares one currency**
+— a single figure summing NPR and USD is arithmetic on unlike units, and this app does not print a
+number it cannot stand behind.
+
+### D2 · Person detail
+
+Status card (state, direction, amount, and the one action that fits) → `Timeline` of history →
+a collapsed "Edit details" disclosure → archive as a text action at the bottom.
+
+The form is collapsed because someone opening a person's page almost always wants to know where the
+debt stands, not to rename them.
+
+### F1 · Budgets overview
+
+Month stepper → overall ring card → category rows with a `ProgressBar` each.
+
+The ring reads as how much of the month's promise is gone. Past 100% it fills entirely in
+`negative` rather than wrapping: a ring that laps itself reads as being back near the start, which
+is the opposite of the truth. The category bars do wrap, because `ProgressBar` rescales so the
+overflow is visible past a marker — a bar can show how far over, a ring cannot.
+
+Copy states the gap and the days left and stops there. No advice, no warning, no suggestion about
+what to do with the remainder.
+
+### F2 · Set a budget
+
+`AmountInput` → what it covers (Everything, or one expense category) → which month. Income
+categories are not offered: a budget is a ceiling on spending, and income has no ceiling to set.
+
+The caption explains the one thing people get wrong — an overall budget already includes the
+categories under it and is never added to them.
 
 ### B3 · Transfer
 
