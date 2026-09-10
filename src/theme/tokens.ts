@@ -74,7 +74,7 @@ export const fonts = {
  */
 export const type = {
   /** Hero money only. */
-  display: { fontSize: 44, lineHeight: 48, fontFamily: fonts.serif, letterSpacing: -0.66 },
+  display: { fontSize: 44, lineHeight: 56, fontFamily: fonts.serif, letterSpacing: -0.66 },
   title: { fontSize: 28, lineHeight: 34, fontFamily: fonts.semibold, letterSpacing: -0.28 },
   heading: { fontSize: 20, lineHeight: 26, fontFamily: fonts.semibold, letterSpacing: -0.1 },
   subheading: { fontSize: 17, lineHeight: 22, fontFamily: fonts.semibold, letterSpacing: 0 },

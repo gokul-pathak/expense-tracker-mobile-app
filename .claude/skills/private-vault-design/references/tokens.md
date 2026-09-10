@@ -99,7 +99,7 @@ Two families, and the split is deliberate:
 element per screen keeps it a deliberate accent instead of a theme.
 
 ```
-display     44 / 48   600   -1.5%   Instrument Serif   hero balance only
+display     44 / 56   600   -1.5%   Instrument Serif   hero balance only
 title       28 / 34   600   -1.0%   Inter              screen titles
 heading     20 / 26   600   -0.5%   Inter              card and sheet titles
 subheading  17 / 22   600    0      Inter              section headers
@@ -182,6 +182,11 @@ card       20   standard cards
 heroCard   24   balance card, budget hero
 sheet      28   bottom sheets, top corners only
 ```
+
+The hero's leading is 56 rather than the 48 the rest of the scale would imply. Instrument Serif at
+44pt has tall enough ascenders that a 48pt line box clips the tops of the digits — visible on every
+balance, and worse on Android. Measured in a browser at several magnitudes before settling on 56.
+A serif needs more leading than the sans steps around it; do not "correct" this back into line.
 
 Radii step up with the element's importance and size. A 20pt radius on a 44pt-tall button looks
 bulbous; a 14pt radius on a full-width hero card looks stingy. `button` exists because the pinned
