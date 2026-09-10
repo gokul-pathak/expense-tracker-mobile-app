@@ -1,25 +1,37 @@
-import { useState } from 'react';
 import { router } from 'expo-router';
-import { AppText, FormScreen, NativeDataNotice, Screen } from '@/components/ui';
-import { colors } from '@/constants/theme';
+import { useState } from 'react';
+import { View } from 'react-native';
+
+import { Banner, FormScreen, NativeDataNotice, Screen } from '@/components/ui';
 import { PersonForm, type PersonFormValues } from '@/features/people/PersonForm';
 import { createPerson, isLocalFinanceDataAvailable } from '@/features/ui/data';
 import { getUserErrorMessage } from '@/features/ui/error-message';
+import { useTheme } from '@/theme';
+
 export default function NewPersonScreen() {
+  const { space } = useTheme();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  if (!isLocalFinanceDataAvailable)
+
+  if (!isLocalFinanceDataAvailable) {
     return (
       <Screen>
         <NativeDataNotice />
       </Screen>
     );
+  }
+
   return (
-    <FormScreen title="New Person">
-      {error ? <AppText color={colors.danger}>{error}</AppText> : null}
+    <FormScreen title="New Person" backIcon="x">
+      {error ? (
+        <View style={{ marginBottom: space.lg }}>
+          <Banner tone="negative" message={error} />
+        </View>
+      ) : null}
       <PersonForm saving={saving} onSave={save} />
     </FormScreen>
   );
+
   function save(values: PersonFormValues) {
     if (saving) return;
     setSaving(true);

@@ -1,28 +1,38 @@
-import { useState } from 'react';
 import { router } from 'expo-router';
+import { useState } from 'react';
+import { View } from 'react-native';
 
+import { Banner, FormScreen, NativeDataNotice, Screen } from '@/components/ui';
 import { AccountForm, type AccountFormValues } from '@/features/accounts/AccountForm';
-import { isLocalFinanceDataAvailable, createAccount } from '@/features/ui/data';
+import { createAccount, isLocalFinanceDataAvailable } from '@/features/ui/data';
 import { getUserErrorMessage } from '@/features/ui/error-message';
+import { useTheme } from '@/theme';
 import { parseMoneyToMinorUnits } from '@/utils/money';
-import { AppText, FormScreen, NativeDataNotice, Screen } from '@/components/ui';
-import { colors } from '@/constants/theme';
 
 export default function NewAccountScreen() {
+  const { space } = useTheme();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  if (!isLocalFinanceDataAvailable)
+
+  if (!isLocalFinanceDataAvailable) {
     return (
       <Screen>
         <NativeDataNotice />
       </Screen>
     );
+  }
+
   return (
-    <FormScreen title="New Account">
-      {error ? <AppText color={colors.danger}>{error}</AppText> : null}
+    <FormScreen title="New Account" backIcon="x">
+      {error ? (
+        <View style={{ marginBottom: space.lg }}>
+          <Banner tone="negative" message={error} />
+        </View>
+      ) : null}
       <AccountForm saving={saving} onSave={save} />
     </FormScreen>
   );
+
   function save(values: AccountFormValues) {
     const openingBalanceMinor = parseMoneyToMinorUnits(values.openingBalance);
     if (openingBalanceMinor === null || saving) return;

@@ -1,14 +1,18 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm } from 'react-hook-form';
-import { StyleSheet, View } from 'react-native';
+import { Controller, useForm } from 'react-hook-form';
+import { View } from 'react-native';
 import { z } from 'zod';
-import { AppButton, FormField } from '@/components/ui';
-import { spacing } from '@/constants/theme';
+
+import { Button, TextField } from '@/components/ui';
+import { useTheme } from '@/theme';
+
 const schema = z.object({
   name: z.string().trim().min(1, 'Person name is required.'),
   note: z.string().optional(),
 });
+
 export type PersonFormValues = z.infer<typeof schema>;
+
 export function PersonForm({
   initialValues,
   saving,
@@ -18,6 +22,7 @@ export function PersonForm({
   saving: boolean;
   onSave: (values: PersonFormValues) => void;
 }) {
+  const { space } = useTheme();
   const {
     control,
     handleSubmit,
@@ -26,29 +31,41 @@ export function PersonForm({
     resolver: zodResolver(schema),
     defaultValues: initialValues ?? { name: '', note: '' },
   });
+
   return (
-    <View style={styles.form}>
-      <FormField
+    <View style={{ gap: space.lg }}>
+      <Controller
         control={control}
         name="name"
-        label="Name"
-        error={errors.name?.message}
-        placeholder="e.g. Ram"
+        render={({ field: { onBlur, onChange, value } }) => (
+          <TextField
+            label="Name"
+            placeholder="e.g. Ram"
+            value={value}
+            onChangeText={onChange}
+            onBlur={onBlur}
+            error={errors.name?.message}
+          />
+        )}
       />
-      <FormField
+      <Controller
         control={control}
         name="note"
-        label="Note (optional)"
-        error={errors.note?.message}
-        placeholder="e.g. Friend"
-        multiline
+        render={({ field: { onBlur, onChange, value } }) => (
+          <TextField
+            label="Note"
+            placeholder="How you know them"
+            multiline
+            value={value ?? ''}
+            onChangeText={onChange}
+            onBlur={onBlur}
+            error={errors.note?.message}
+          />
+        )}
       />
-      <AppButton
-        label={saving ? 'Saving...' : 'Save Person'}
-        disabled={saving}
-        onPress={handleSubmit(onSave)}
-      />
+      <View style={{ marginTop: space.sm }}>
+        <Button label="Save Person" large loading={saving} onPress={handleSubmit(onSave)} />
+      </View>
     </View>
   );
 }
-const styles = StyleSheet.create({ form: { gap: spacing.lg } });

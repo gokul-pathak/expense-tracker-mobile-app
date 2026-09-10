@@ -1,12 +1,23 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Controller, useForm } from 'react-hook-form';
+import { View } from 'react-native';
 import { z } from 'zod';
 
-import { AppButton, AppText, FormField } from '@/components/ui';
-import { ACCOUNT_TYPES } from '@/db/constants';
-import { colors, radii, spacing } from '@/constants/theme';
+import {
+  Button,
+  Chip,
+  Icon,
+  isIconName,
+  PickerSheet,
+  SelectorField,
+  Text,
+  TextField,
+  type IconName,
+  type PickerOption,
+} from '@/components/ui';
+import { ACCOUNT_TYPES, type AccountType } from '@/db/constants';
+import { accountTypeIcon, useTheme } from '@/theme';
 import { parseMoneyToMinorUnits } from '@/utils/money';
 
 const schema = z.object({
@@ -23,12 +34,14 @@ const schema = z.object({
 });
 
 export type AccountFormValues = z.infer<typeof schema>;
+
 type Props = {
   initialValues?: AccountFormValues;
   saving: boolean;
   onSave: (values: AccountFormValues) => void;
 };
-const labels: Record<(typeof ACCOUNT_TYPES)[number], string> = {
+
+const labels: Record<AccountType, string> = {
   cash: 'Cash',
   bank: 'Bank',
   wallet: 'Wallet',
@@ -36,7 +49,23 @@ const labels: Record<(typeof ACCOUNT_TYPES)[number], string> = {
   other: 'Other',
 };
 
+/**
+ * The icon is chosen from a fixed set rather than typed. The old field took any
+ * string, which meant an account could carry an icon key nothing renders.
+ */
+const iconChoices: IconName[] = [
+  'banknote',
+  'landmark',
+  'wallet',
+  'credit-card',
+  'coins',
+  'briefcase',
+  'smartphone',
+  'hard-drive',
+];
+
 export function AccountForm({ initialValues, saving, onSave }: Props) {
+  const { palette, space } = useTheme();
   const {
     control,
     handleSubmit,
@@ -52,91 +81,136 @@ export function AccountForm({ initialValues, saving, onSave }: Props) {
       icon: '',
     },
   });
-  const [type, setType] = useState(initialValues?.type ?? 'cash');
+  const [type, setType] = useState<AccountType>(initialValues?.type ?? 'cash');
+  const [icon, setIcon] = useState(initialValues?.icon ?? '');
+  const [showIcons, setShowIcons] = useState(false);
+
+  const iconOptions: PickerOption<string>[] = iconChoices.map((name) => ({
+    value: name,
+    label: iconLabel(name),
+    icon: name,
+  }));
+
   return (
-    <View style={styles.form}>
-      <FormField
+    <View style={{ gap: space.lg }}>
+      <Controller
         control={control}
         name="name"
-        label="Account Name"
-        error={errors.name?.message}
-        placeholder="e.g. Main Cash"
+        render={({ field: { onBlur, onChange, value } }) => (
+          <TextField
+            label="Account Name"
+            placeholder="e.g. Main Cash"
+            value={value}
+            onChangeText={onChange}
+            onBlur={onBlur}
+            error={errors.name?.message}
+          />
+        )}
       />
-      <View style={styles.field}>
-        <AppText weight="600">Account Type</AppText>
-        <View style={styles.options}>
+
+      <View style={{ gap: space.sm }}>
+        <Text variant="small" tone="tertiary">
+          Account Type
+        </Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
           {ACCOUNT_TYPES.map((value) => (
-            <Pressable
+            <Chip
               key={value}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: type === value }}
+              label={labels[value]}
+              icon={typeIcon(value)}
+              selected={type === value}
               onPress={() => {
                 setType(value);
                 setValue('type', value, { shouldValidate: true });
               }}
-              style={[styles.option, type === value && styles.optionSelected]}
-            >
-              <AppText
-                variant="caption"
-                weight="600"
-                color={type === value ? colors.surface : colors.text}
-              >
-                {labels[value]}
-              </AppText>
-            </Pressable>
+            />
           ))}
         </View>
         {errors.type ? (
-          <AppText variant="caption" color={colors.danger}>
+          <Text variant="caption" tone="negative" accessibilityRole="alert">
             {errors.type.message}
-          </AppText>
+          </Text>
         ) : null}
       </View>
-      <FormField
+
+      <Controller
         control={control}
         name="openingBalance"
-        label="Opening Balance"
-        error={errors.openingBalance?.message}
-        keyboardType="decimal-pad"
-        placeholder="0.00"
+        render={({ field: { onBlur, onChange, value } }) => (
+          <TextField
+            label="Opening Balance"
+            placeholder="0.00"
+            keyboardType="decimal-pad"
+            value={value}
+            onChangeText={onChange}
+            onBlur={onBlur}
+            error={errors.openingBalance?.message}
+          />
+        )}
       />
-      <FormField
+
+      <Controller
         control={control}
         name="currency"
-        label="Currency"
-        error={errors.currency?.message}
-        autoCapitalize="characters"
-        placeholder="NPR"
-        maxLength={8}
+        render={({ field: { onBlur, onChange, value } }) => (
+          <TextField
+            label="Currency"
+            placeholder="NPR"
+            autoCapitalize="characters"
+            autoCorrect={false}
+            maxLength={8}
+            value={value}
+            onChangeText={onChange}
+            onBlur={onBlur}
+            error={errors.currency?.message}
+          />
+        )}
       />
-      <FormField
-        control={control}
-        name="icon"
-        label="Icon (optional)"
-        error={errors.icon?.message}
-        placeholder="e.g. wallet"
+
+      <SelectorField
+        label="Icon"
+        value={icon ? iconLabel(icon) : undefined}
+        placeholder="Optional"
+        leading={
+          isIconName(icon) ? <Icon name={icon} size={18} color={palette.textSecondary} /> : null
+        }
+        onPress={() => setShowIcons(true)}
       />
-      <AppButton
-        label={saving ? 'Saving...' : 'Save Account'}
-        disabled={saving}
-        onPress={handleSubmit(onSave)}
+
+      <View style={{ marginTop: space.sm }}>
+        <Button label="Save Account" large loading={saving} onPress={handleSubmit(onSave)} />
+      </View>
+
+      <PickerSheet
+        visible={showIcons}
+        onClose={() => setShowIcons(false)}
+        title="Choose an icon"
+        options={iconOptions}
+        selected={icon || undefined}
+        clearOption={{
+          label: 'None',
+          onSelect: () => {
+            setIcon('');
+            setValue('icon', '');
+          },
+        }}
+        onSelect={(next) => {
+          setIcon(next);
+          setValue('icon', next);
+        }}
       />
     </View>
   );
 }
-const styles = StyleSheet.create({
-  form: { gap: spacing.lg },
-  field: { gap: spacing.sm },
-  options: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  option: {
-    minHeight: 40,
-    paddingHorizontal: spacing.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  optionSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
-});
+
+function typeIcon(value: AccountType): IconName {
+  const key = accountTypeIcon[value];
+  return isIconName(key) ? key : 'wallet';
+}
+
+function iconLabel(name: string) {
+  return name
+    .split('-')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}

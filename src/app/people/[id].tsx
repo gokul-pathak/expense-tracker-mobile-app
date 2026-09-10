@@ -1,228 +1,303 @@
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { useFocusEffect, useLocalSearchParams, router } from 'expo-router';
-import { Alert, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+
 import {
-  AppButton,
-  AppText,
+  Banner,
+  Button,
   Card,
+  Dialog,
+  ErrorState,
   FormScreen,
+  Icon,
+  Money,
   NativeDataNotice,
   Screen,
-  ScreenState,
+  SectionHeader,
+  Skeleton,
+  Text,
+  Timeline,
+  type TimelineEntry,
 } from '@/components/ui';
-import { colors, spacing } from '@/constants/theme';
 import { PersonForm, type PersonFormValues } from '@/features/people/PersonForm';
 import type { Person } from '@/features/people/person.types';
+import { formatTransactionDate } from '@/features/transactions/transaction-presentation';
 import type {
   PersonFinancialSummary,
   PersonTransactionItem,
 } from '@/features/transactions/transaction.types';
 import {
   archivePerson,
+  getAppSettings,
+  getPerson,
   getPersonFinancialSummary,
   getPersonTransactionHistory,
-  getPerson,
   isLocalFinanceDataAvailable,
   unarchivePerson,
   updatePerson,
 } from '@/features/ui/data';
 import { getUserErrorMessage } from '@/features/ui/error-message';
-import { formatTransactionDate } from '@/features/transactions/transaction-presentation';
-import { formatMinorUnits } from '@/utils/money';
+import { useTheme } from '@/theme';
+import { parseRouteId } from '@/utils/route-id';
+
 export default function PersonDetailScreen() {
+  const { palette, space, radius, size } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [person, setPerson] = useState<Person>();
   const [summary, setSummary] = useState<PersonFinancialSummary>();
   const [history, setHistory] = useState<PersonTransactionItem[]>([]);
+  const [currency, setCurrency] = useState('NPR');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const routeId = parseRouteId(id);
+
   const load = useCallback(() => {
     if (!isLocalFinanceDataAvailable) return;
+    if (routeId === null) {
+      setError('This link is invalid.');
+      return;
+    }
+    setError('');
     try {
-      setPerson(getPerson(Number(id)));
-      setSummary(getPersonFinancialSummary(Number(id)));
-      setHistory(getPersonTransactionHistory(Number(id)));
+      setPerson(getPerson(routeId));
+      setSummary(getPersonFinancialSummary(routeId));
+      setHistory(getPersonTransactionHistory(routeId));
+      setCurrency(getAppSettings().defaultCurrency);
     } catch (caught) {
       setError(getUserErrorMessage(caught));
     }
-  }, [id]);
+  }, [routeId]);
   useFocusEffect(load);
-  if (!isLocalFinanceDataAvailable)
+
+  if (!isLocalFinanceDataAvailable) {
     return (
       <Screen>
         <NativeDataNotice />
       </Screen>
     );
-  if (error && !person)
+  }
+  if (error && !person) {
     return (
-      <Screen>
-        <ScreenState
+      <FormScreen title="Person">
+        <ErrorState
           title="Could not load person"
-          description={error}
-          retry={() => router.back()}
+          message={error}
+          onRetry={routeId === null ? undefined : load}
         />
-      </Screen>
+      </FormScreen>
     );
-  if (!person)
+  }
+  if (!person || !summary) {
     return (
-      <Screen>
-        <ScreenState title="Loading person" description="Reading your local person..." />
-      </Screen>
+      <FormScreen title="Person">
+        <Skeleton height={150} radius={radius.card} style={{ marginTop: space.lg }} />
+        <Skeleton
+          height={size.transactionRow * 2}
+          radius={radius.card}
+          style={{ marginTop: space.xxl }}
+        />
+      </FormScreen>
     );
+  }
+
   const currentPerson = person;
+  const currentSummary = summary;
+  const owesYou = currentSummary.netMinor > 0;
+  const youOwe = currentSummary.netMinor < 0;
+
   return (
     <FormScreen title={currentPerson.name}>
-      <View style={styles.content}>
-        {error ? <AppText color={colors.danger}>{error}</AppText> : null}
-        {summary ? (
-          <Card style={styles.summary}>
-            <AppText variant="caption" color={colors.textMuted}>
-              {statusLabel(summary.status)}
-            </AppText>
-            {summary.receivableMinor > 0 ? (
-              <SummaryLine label="You Will Receive" amount={summary.receivableMinor} />
-            ) : null}
-            {summary.liabilityMinor > 0 ? (
-              <SummaryLine label="You Need To Pay" amount={summary.liabilityMinor} />
-            ) : null}
-            {summary.receivableMinor === 0 && summary.liabilityMinor === 0 ? (
-              <AppText weight="700">Settled</AppText>
-            ) : null}
-          </Card>
-        ) : null}
-        {!currentPerson.isArchived && summary?.receivableMinor ? (
-          <AppButton
-            label="Record Payment"
-            onPress={() =>
-              router.push({
-                pathname: '/people/[id]/payment',
-                params: {
-                  id: currentPerson.id,
-                  type: 'received',
-                  outstanding: summary.receivableMinor,
-                },
-              } as never)
-            }
+      {error ? (
+        <View style={{ marginBottom: space.lg }}>
+          <Banner tone="negative" message={error} />
+        </View>
+      ) : null}
+
+      {currentPerson.isArchived ? (
+        <View style={{ marginBottom: space.lg }}>
+          <Banner
+            tone="info"
+            message="This person is archived. Their history is kept, but they are hidden when recording new loans."
           />
-        ) : null}
-        {!currentPerson.isArchived && summary?.liabilityMinor ? (
-          <AppButton
-            label="Repay"
-            variant="secondary"
-            onPress={() =>
-              router.push({
-                pathname: '/people/[id]/payment',
-                params: { id: currentPerson.id, type: 'paid', outstanding: summary.liabilityMinor },
-              } as never)
-            }
+        </View>
+      ) : null}
+
+      <Card hero style={{ marginTop: space.sm }}>
+        <Text variant="eyebrow" tone={owesYou || youOwe ? 'accent' : 'tertiary'}>
+          {statusLabel(currentSummary.status)}
+        </Text>
+        <Text variant="body" tone="secondary" style={{ marginTop: space.md }}>
+          {owesYou ? 'Owes you' : youOwe ? 'You owe' : 'Nothing outstanding'}
+        </Text>
+        <View style={{ marginTop: space.xs }}>
+          <Money
+            minorUnits={Math.abs(currentSummary.netMinor)}
+            currency={currency}
+            size="stat"
+            direction={owesYou ? 'income' : youOwe ? 'expense' : 'neutral'}
           />
+        </View>
+        {owesYou || youOwe ? (
+          <View style={{ marginTop: space.lg }}>
+            <Button
+              label={owesYou ? 'Record Payment' : 'Repay'}
+              onPress={() =>
+                router.push({
+                  pathname: '/people/[id]/payment',
+                  params: {
+                    id: String(currentPerson.id),
+                    type: owesYou ? 'received' : 'paid',
+                    outstanding: String(
+                      owesYou ? currentSummary.receivableMinor : currentSummary.liabilityMinor,
+                    ),
+                  },
+                } as never)
+              }
+            />
+          </View>
         ) : null}
-        {currentPerson.isArchived ? (
-          <AppText color={colors.textMuted}>
-            This person is archived. Their financial history remains available, but new entries are
-            disabled.
-          </AppText>
-        ) : null}
-        <AppText variant="heading" weight="700">
-          History
-        </AppText>
+      </Card>
+
+      <View style={{ marginTop: space.xxl }}>
+        <SectionHeader title="History" />
         {history.length === 0 ? (
-          <AppText color={colors.textMuted}>No money history with this person yet.</AppText>
+          <Card>
+            <Text variant="body" tone="secondary">
+              Nothing recorded with {currentPerson.name} yet.
+            </Text>
+          </Card>
         ) : (
-          history.map((item) => (
-            <Card key={item.id} style={styles.historyRow}>
-              <View>
-                <AppText weight="700">{historyLabel(item.type, currentPerson.name)}</AppText>
-                <AppText variant="caption" color={colors.textMuted}>
-                  {item.accountName} · {formatTransactionDate(item.transactionDate)}
-                </AppText>
-                {item.note ? (
-                  <AppText variant="caption" color={colors.textMuted}>
-                    {item.note}
-                  </AppText>
-                ) : null}
-              </View>
-              <AppText weight="700">{formatMinorUnits(item.amountMinor, 'NPR')}</AppText>
-            </Card>
-          ))
+          <Card>
+            <Timeline
+              entries={history.map((item) => toEntry(item, currentPerson.name, currency))}
+            />
+          </Card>
         )}
-        <AppText variant="heading" weight="700">
-          Person Details
-        </AppText>
-        <PersonForm
-          initialValues={{ name: currentPerson.name, note: currentPerson.note ?? '' }}
-          saving={saving}
-          onSave={save}
-        />
-        <AppButton
+      </View>
+
+      <View style={{ marginTop: space.xxl }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Edit details"
+          accessibilityState={{ expanded: editing }}
+          onPress={() => setEditing((open) => !open)}
+          style={({ pressed }) => [
+            styles.disclosure,
+            { minHeight: size.touchTarget, paddingHorizontal: space.lg },
+            pressed && styles.pressed,
+          ]}
+        >
+          <Text variant="smallStrong" tone="secondary">
+            Edit details
+          </Text>
+          <Icon
+            name={editing ? 'chevron-up' : 'chevron-down'}
+            size={18}
+            color={palette.textTertiary}
+          />
+        </Pressable>
+        {editing ? (
+          <View style={{ marginTop: space.md }}>
+            <PersonForm
+              initialValues={{ name: currentPerson.name, note: currentPerson.note ?? '' }}
+              saving={saving}
+              onSave={save}
+            />
+          </View>
+        ) : null}
+      </View>
+
+      <View style={{ marginTop: space.xl4, alignItems: 'center' }}>
+        <Button
           label={currentPerson.isArchived ? 'Unarchive Person' : 'Archive Person'}
-          variant="secondary"
+          variant={currentPerson.isArchived ? 'text' : 'destructive'}
           disabled={saving}
-          onPress={toggleArchive}
+          onPress={() => (currentPerson.isArchived ? toggleArchive() : setConfirming(true))}
         />
       </View>
+
+      <Dialog
+        visible={confirming}
+        title="Archive this person?"
+        message="They are hidden when recording new loans and repayments. Everything already recorded with them is kept."
+        confirmLabel="Archive"
+        destructive
+        onCancel={() => setConfirming(false)}
+        onConfirm={() => {
+          setConfirming(false);
+          toggleArchive();
+        }}
+      />
     </FormScreen>
   );
+
   function save(values: PersonFormValues) {
     if (saving) return;
     setSaving(true);
     setError('');
     try {
       setPerson(updatePerson(currentPerson.id, { ...values, note: values.note || null }));
+      setEditing(false);
     } catch (caught) {
       setError(getUserErrorMessage(caught));
     } finally {
       setSaving(false);
     }
   }
+
   function toggleArchive() {
-    const perform = () => {
-      try {
-        setPerson(
-          currentPerson.isArchived
-            ? unarchivePerson(currentPerson.id)
-            : archivePerson(currentPerson.id),
-        );
-      } catch (caught) {
-        setError(getUserErrorMessage(caught));
-      }
-    };
-    if (currentPerson.isArchived) perform();
-    else
-      Alert.alert(
-        'Archive this person?',
-        'They will be hidden from active people but kept for historical records.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Archive', style: 'destructive', onPress: perform },
-        ],
+    try {
+      setPerson(
+        currentPerson.isArchived
+          ? unarchivePerson(currentPerson.id)
+          : archivePerson(currentPerson.id),
       );
+    } catch (caught) {
+      setError(getUserErrorMessage(caught));
+    }
   }
 }
-function SummaryLine({ label, amount }: { label: string; amount: number }) {
-  return (
-    <View style={styles.summaryLine}>
-      <AppText color={colors.textMuted}>{label}</AppText>
-      <AppText weight="700">{formatMinorUnits(amount, 'NPR')}</AppText>
-    </View>
-  );
+
+/**
+ * Each event is described from the user's side — "You gave", "Ram paid" — and
+ * says which account it moved through. Both halves matter: who did what, and
+ * where the money actually went.
+ */
+function toEntry(item: PersonTransactionItem, personName: string, currency: string): TimelineEntry {
+  const outgoing = item.type === 'lend' || item.type === 'repayment_paid';
+  const label =
+    item.type === 'lend'
+      ? 'You gave'
+      : item.type === 'borrow'
+        ? 'You took'
+        : item.type === 'repayment_received'
+          ? personName + ' paid'
+          : 'You paid';
+  const detail =
+    formatTransactionDate(item.transactionDate) +
+    ' · ' +
+    (outgoing ? 'from ' : 'to ') +
+    item.accountName;
+
+  return {
+    key: item.id,
+    label,
+    detail: item.note ? detail + ' · ' + item.note : detail,
+    minorUnits: item.amountMinor,
+    currency,
+    direction: outgoing ? 'expense' : 'income',
+  };
 }
+
 function statusLabel(status: PersonFinancialSummary['status']) {
-  return status === 'partially_paid'
-    ? 'Partially Paid'
-    : status === 'pending'
-      ? 'Pending'
-      : 'Settled';
+  if (status === 'settled') return 'Settled';
+  if (status === 'partially_paid') return 'Partly paid';
+  return 'Pending';
 }
-function historyLabel(type: PersonTransactionItem['type'], name: string) {
-  if (type === 'lend') return 'You gave';
-  if (type === 'borrow') return 'You took';
-  if (type === 'repayment_received') return `${name} paid`;
-  return 'You paid';
-}
+
 const styles = StyleSheet.create({
-  content: { gap: spacing.lg },
-  summary: { gap: spacing.sm },
-  summaryLine: { flexDirection: 'row', justifyContent: 'space-between' },
-  historyRow: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.md },
+  disclosure: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  pressed: { opacity: 0.7 },
 });

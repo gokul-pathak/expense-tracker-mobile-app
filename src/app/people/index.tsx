@@ -1,197 +1,229 @@
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { useFocusEffect, router } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { AppButton, AppText, Card, NativeDataNotice, Screen, ScreenState } from '@/components/ui';
-import { useRefreshOnSyncedData } from '@/features/sync/use-synced-data';
-import { colors, radii, spacing } from '@/constants/theme';
-import { formatMinorUnits } from '@/utils/money';
+import { StyleSheet, View } from 'react-native';
+
+import {
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  FormScreen,
+  ListRow,
+  Money,
+  NativeDataNotice,
+  Screen,
+  SegmentedControl,
+  Skeleton,
+  StatTile,
+  Text,
+} from '@/components/ui';
 import type { Person } from '@/features/people/person.types';
+import { useRefreshOnSyncedData } from '@/features/sync/use-synced-data';
 import type { PersonFinancialSummary } from '@/features/transactions/transaction.types';
 import {
+  getAppSettings,
   getPeopleFinancialSummary,
   isLocalFinanceDataAvailable,
   listActivePeople,
   listArchivedPeople,
 } from '@/features/ui/data';
+import { useTheme } from '@/theme';
+
+type Scope = 'active' | 'archived';
+
+const scopes = [
+  { value: 'active' as const, label: 'Active' },
+  { value: 'archived' as const, label: 'Archived' },
+];
+
 export default function PeopleScreen() {
-  const [archived, setArchived] = useState(false);
+  const { palette, space, radius, size } = useTheme();
+  const [scope, setScope] = useState<Scope>('active');
   const [people, setPeople] = useState<Person[]>([]);
   const [summaries, setSummaries] = useState<PersonFinancialSummary[]>([]);
-  const [totalReceivableMinor, setTotalReceivableMinor] = useState(0);
-  const [totalLiabilityMinor, setTotalLiabilityMinor] = useState(0);
+  const [receivableMinor, setReceivableMinor] = useState(0);
+  const [liabilityMinor, setLiabilityMinor] = useState(0);
+  const [currency, setCurrency] = useState('NPR');
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+
   const load = useCallback(() => {
     if (!isLocalFinanceDataAvailable) return;
     setLoading(true);
     setFailed(false);
     try {
-      setPeople(archived ? listArchivedPeople() : listActivePeople());
-      const financialSummary = getPeopleFinancialSummary();
-      setSummaries(financialSummary.people);
-      setTotalReceivableMinor(financialSummary.totalReceivableMinor);
-      setTotalLiabilityMinor(financialSummary.totalLiabilityMinor);
-    } catch {
+      setPeople(scope === 'active' ? listActivePeople() : listArchivedPeople());
+      const summary = getPeopleFinancialSummary();
+      setSummaries(summary.people);
+      setReceivableMinor(summary.totalReceivableMinor);
+      setLiabilityMinor(summary.totalLiabilityMinor);
+      setCurrency(getAppSettings().defaultCurrency);
+    } catch (error) {
+      console.error('Could not load people.', error);
       setFailed(true);
     } finally {
       setLoading(false);
     }
-  }, [archived]);
+  }, [scope]);
   useFocusEffect(load);
   // A sync that changes SQLite refreshes this screen even while it is open.
   useRefreshOnSyncedData(load);
-  if (!isLocalFinanceDataAvailable)
+
+  if (!isLocalFinanceDataAvailable) {
     return (
       <Screen>
         <NativeDataNotice />
       </Screen>
     );
-  if (loading)
-    return (
-      <Screen>
-        <ScreenState title="Loading people" description="Reading your local people..." />
-      </Screen>
-    );
-  if (failed)
-    return (
-      <Screen>
-        <ScreenState
-          title="Could not load people"
-          description="Your local data could not be read."
-          retry={load}
-        />
-      </Screen>
-    );
+  }
+
+  const settled = receivableMinor === 0 && liabilityMinor === 0;
+
   return (
-    <Screen scroll contentStyle={styles.content}>
-      <AppText variant="title" weight="700">
-        People
-      </AppText>
-      <View style={styles.segment}>
-        <Tab label="Active" selected={!archived} onPress={() => setArchived(false)} />
-        <Tab label="Archived" selected={archived} onPress={() => setArchived(true)} />
+    <FormScreen
+      title="People"
+      footer={
+        people.length > 0 && !loading && !failed ? (
+          <Button
+            label="Add Person"
+            variant="text"
+            icon="plus"
+            fullWidth
+            onPress={() => router.push('/people/new' as never)}
+          />
+        ) : undefined
+      }
+    >
+      <View style={{ marginTop: space.sm }}>
+        <SegmentedControl
+          segments={scopes}
+          value={scope}
+          onChange={setScope}
+          accessibilityLabel="Show active or archived people"
+        />
       </View>
-      {!archived ? (
-        <View style={styles.summary}>
-          <Card style={styles.summaryCard}>
-            <AppText variant="caption" color={colors.textMuted}>
-              You Will Receive
-            </AppText>
-            <AppText weight="700">{formatMinorUnits(totalReceivableMinor, 'NPR')}</AppText>
-          </Card>
-          <Card style={styles.summaryCard}>
-            <AppText variant="caption" color={colors.textMuted}>
-              You Need To Pay
-            </AppText>
-            <AppText weight="700">{formatMinorUnits(totalLiabilityMinor, 'NPR')}</AppText>
-          </Card>
+
+      {loading ? (
+        <View>
+          <Skeleton height={80} radius={radius.card} style={{ marginTop: space.lg }} />
+          <Skeleton
+            height={size.listRow * 4}
+            radius={radius.card}
+            style={{ marginTop: space.xxl }}
+          />
         </View>
-      ) : null}
-      {!archived && people.length > 0 && totalReceivableMinor === 0 && totalLiabilityMinor === 0 ? (
-        <AppText color={colors.textMuted}>No outstanding money with people yet.</AppText>
-      ) : null}
-      {people.length === 0 ? (
-        <ScreenState
-          title={archived ? 'No archived people.' : 'No people added yet.'}
-          description={
-            archived
-              ? 'Archived people will appear here.'
-              : 'Add someone now so they can be used later when tracking money given or taken.'
-          }
+      ) : failed ? (
+        <ErrorState
+          message="Your local people records could not be read. Your data is safe."
+          onRetry={load}
         />
       ) : (
-        people.map((person) => {
-          const summary = summaries.find((item) => item.personId === person.id);
-          return (
-            <Pressable
-              key={person.id}
-              accessibilityRole="button"
-              accessibilityLabel={personAccessibilityLabel(person, summary)}
-              onPress={() => router.push(`/people/${person.id}` as never)}
-            >
-              <Card style={styles.row}>
-                <View>
-                  <AppText weight="700">{person.name}</AppText>
-                  {summary && (summary.receivableMinor > 0 || summary.liabilityMinor > 0) ? (
-                    <FinancialState summary={summary} />
-                  ) : person.note ? (
-                    <AppText variant="caption" color={colors.textMuted}>
-                      {person.note}
-                    </AppText>
-                  ) : null}
-                </View>
-                <AppText color={colors.textMuted}>›</AppText>
-              </Card>
-            </Pressable>
-          );
-        })
+        <>
+          {scope === 'active' ? (
+            <Card style={[styles.totals, { marginTop: space.lg }]}>
+              <StatTile
+                label="You will receive"
+                minorUnits={receivableMinor}
+                currency={currency}
+                direction={receivableMinor > 0 ? 'income' : undefined}
+                size="row"
+              />
+              <View style={[styles.divider, { backgroundColor: palette.divider }]} />
+              <StatTile
+                label="You need to pay"
+                minorUnits={liabilityMinor}
+                currency={currency}
+                direction={liabilityMinor > 0 ? 'expense' : undefined}
+                size="row"
+                align="right"
+              />
+            </Card>
+          ) : null}
+
+          {scope === 'active' && settled && people.length > 0 ? (
+            <Text variant="caption" tone="tertiary" style={{ marginTop: space.md }}>
+              Nothing outstanding with anyone.
+            </Text>
+          ) : null}
+
+          {people.length === 0 ? (
+            <EmptyState
+              illustration="arcs"
+              title={scope === 'active' ? 'No people yet' : 'Nothing archived'}
+              body={
+                scope === 'active'
+                  ? 'Add the people you lend to and borrow from. Every loan and repayment is tracked against one of them.'
+                  : 'People you archive are kept here so their history stays intact.'
+              }
+              action={
+                scope === 'active'
+                  ? { label: 'Add Person', onPress: () => router.push('/people/new' as never) }
+                  : undefined
+              }
+            />
+          ) : (
+            <Card padding="none" style={{ marginTop: space.lg }}>
+              {people.map((person, index) => (
+                <PersonRow
+                  key={person.id}
+                  person={person}
+                  summary={summaries.find((item) => item.personId === person.id)}
+                  currency={currency}
+                  last={index === people.length - 1}
+                />
+              ))}
+            </Card>
+          )}
+        </>
       )}
-      <AppButton label="+ Add Person" onPress={() => router.push('/people/new' as never)} />
-    </Screen>
+    </FormScreen>
   );
 }
-function FinancialState({ summary }: { summary: PersonFinancialSummary }) {
-  return (
-    <View>
-      {summary.receivableMinor > 0 ? (
-        <AppText variant="caption" color={colors.textMuted}>
-          You will receive {formatMinorUnits(summary.receivableMinor, 'NPR')}
-        </AppText>
-      ) : null}
-      {summary.liabilityMinor > 0 ? (
-        <AppText variant="caption" color={colors.textMuted}>
-          You need to pay {formatMinorUnits(summary.liabilityMinor, 'NPR')}
-        </AppText>
-      ) : null}
-    </View>
-  );
-}
-function personAccessibilityLabel(person: Person, summary?: PersonFinancialSummary) {
-  if (summary?.receivableMinor)
-    return `${person.name} owes you ${summary.receivableMinor} minor units`;
-  if (summary?.liabilityMinor)
-    return `You owe ${person.name} ${summary.liabilityMinor} minor units`;
-  return `${person.name}, settled`;
-}
-function Tab({
-  label,
-  selected,
-  onPress,
+
+/**
+ * The right-hand figure says who owes whom, not just how much. A bare number
+ * beside a name is ambiguous in exactly the situation this screen exists for.
+ */
+function PersonRow({
+  person,
+  summary,
+  currency,
+  last,
 }: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
+  person: Person;
+  summary?: PersonFinancialSummary;
+  currency: string;
+  last: boolean;
 }) {
+  const net = summary?.netMinor ?? 0;
+  const detail = net > 0 ? 'Owes you' : net < 0 ? 'You owe' : (person.note ?? 'Settled');
+
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={[styles.tab, selected && styles.selected]}
-    >
-      <AppText weight="600" color={selected ? colors.surface : colors.textMuted}>
-        {label}
-      </AppText>
-    </Pressable>
+    <ListRow
+      label={person.name}
+      detail={detail}
+      icon="user"
+      trailing={
+        net === 0 ? undefined : (
+          <Money
+            minorUnits={Math.abs(net)}
+            currency={currency}
+            size="row"
+            direction={net > 0 ? 'income' : 'expense'}
+            showCode={false}
+            align="right"
+          />
+        )
+      }
+      chevron={net === 0}
+      onPress={() => router.push(`/people/${person.id}` as never)}
+      accessibilityLabel={person.name + ', ' + detail}
+      last={last}
+    />
   );
 }
+
 const styles = StyleSheet.create({
-  content: { gap: spacing.md },
-  segment: {
-    flexDirection: 'row',
-    padding: spacing.xs,
-    borderRadius: radii.md,
-    backgroundColor: colors.surfaceMuted,
-  },
-  tab: {
-    flex: 1,
-    minHeight: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radii.sm,
-  },
-  selected: { backgroundColor: colors.primary },
-  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  summary: { flexDirection: 'row', gap: spacing.sm },
-  summaryCard: { flex: 1, gap: spacing.xs },
+  totals: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  divider: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch' },
 });

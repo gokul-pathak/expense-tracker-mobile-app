@@ -36,6 +36,17 @@ export {
   restoreChosenBackup,
 } from '@/features/backup/backup-files.native';
 export { getDashboardSummary } from '@/features/dashboard/dashboard.service';
+export { getAccountBalance } from '@/features/transactions/account-balance.service';
+export {
+  createBudget,
+  deleteBudget,
+  getBudget,
+  getBudgetProgress,
+  getMonthlyBudgetSummary,
+  listBudgets,
+  listBudgetsForMonth,
+  updateBudget,
+} from '@/features/budgets/budget.service';
 export {
   getCustomRange,
   getExpenseCategoryBreakdown,

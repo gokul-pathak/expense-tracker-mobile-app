@@ -111,6 +111,13 @@ date-group heading, which sits closer to the content than a page section does.
 Vertical hairline with dots at each event, used for a person's lending history. Each entry: label,
 date, amount with direction. Reads as a statement of record, which a stack of cards does not.
 
+The dot takes the direction colour, so the shape of a debt — given, given, partly repaid — is
+readable down the rail before any figure is.
+
+Entries are described from the user's side: "You gave", "Ram paid". A neutral third-person label
+would leave the reader working out which way the money went, which is the one thing this screen
+exists to answer.
+
 ---
 
 ## Controls
@@ -137,7 +144,11 @@ category chips, quick-amount chips.
 
 ### `SegmentedControl`
 
-2–3 options. `surfaceSunken` track, `surface` thumb, spring slide. Active/Archived, Expense/Income.
+2–3 options. `surfaceSunken` track, `surfaceRaised` thumb. Active/Archived, Expense/Income.
+
+Not a filter chip row, and the distinction is load-bearing: chips add up and any number can be on,
+segments replace each other and exactly one is always chosen. Reach for `Chip` when the user is
+narrowing a list and for this when they are switching between two versions of it.
 
 ### `SearchField`
 
