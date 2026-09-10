@@ -220,6 +220,12 @@ async function setUpThreeDevices() {
   return { cash, bank, ram, coffee };
 }
 
+/**
+ * Every test here builds and syncs three separate databases, which makes them
+ * the second heaviest in the suite: 12 to 15 seconds each once the directory
+ * runs in parallel. Their 60s budget was barely four times that, so they carry
+ * an explicit 120s rather than leaning on it.
+ */
 describe('three devices', () => {
   beforeEach(async () => {
     cloud = createFakeCloud();
@@ -239,7 +245,7 @@ describe('three devices', () => {
     expect(onA.accounts.map((account) => account.balanceMinor).sort()).toEqual(
       [rupees(7_000), rupees(50_000)].sort(),
     );
-  }, 60_000);
+  }, 120_000);
 
   it('carries independent records created on each device to all three', async () => {
     const { coffee } = await setUpThreeDevices();
@@ -271,7 +277,7 @@ describe('three devices', () => {
     expect(onA.accounts.find((account) => account.name === 'Cash')?.balanceMinor).toBe(
       rupees(1_000),
     );
-  }, 60_000);
+  }, 120_000);
 
   it('converges on one winner when all three edit the same record', async () => {
     await setUpThreeDevices();
@@ -301,7 +307,7 @@ describe('three devices', () => {
     const expenses = onA.transactions.filter((row) => row.type === 'expense');
     expect(expenses).toHaveLength(1);
     expect([rupees(6_000), rupees(7_000), rupees(9_000)]).toContain(expenses[0]!.amountMinor);
-  }, 60_000);
+  }, 120_000);
 
   it('settles: another round of syncing changes nothing', async () => {
     await setUpThreeDevices();
@@ -326,7 +332,7 @@ describe('three devices', () => {
     expect(snapshotOf(A)).toEqual(settled);
     expect(snapshotOf(B)).toEqual(settled);
     expect(snapshotOf(C)).toEqual(settled);
-  }, 60_000);
+  }, 120_000);
 
   it('keeps a deletion deleted on every device, including a late one', async () => {
     await setUpThreeDevices();
@@ -358,7 +364,7 @@ describe('three devices', () => {
     const onA = snapshotOf(A);
     expect(snapshotOf(B)).toEqual(onA);
     expect(snapshotOf(C)).toEqual(onA);
-  }, 60_000);
+  }, 120_000);
 
   it('keeps debt and transfer invariants identical on all three', async () => {
     const { ram } = await setUpThreeDevices();
@@ -395,7 +401,7 @@ describe('three devices', () => {
     expect(onA.totalBalanceMinor).toBe(rupees(60_000));
     expect(onA.dashboard.monthlyIncomeMinor).toBe(0);
     expect(onA.dashboard.monthlyExpenseMinor).toBe(rupees(5_000));
-  }, 60_000);
+  }, 120_000);
 
   it('leaves every device with a clean integrity report', async () => {
     await setUpThreeDevices();
@@ -421,7 +427,7 @@ describe('three devices', () => {
       );
       expect(getSyncState()?.lastSuccessfulSyncAt, device).toBeInstanceOf(Date);
     }
-  }, 60_000);
+  }, 120_000);
 
   it('produces no duplicate cloud rows for one logical record', async () => {
     await setUpThreeDevices();
@@ -457,5 +463,5 @@ describe('three devices', () => {
       .map((row) => (row as unknown as { system_key: string | null }).system_key)
       .filter((key): key is string => key !== null);
     expect(new Set(systemKeys).size).toBe(systemKeys.length);
-  }, 60_000);
+  }, 120_000);
 });

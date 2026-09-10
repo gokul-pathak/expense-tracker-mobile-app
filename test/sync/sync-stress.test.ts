@@ -122,7 +122,9 @@ describe('outbox durability under load', () => {
     expect(cloud.rows('transaction')).toHaveLength(120);
     expect(countPendingSyncMutations()).toBe(0);
     // Building 120 records through the domain services dominates the time here.
-  }, 60_000);
+    // Measured at roughly 2.5s with this file alone and 22s with the directory
+    // running in parallel, so 60s was under three times the real cost.
+  }, 120_000);
 
   it('drains a thousand queued mutations across bounded runs', async () => {
     const cash = makeAccount('Cash', 'NPR', 1_000_000_000);
@@ -148,7 +150,12 @@ describe('outbox durability under load', () => {
     expect(verifySyncIntegrity().ok).toBe(true);
     // Building the fixture through the domain services dominates the time here;
     // the generous budget is for slow machines, not for the engine.
-  }, 120_000);
+    //
+    // The slowest test in the suite by a wide margin. Measured at 20s with this
+    // file alone, 106s with the directory running in parallel, and 178-302s on
+    // a machine that was also doing something else — so the previous 120s
+    // budget was already inside the noise and failed regularly.
+  }, 420_000);
 
   it('processes a large queue deterministically, parents before children', async () => {
     const cash = makeAccount('Cash', 'NPR', 100_000_000);
