@@ -33,6 +33,7 @@ import {
   createRepaymentPaid,
   createRepaymentReceived,
   createTransfer,
+  getAccountBalance,
   getPerson,
   listActiveAccounts,
   listActivePeople,
@@ -66,6 +67,12 @@ export function MoneyMovementForm({
 }) {
   const { space } = useTheme();
   const [accounts, setAccounts] = useState<Account[]>([]);
+  /**
+   * What each account actually holds, so choosing where money moves from is an
+   * informed choice rather than a guess. Read once per load: the figure is a
+   * full aggregate per account, not something to recompute on every keystroke.
+   */
+  const [balances, setBalances] = useState<Map<number, number>>(new Map());
   const [people, setPeople] = useState<Person[]>([]);
   const [person, setPerson] = useState<Person>();
   const [sourceAccountId, setSourceAccountId] = useState<number>();
@@ -110,6 +117,9 @@ export function MoneyMovementForm({
     try {
       const nextAccounts = listActiveAccounts();
       setAccounts(nextAccounts);
+      setBalances(
+        new Map(nextAccounts.map((account) => [account.id, getAccountBalance(account.id)])),
+      );
       if (nextAccounts.length === 1) {
         if (sourceLabel) setSourceAccountId(nextAccounts[0]?.id);
         if (destinationLabel) setDestinationAccountId(nextAccounts[0]?.id);
@@ -259,6 +269,7 @@ export function MoneyMovementForm({
             value={source?.name}
             placeholder="Choose account"
             icon={source ? accountIcon(source.type) : undefined}
+            detail={accountBalanceLabel(source)}
             error={sameAccount ? 'Choose two different accounts.' : undefined}
             onPress={() => setSelector('source')}
           />
@@ -272,6 +283,7 @@ export function MoneyMovementForm({
             value={destination?.name}
             placeholder="Choose account"
             icon={destination ? accountIcon(destination.type) : undefined}
+            detail={accountBalanceLabel(destination)}
             onPress={() => setSelector('destination')}
           />
         ) : null}
@@ -346,6 +358,18 @@ export function MoneyMovementForm({
       />
     </FormScreen>
   );
+
+  /**
+   * The balance is stated in the account's own currency, not the form's, since
+   * the two can differ and a figure labelled with the wrong currency would be
+   * worse than no figure at all.
+   */
+  function accountBalanceLabel(account?: Account) {
+    if (!account) return undefined;
+    const balanceMinor = balances.get(account.id);
+    if (balanceMinor === undefined) return undefined;
+    return formatMinorUnits(balanceMinor, account.currency);
+  }
 
   function swapAccounts() {
     if (Platform.OS !== 'web') void Haptics.selectionAsync();

@@ -231,11 +231,14 @@ switch in Settings, which appears directly under App Lock the moment it is turne
 
 `From` and `To` selectors stacked with a circular swap button on the hairline between them.
 
-The canvas also puts each account's current balance in tertiary under its name. There is no
-per-account balance query yet — `listActiveAccounts` returns the opening balance only — so that line
-is not built. Add it when `C1` brings the balance query, since the accounts list needs the same
-figure. **Neutral colour throughout** — a transfer changes
-nothing overall and the design should say so. Include the same-account error state.
+Each account's current balance sits in tertiary beneath its name, read once per load through the
+same `getAccountBalance` the accounts list uses. It is stated in the account's own currency rather
+than the form's, since the two can differ and a figure under the wrong currency would be worse than
+no figure. Every account selector in this form carries it, not only a transfer's: it is the same
+control answering the same question, and suppressing it elsewhere would be the odd choice.
+
+**Neutral colour throughout** — a transfer changes nothing overall and the design should say so.
+Include the same-account error state.
 
 ### B5 / B6 · Lend and Borrow
 
