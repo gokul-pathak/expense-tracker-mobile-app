@@ -18,6 +18,8 @@ type Props = {
   icon?: IconName;
   /** 40pt instead of 48pt, for inline and card-footer actions. */
   small?: boolean;
+  /** 54pt, for the pinned action at the foot of an entry form. */
+  large?: boolean;
   /** Text buttons hug their label; filled buttons fill the row unless told not to. */
   fullWidth?: boolean;
   accessibilityLabel?: string;
@@ -36,6 +38,7 @@ export function Button({
   loading = false,
   icon,
   small = false,
+  large = false,
   fullWidth,
   accessibilityLabel,
 }: Props) {
@@ -70,8 +73,8 @@ export function Button({
       style={({ pressed }) => [
         styles.base,
         {
-          minHeight: small ? size.buttonSmall : size.button,
-          borderRadius: radius.control,
+          minHeight: large ? size.buttonLarge : small ? size.buttonSmall : size.button,
+          borderRadius: large ? radius.button : radius.control,
           paddingHorizontal: filled ? space.xl : space.md,
           alignSelf: stretch ? 'stretch' : 'flex-start',
           gap: space.sm,

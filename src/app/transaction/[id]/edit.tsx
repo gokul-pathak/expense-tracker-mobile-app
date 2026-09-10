@@ -1,60 +1,84 @@
-import { useCallback, useState } from 'react';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useState } from 'react';
 
-import { NativeDataNotice, Screen, ScreenState } from '@/components/ui';
-import { TransactionEntryForm } from '@/features/transactions/TransactionEntryForm';
+import {
+  EmptyState,
+  ErrorState,
+  FormScreen,
+  NativeDataNotice,
+  Screen,
+  Skeleton,
+} from '@/components/ui';
 import type { Transaction } from '@/features/transactions/transaction.types';
+import { TransactionEntryForm } from '@/features/transactions/TransactionEntryForm';
 import { getTransaction, isLocalFinanceDataAvailable } from '@/features/ui/data';
+import { useTheme } from '@/theme';
+import { parseRouteId } from '@/utils/route-id';
 
 export default function EditTransactionScreen() {
+  const { space, radius, size } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [transaction, setTransaction] = useState<Transaction>();
   const [failed, setFailed] = useState(false);
+  const routeId = parseRouteId(id);
+
   const load = useCallback(() => {
-    if (!isLocalFinanceDataAvailable || !id) return;
+    if (!isLocalFinanceDataAvailable) return;
+    if (routeId === null) {
+      setFailed(true);
+      return;
+    }
     setFailed(false);
     try {
-      setTransaction(getTransaction(Number(id)));
+      setTransaction(getTransaction(routeId));
     } catch (error) {
       console.error('Could not load transaction for editing.', error);
       setFailed(true);
     }
-  }, [id]);
+  }, [routeId]);
   useFocusEffect(load);
 
-  if (!isLocalFinanceDataAvailable)
+  if (!isLocalFinanceDataAvailable) {
     return (
       <Screen>
         <NativeDataNotice />
       </Screen>
     );
-  if (failed)
+  }
+  if (failed) {
     return (
-      <Screen>
-        <ScreenState
+      <FormScreen title="Edit" backIcon="x">
+        <ErrorState
           title="Transaction unavailable"
-          description="This transaction may have been deleted."
-          retry={load}
+          message={
+            routeId === null
+              ? 'This link is invalid.'
+              : 'This transaction may have been deleted since you opened it.'
+          }
+          onRetry={routeId === null ? undefined : load}
         />
-      </Screen>
+      </FormScreen>
     );
-  if (!transaction)
+  }
+  if (!transaction) {
     return (
-      <Screen>
-        <ScreenState
-          title="Loading transaction"
-          description="Preparing this transaction for editing..."
-        />
-      </Screen>
+      <FormScreen title="Edit" backIcon="x">
+        <Skeleton height={size.control} radius={radius.control} style={{ marginTop: space.xl }} />
+      </FormScreen>
     );
-  if (transaction.type !== 'expense' && transaction.type !== 'income')
+  }
+  // Transfers, loans and repayments have their own shape and are recorded
+  // again rather than edited, so this route only handles the two it can.
+  if (transaction.type !== 'expense' && transaction.type !== 'income') {
     return (
-      <Screen>
-        <ScreenState
-          title="Unsupported transaction"
-          description="This transaction type cannot be edited here."
+      <FormScreen title="Edit" backIcon="x">
+        <EmptyState
+          illustration="ledger"
+          title="This one can't be edited"
+          body="Transfers, loans and repayments are recorded rather than amended. Delete it and record it again."
         />
-      </Screen>
+      </FormScreen>
     );
+  }
   return <TransactionEntryForm transaction={transaction} type={transaction.type} />;
 }

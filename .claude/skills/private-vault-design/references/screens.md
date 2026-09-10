@@ -38,15 +38,15 @@ out on one screen.
 | A3  | Quick Add                               | `features/quick-add/QuickAdd`    | Drawn  | 2     | ☑    |
 | A4  | Reports                                 | `(tabs)/reports.tsx`             | Drawn  | 2     | ☑    |
 | A5  | More                                    | `(tabs)/more.tsx`                | Spec   | 2     | ☑    |
-| B1  | Add Expense                             | `transaction/expense/new.tsx`    | Drawn  | 3     | ☐    |
-| B2  | Add Income                              | `transaction/income/new.tsx`     | Spec   | 3     | ☐    |
-| B3  | Transfer                                | `transaction/transfer/new.tsx`   | Spec   | 3     | ☐    |
-| B4  | Lend / Borrow chooser                   | `transaction/people.tsx`         | Drawn  | 3     | ☐    |
-| B5  | Record Money Given                      | `transaction/lend/new.tsx`       | Spec   | 3     | ☐    |
-| B6  | Record Money Taken                      | `transaction/borrow/new.tsx`     | Spec   | 3     | ☐    |
-| B7  | Record Payment                          | `people/[id]/payment.tsx`        | Spec   | 3     | ☐    |
-| B8  | Transaction Detail                      | `transaction/[id].tsx`           | Spec   | 3     | ☐    |
-| B9  | Edit Transaction                        | `transaction/[id]/edit.tsx`      | Spec   | 3     | ☐    |
+| B1  | Add Expense                             | `transaction/expense/new.tsx`    | Drawn  | 3     | ☑    |
+| B2  | Add Income                              | `transaction/income/new.tsx`     | Spec   | 3     | ☑    |
+| B3  | Transfer                                | `transaction/transfer/new.tsx`   | Spec   | 3     | ☑    |
+| B4  | Lend / Borrow chooser                   | `transaction/people.tsx`         | Drawn  | 3     | ☑    |
+| B5  | Record Money Given                      | `transaction/lend/new.tsx`       | Spec   | 3     | ☑    |
+| B6  | Record Money Taken                      | `transaction/borrow/new.tsx`     | Spec   | 3     | ☑    |
+| B7  | Record Payment                          | `people/[id]/payment.tsx`        | Spec   | 3     | ☑    |
+| B8  | Transaction Detail                      | `transaction/[id].tsx`           | Spec   | 3     | ☑    |
+| B9  | Edit Transaction                        | `transaction/[id]/edit.tsx`      | Spec   | 3     | ☑    |
 | C1  | Accounts list                           | `accounts/index.tsx`             | Drawn  | 4     | ☐    |
 | C2  | New Account                             | `accounts/new.tsx`               | Spec   | 4     | ☐    |
 | C3  | Edit Account                            | `accounts/[id].tsx`              | Spec   | 4     | ☐    |
@@ -114,8 +114,12 @@ group when `F1` lands.
 
 ### B3 · Transfer
 
-`From` and `To` selectors stacked with a circular swap button on the hairline between them. Both
-show current balance in tertiary beneath the name. **Neutral colour throughout** — a transfer changes
+`From` and `To` selectors stacked with a circular swap button on the hairline between them.
+
+The canvas also puts each account's current balance in tertiary under its name. There is no
+per-account balance query yet — `listActiveAccounts` returns the opening balance only — so that line
+is not built. Add it when `C1` brings the balance query, since the accounts list needs the same
+figure. **Neutral colour throughout** — a transfer changes
 nothing overall and the design should say so. Include the same-account error state.
 
 ### B5 / B6 · Lend and Borrow
@@ -124,6 +128,13 @@ Each carries a quiet `Banner` correcting the most likely misunderstanding:
 
 - Lend: "This is not an expense. It stays on your books as money owed to you."
 - Borrow: "This is not income. It stays on your books as money you owe."
+
+Transfer carries the same correction in its own terms: "A transfer moves money between your
+accounts. Your total is unchanged."
+
+For the same reason, **every movement form types its amount in the neutral colour**, not in
+`negative` or `positive`. A red figure over a banner saying "this is not an expense" contradicts
+itself. Only the expense and income forms colour the figure by direction.
 
 ### B7 · Record Payment
 

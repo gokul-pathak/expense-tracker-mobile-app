@@ -1,16 +1,32 @@
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { zodResolver } from '@hookform/resolvers/zod';
+import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { z } from 'zod';
 
-import { AppButton, AppText, FormScreen, ScreenState } from '@/components/ui';
-import { colors, radii, spacing } from '@/constants/theme';
+import {
+  AmountInput,
+  Banner,
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  FormScreen,
+  Icon,
+  isIconName,
+  Money,
+  PickerSheet,
+  SelectorField,
+  Skeleton,
+  Text,
+  TextField,
+  type PickerOption,
+} from '@/components/ui';
 import type { Account } from '@/features/accounts/account.types';
 import type { Person } from '@/features/people/person.types';
-import { getUserErrorMessage } from '@/features/ui/error-message';
 import {
   createBorrow,
   createLend,
@@ -21,10 +37,13 @@ import {
   listActiveAccounts,
   listActivePeople,
 } from '@/features/ui/data';
+import { getUserErrorMessage } from '@/features/ui/error-message';
+import { accountTypeIcon, useTheme } from '@/theme';
 import { formatMinorUnits, parseMoneyToMinorUnits } from '@/utils/money';
 
 type MovementType = 'transfer' | 'lend' | 'borrow' | 'repayment_received' | 'repayment_paid';
 type Selector = 'person' | 'source' | 'destination' | null;
+
 const schema = z.object({
   amount: z.string().superRefine((value, context) => {
     const amount = parseMoneyToMinorUnits(value);
@@ -45,6 +64,7 @@ export function MoneyMovementForm({
   personId?: number;
   outstandingMinor?: number;
 }) {
+  const { space } = useTheme();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
   const [person, setPerson] = useState<Person>();
@@ -68,11 +88,21 @@ export function MoneyMovementForm({
     resolver: zodResolver(schema),
     defaultValues: { amount: '', note: '' },
   });
+
   const source = accounts.find((account) => account.id === sourceAccountId);
   const destination = accounts.find((account) => account.id === destinationAccountId);
   const needsPerson = type !== 'transfer';
   const sourceLabel = type === 'borrow' || type === 'repayment_received' ? undefined : 'From';
   const destinationLabel = type === 'lend' || type === 'repayment_paid' ? undefined : 'To';
+  const currency = source?.currency ?? destination?.currency ?? 'NPR';
+  const title = titleFor(type);
+  const sameAccount =
+    type === 'transfer' &&
+    sourceAccountId !== undefined &&
+    sourceAccountId === destinationAccountId;
+  const mixedCurrency =
+    type === 'transfer' &&
+    Boolean(source && destination && source.currency !== destination.currency);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -97,214 +127,232 @@ export function MoneyMovementForm({
   }, [destinationLabel, needsPerson, personId, sourceLabel]);
   useFocusEffect(load);
 
-  if (loading)
+  if (loading) {
     return (
-      <FormScreen title={titleFor(type)}>
-        <ScreenState title="Loading" description="Reading your local accounts and people..." />
+      <FormScreen title={title} backIcon="x">
+        <MovementSkeleton />
       </FormScreen>
     );
-  if (failed)
+  }
+  if (failed) {
     return (
-      <FormScreen title={titleFor(type)}>
-        <ScreenState
-          title="Could not load details"
-          description="Your local data could not be read."
-          retry={load}
+      <FormScreen title={title} backIcon="x">
+        <ErrorState
+          message="Your local accounts or people could not be read. Your data is safe."
+          onRetry={load}
         />
       </FormScreen>
     );
+  }
   if (accounts.length === 0) {
     return (
-      <FormScreen title={titleFor(type)}>
-        <ScreenState
+      <FormScreen title={title} backIcon="x">
+        <EmptyState
+          illustration="card"
           title="Add an account first"
-          description="An active account is required to record this movement."
+          body="This movement has to come from or land in one of your accounts."
+          action={{ label: 'Add Account', onPress: () => router.push('/accounts/new' as never) }}
         />
-        <AppButton label="Add Account" onPress={() => router.push('/accounts/new' as never)} />
       </FormScreen>
     );
   }
   if (needsPerson && !personId && people.length === 0) {
     return (
-      <FormScreen title={titleFor(type)}>
-        <ScreenState
-          title="Add a person first to track money given or taken."
-          description="People are required for lending and borrowing."
+      <FormScreen title={title} backIcon="x">
+        <EmptyState
+          illustration="arcs"
+          title="Add a person first"
+          body="Money given and taken is tracked against a person, so add whoever this is with."
+          action={{ label: 'Add Person', onPress: () => router.push('/people/new' as never) }}
         />
-        <AppButton label="Add Person" onPress={() => router.push('/people/new' as never)} />
       </FormScreen>
     );
   }
 
+  const accountOptions = (exclude?: number): PickerOption<number>[] =>
+    accounts
+      .filter((account) => !(type === 'transfer' && account.id === exclude))
+      .map((account) => ({
+        value: account.id,
+        label: account.name,
+        detail: account.type.replace('_', ' '),
+        icon: accountIcon(account.type),
+      }));
+  const personOptions: PickerOption<number>[] = people.map((item) => ({
+    value: item.id,
+    label: item.name,
+    icon: 'user',
+  }));
+
   return (
-    <FormScreen title={titleFor(type)}>
-      <View style={styles.form}>
-        {formError ? <AppText color={colors.danger}>{formError}</AppText> : null}
-        {person ? <AppText color={colors.textMuted}>{person.name}</AppText> : null}
-        {outstandingMinor !== undefined ? (
-          <View style={styles.outstanding}>
-            <AppText color={colors.textMuted}>Outstanding</AppText>
-            <AppText weight="700">
-              {formatMinorUnits(
-                outstandingMinor,
-                source?.currency ?? destination?.currency ?? 'NPR',
-              )}
-            </AppText>
-          </View>
-        ) : null}
-        <View style={styles.field}>
-          <AppText color={colors.textMuted}>
-            {source?.currency ?? destination?.currency ?? 'NPR'}
-          </AppText>
-          <Controller
-            control={control}
-            name="amount"
-            render={({ field: { onChange, onBlur, value } }) => (
-              <TextInput
-                accessibilityLabel="Amount"
-                autoFocus
-                keyboardType="decimal-pad"
-                onBlur={onBlur}
-                onChangeText={onChange}
-                placeholder="0.00"
-                placeholderTextColor={colors.textMuted}
-                style={[styles.amount, errors.amount && styles.inputError]}
-                value={value}
-              />
-            )}
-          />
-          {errors.amount ? <AppText color={colors.danger}>{errors.amount.message}</AppText> : null}
-          {outstandingMinor !== undefined ? (
-            <Pressable
-              onPress={() =>
-                setValue('amount', inputAmount(outstandingMinor), { shouldValidate: true })
-              }
-            >
-              <AppText color={colors.primary} weight="600">
-                Use full outstanding amount
-              </AppText>
-            </Pressable>
-          ) : null}
+    <FormScreen
+      title={title}
+      backIcon="x"
+      action={{ label: 'Save', onPress: handleSubmit(save), disabled: saving }}
+      footer={
+        <Button label={saveLabel(type)} large loading={saving} onPress={handleSubmit(save)} />
+      }
+    >
+      {formError ? (
+        <View style={{ marginBottom: space.md }}>
+          <Banner tone="negative" message={formError} />
         </View>
+      ) : null}
+
+      {ledgerNote(type) ? (
+        <View style={{ marginBottom: space.lg }}>
+          <Banner tone="info" message={ledgerNote(type) ?? ''} />
+        </View>
+      ) : null}
+
+      {outstandingMinor !== undefined ? (
+        <Card style={[styles.outstanding, { marginBottom: space.lg }]}>
+          <Text variant="small" tone="tertiary">
+            Outstanding
+          </Text>
+          <Money minorUnits={outstandingMinor} currency={currency} size="row" showCode={false} />
+        </Card>
+      ) : null}
+
+      <Controller
+        control={control}
+        name="amount"
+        render={({ field: { onChange, value } }) => (
+          <AmountInput
+            value={value}
+            onChangeText={onChange}
+            currency={currency}
+            error={errors.amount?.message}
+          />
+        )}
+      />
+
+      {outstandingMinor !== undefined ? (
+        <View style={[styles.centred, { marginTop: space.md }]}>
+          <Button
+            label={'Use full ' + formatMinorUnits(outstandingMinor, currency)}
+            variant="text"
+            onPress={() =>
+              setValue('amount', inputAmount(outstandingMinor), { shouldValidate: true })
+            }
+          />
+        </View>
+      ) : null}
+
+      <View style={{ marginTop: space.xl, gap: space.md }}>
         {needsPerson && !personId ? (
-          <Picker
+          <SelectorField
             label="Person"
-            value={person?.name ?? 'Choose person'}
+            value={person?.name}
+            placeholder="Choose person"
+            icon="user"
             onPress={() => setSelector('person')}
           />
         ) : null}
+        {needsPerson && personId && person ? (
+          <SelectorField label="Person" value={person.name} icon="user" disabled onPress={noop} />
+        ) : null}
+
         {sourceLabel ? (
-          <Picker
+          <SelectorField
             label={sourceLabel}
-            value={source?.name ?? 'Choose account'}
+            value={source?.name}
+            placeholder="Choose account"
+            icon={source ? accountIcon(source.type) : undefined}
+            error={sameAccount ? 'Choose two different accounts.' : undefined}
             onPress={() => setSelector('source')}
           />
         ) : null}
+
+        {sourceLabel && destinationLabel ? <SwapRow onPress={swapAccounts} /> : null}
+
         {destinationLabel ? (
-          <Picker
+          <SelectorField
             label={destinationLabel}
-            value={destination?.name ?? 'Choose account'}
+            value={destination?.name}
+            placeholder="Choose account"
+            icon={destination ? accountIcon(destination.type) : undefined}
             onPress={() => setSelector('destination')}
           />
         ) : null}
-        {type === 'transfer' &&
-        source &&
-        destination &&
-        source.currency !== destination.currency ? (
-          <AppText color={colors.danger}>
-            Transfers between different currencies are not supported yet.
-          </AppText>
-        ) : null}
-        <Picker label="Date" value={dateLabel(date)} onPress={() => setShowDatePicker(true)} />
-        {showDatePicker ? (
-          <DateTimePicker
-            maximumDate={new Date()}
-            mode="date"
-            value={date}
-            onChange={(_event, value) => {
-              setShowDatePicker(false);
-              if (value) setDate(value);
-            }}
+
+        {mixedCurrency ? (
+          <Banner
+            tone="warning"
+            message="Transfers between different currencies are not supported yet."
           />
         ) : null}
-        <View style={styles.field}>
-          <AppText weight="600">Note</AppText>
-          <Controller
-            control={control}
-            name="note"
-            render={({ field: { onChange, onBlur, value } }) => (
-              <TextInput
-                accessibilityLabel="Note"
-                multiline
-                onBlur={onBlur}
-                onChangeText={onChange}
-                placeholder="Optional note"
-                placeholderTextColor={colors.textMuted}
-                style={styles.note}
-                value={value}
-              />
-            )}
-          />
-        </View>
-        <AppButton
-          disabled={saving}
-          label={saving ? 'Saving...' : saveLabel(type)}
-          onPress={handleSubmit(save)}
+
+        <SelectorField
+          label="Date"
+          value={dateLabel(date)}
+          onPress={() => setShowDatePicker(true)}
+        />
+
+        <Controller
+          control={control}
+          name="note"
+          render={({ field: { onBlur, onChange, value } }) => (
+            <TextField
+              label="Note"
+              placeholder="What was this for?"
+              multiline
+              value={value}
+              onChangeText={onChange}
+              onBlur={onBlur}
+            />
+          )}
         />
       </View>
-      <SelectionModal
-        visible={selector !== null}
-        title={selector === 'person' ? 'Choose person' : 'Choose account'}
+
+      {showDatePicker ? (
+        <DateTimePicker
+          maximumDate={new Date()}
+          mode="date"
+          value={date}
+          onChange={(_event, value) => {
+            setShowDatePicker(false);
+            if (value) setDate(value);
+          }}
+        />
+      ) : null}
+
+      <PickerSheet
+        visible={selector === 'person'}
         onClose={() => setSelector(null)}
-      >
-        {selector === 'person'
-          ? people.map((item) => (
-              <Option
-                key={item.id}
-                label={item.name}
-                onPress={() => {
-                  setPerson(item);
-                  setSelector(null);
-                }}
-              />
-            ))
-          : accounts
-              .filter(
-                (account) =>
-                  !(
-                    type === 'transfer' &&
-                    ((selector === 'source' && account.id === destinationAccountId) ||
-                      (selector === 'destination' && account.id === sourceAccountId))
-                  ),
-              )
-              .map((account) => (
-                <Option
-                  key={account.id}
-                  label={account.name}
-                  detail={account.type.replace('_', ' ')}
-                  onPress={() => {
-                    if (selector === 'source') setSourceAccountId(account.id);
-                    else setDestinationAccountId(account.id);
-                    setSelector(null);
-                  }}
-                />
-              ))}
-        {selector === 'person' ? (
-          <AppButton
-            label="+ Add Person"
-            variant="secondary"
-            onPress={() => router.push('/people/new' as never)}
-          />
-        ) : (
-          <AppButton
-            label="+ Add Account"
-            variant="secondary"
-            onPress={() => router.push('/accounts/new' as never)}
-          />
-        )}
-      </SelectionModal>
+        title="Choose person"
+        options={personOptions}
+        selected={person?.id}
+        onSelect={(id) => setPerson(people.find((item) => item.id === id))}
+        footer={{ label: 'Add Person', onPress: () => router.push('/people/new' as never) }}
+      />
+      <PickerSheet
+        visible={selector === 'source'}
+        onClose={() => setSelector(null)}
+        title="Choose account"
+        options={accountOptions(destinationAccountId)}
+        selected={sourceAccountId}
+        onSelect={setSourceAccountId}
+        footer={{ label: 'Add Account', onPress: () => router.push('/accounts/new' as never) }}
+      />
+      <PickerSheet
+        visible={selector === 'destination'}
+        onClose={() => setSelector(null)}
+        title="Choose account"
+        options={accountOptions(sourceAccountId)}
+        selected={destinationAccountId}
+        onSelect={setDestinationAccountId}
+        footer={{ label: 'Add Account', onPress: () => router.push('/accounts/new' as never) }}
+      />
     </FormScreen>
   );
+
+  function swapAccounts() {
+    if (Platform.OS !== 'web') void Haptics.selectionAsync();
+    setSourceAccountId(destinationAccountId);
+    setDestinationAccountId(sourceAccountId);
+    setFormError('');
+  }
 
   function save(values: Values) {
     if (submitting.current) return;
@@ -315,7 +363,7 @@ export function MoneyMovementForm({
     }
     if (outstandingMinor !== undefined && amountMinor > outstandingMinor) {
       setError('amount', {
-        message: `Amount cannot exceed the outstanding balance of ${formatMinorUnits(outstandingMinor, source?.currency ?? destination?.currency ?? 'NPR')}.`,
+        message: `Amount cannot exceed the outstanding balance of ${formatMinorUnits(outstandingMinor, currency)}.`,
       });
       return;
     }
@@ -365,80 +413,79 @@ export function MoneyMovementForm({
   }
 }
 
-function Picker({ label, value, onPress }: { label: string; value: string; onPress: () => void }) {
+/** A circular swap sitting on the hairline between From and To. */
+function SwapRow({ onPress }: { onPress: () => void }) {
+  const { palette, space, size, motion } = useTheme();
+  const rule = { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: palette.hairline };
   return (
-    <View style={styles.field}>
-      <AppText weight="600">{label}</AppText>
+    <View style={[styles.swapRow, { gap: space.md }]}>
+      <View style={rule} />
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Choose ${label}`}
+        accessibilityLabel="Swap the two accounts"
+        hitSlop={10}
         onPress={onPress}
-        style={styles.picker}
+        style={({ pressed }) => [
+          styles.swap,
+          {
+            width: size.buttonSmall,
+            height: size.buttonSmall,
+            borderRadius: size.buttonSmall / 2,
+            backgroundColor: palette.surfaceRaised,
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: palette.hairline,
+          },
+          pressed && { transform: [{ scale: motion.press.scale }] },
+        ]}
       >
-        <AppText color={value.startsWith('Choose') ? colors.textMuted : colors.text}>
-          {value}
-        </AppText>
-        <AppText color={colors.textMuted}>›</AppText>
+        <Icon name="arrow-up-down" size={18} color={palette.textSecondary} />
       </Pressable>
+      <View style={rule} />
     </View>
   );
 }
-function SelectionModal({
-  visible,
-  title,
-  onClose,
-  children,
-}: {
-  visible: boolean;
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
+
+function MovementSkeleton() {
+  const { space, radius, size } = useTheme();
   return (
-    <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
-      <View style={styles.backdrop}>
-        <View style={styles.modal}>
-          <View style={styles.modalHeader}>
-            <AppText variant="heading" weight="700">
-              {title}
-            </AppText>
-            <Pressable onPress={onClose}>
-              <AppText color={colors.primary} weight="600">
-                Done
-              </AppText>
-            </Pressable>
-          </View>
-          <ScrollView contentContainerStyle={styles.modalList}>{children}</ScrollView>
-        </View>
+    <View style={{ marginTop: space.lg }}>
+      <Skeleton width={72} height={12} radius="pill" style={styles.centredSelf} />
+      <Skeleton
+        width={220}
+        height={44}
+        radius="pill"
+        style={[styles.centredSelf, { marginTop: 14 }]}
+      />
+      <View style={{ marginTop: space.xxl + space.lg, gap: space.md }}>
+        <Skeleton height={size.control} radius={radius.control} />
+        <Skeleton height={size.control} radius={radius.control} />
+        <Skeleton height={size.control} radius={radius.control} />
       </View>
-    </Modal>
+    </View>
   );
 }
-function Option({
-  label,
-  detail,
-  onPress,
-}: {
-  label: string;
-  detail?: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
-      style={styles.option}
-    >
-      <AppText weight="600">{label}</AppText>
-      {detail ? (
-        <AppText variant="caption" color={colors.textMuted}>
-          {detail}
-        </AppText>
-      ) : null}
-    </Pressable>
-  );
+
+/**
+ * The correction each of these most needs to make. Lending is not spending and
+ * borrowing is not earning — both stay on your books, and someone recording one
+ * for the first time will assume otherwise.
+ */
+function ledgerNote(type: MovementType): string | undefined {
+  if (type === 'lend')
+    return 'This is not an expense. It stays on your books as money owed to you.';
+  if (type === 'borrow') return 'This is not income. It stays on your books as money you owe.';
+  if (type === 'transfer')
+    return 'A transfer moves money between your accounts. Your total is unchanged.';
+  return undefined;
 }
+
+function accountIcon(accountType: string) {
+  const key = accountTypeIcon[accountType];
+  return isIconName(key) ? key : 'wallet';
+}
+
+function noop() {}
+
 function titleFor(type: MovementType) {
   return (
     {
@@ -450,6 +497,7 @@ function titleFor(type: MovementType) {
     } as const
   )[type];
 }
+
 function saveLabel(type: MovementType) {
   return (
     {
@@ -461,6 +509,7 @@ function saveLabel(type: MovementType) {
     } as const
   )[type];
 }
+
 function dateLabel(date: Date) {
   return new Intl.DateTimeFormat('en-US', {
     month: 'short',
@@ -468,66 +517,21 @@ function dateLabel(date: Date) {
     year: 'numeric',
   }).format(date);
 }
+
 function inputAmount(amount: number) {
   return `${Math.floor(amount / 100)}.${String(amount % 100).padStart(2, '0')}`;
 }
+
 function mapError(message: string) {
   if (message.includes('different')) return 'Choose two different accounts.';
   if (message.includes('cannot exceed')) return message;
   return message;
 }
+
 const styles = StyleSheet.create({
-  form: { gap: spacing.lg },
-  field: { gap: spacing.sm },
-  amount: {
-    borderBottomWidth: 2,
-    borderColor: colors.primary,
-    color: colors.text,
-    fontSize: 42,
-    fontWeight: '700',
-    paddingVertical: spacing.sm,
-  },
-  inputError: { borderColor: colors.danger },
-  note: {
-    minHeight: 84,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    backgroundColor: colors.surface,
-    color: colors.text,
-    padding: spacing.md,
-    textAlignVertical: 'top',
-  },
-  picker: {
-    minHeight: 52,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    backgroundColor: colors.surface,
-    paddingHorizontal: spacing.md,
-  },
-  outstanding: {
-    gap: spacing.xs,
-    padding: spacing.md,
-    borderRadius: radii.md,
-    backgroundColor: colors.surfaceMuted,
-  },
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0, 0, 0, 0.32)' },
-  modal: {
-    maxHeight: '75%',
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
-    backgroundColor: colors.background,
-  },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', padding: spacing.lg },
-  modalList: { gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.xxxl },
-  option: {
-    minHeight: 56,
-    justifyContent: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
+  outstanding: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  centred: { alignItems: 'center' },
+  centredSelf: { alignSelf: 'center' },
+  swapRow: { flexDirection: 'row', alignItems: 'center' },
+  swap: { alignItems: 'center', justifyContent: 'center' },
 });

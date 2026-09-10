@@ -124,6 +124,9 @@ date, amount with direction. Reads as a statement of record, which a stack of ca
 | `text`        | no fill, accent text            | no fill, bronze text        |
 | `destructive` | no fill, `negative` text        | same                        |
 
+`large` gives 54pt and `radius.button`, for the pinned action at the foot of an entry form where it
+is the only target on the row.
+
 **Destructive is a text button, never a filled red block** — except inside an explicit confirmation
 dialog, where a filled destructive button is correct because the user has already been warned.
 
@@ -150,11 +153,28 @@ every entry form — category, account, person, date, payment mode.
 Shows placeholder text in `tertiary` when unset, `primary` when set. Error state swaps the border to
 `negative` and shows a message below.
 
+### `TextField`
+
+Label above, control below, error beneath — the counterpart to `SelectorField` for anything typed.
+Same surface, hairline and radius, so a form mixing the two reads as one stack. `multiline` gives
+88pt and top-aligned text for a note.
+
+Replaces `FormField`, which is wired to react-hook-form and takes its error as a caller-supplied
+string. Migrate each caller as you touch it.
+
 ### `AmountInput`
 
-The entry hero. 44pt tabular figure, currency code fixed and muted to its left, caret as a 2pt
-accent bar. **Underline only, no box** — a boxed input at this size looks like a form field, and
-this is meant to look like the number is the screen.
+The figure at the top of every entry form: eyebrow, currency code, 44pt integer, 26pt decimals, and
+a blinking accent caret, over a hairline.
+
+44pt in **Inter**, not Instrument Serif — the serif is reserved for a settled balance, and a serif
+digit changing under the caret reads as decorative rather than as a number being entered. The token
+is `moneySize.entry`.
+
+The real `TextInput` is invisible and stretched over the whole block, so the keyboard, selection and
+paste behave natively while the visible figure is drawn to the design. Styling the input itself
+cannot produce the three-part treatment. Input is sanitised as it is typed — digits, one dot, two
+places — so what is on screen is always something the app can store.
 
 ### `Switch`
 
@@ -172,10 +192,22 @@ dimmed backdrop (55% black, 12px blur). Springs in at `motion.sheetPresent`.
 Every picker in the app is one of these. The current code uses raw RN `Modal` with hand-rolled
 styles in four places — those collapse into this.
 
+### `PickerSheet`
+
+A `BottomSheet` holding one list of options with a tick on the chosen one, an optional clearing row
+("None", "Any account"), and an optional footer action ("Add Account"). Choosing closes the sheet:
+a single choice is complete the moment it is made, so there is no Done to press.
+
+Every picker in the app is one of these. The old code hand-rolled four near-identical modals, which
+is how four different row heights and tick treatments got into one product.
+
 ### `Dialog`
 
 Centred confirmation for destructive actions. Title, body, cancel + confirm. This is the one place a
 filled destructive button is right.
+
+Deliberately not a sheet: a sheet is where you choose among many, a dialog is where you stop and
+answer one question.
 
 ### `Toast`
 

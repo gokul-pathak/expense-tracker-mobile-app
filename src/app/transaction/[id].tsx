@@ -1,19 +1,27 @@
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { useFocusEffect, useLocalSearchParams, router } from 'expo-router';
-import { Alert, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import {
-  AppButton,
-  AppText,
+  Banner,
+  Button,
+  Card,
+  CategoryChip,
+  Dialog,
+  ErrorState,
   FormScreen,
+  ListRow,
+  Money,
   NativeDataNotice,
   Screen,
-  ScreenState,
+  SectionHeader,
+  Skeleton,
+  Text,
 } from '@/components/ui';
-import { colors, spacing } from '@/constants/theme';
 import {
   formatTransactionDate,
   getTransactionAccountLabel,
+  getTransactionDirection,
   getTransactionLabel,
 } from '@/features/transactions/transaction-presentation';
 import type { TransactionView } from '@/features/transactions/transaction.types';
@@ -23,7 +31,7 @@ import {
   isLocalFinanceDataAvailable,
 } from '@/features/ui/data';
 import { getUserErrorMessage } from '@/features/ui/error-message';
-import { formatMinorUnits } from '@/utils/money';
+import { useTheme } from '@/theme';
 import { parseRouteId } from '@/utils/route-id';
 
 const paymentModeLabels = {
@@ -38,13 +46,16 @@ const paymentModeLabels = {
 } as const;
 
 export default function TransactionDetailScreen() {
+  const { space } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [transaction, setTransaction] = useState<TransactionView>();
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState('');
   const routeId = parseRouteId(id);
+
   const load = useCallback(() => {
     if (!isLocalFinanceDataAvailable || routeId === null) {
       setLoading(false);
@@ -64,145 +75,208 @@ export default function TransactionDetailScreen() {
   }, [routeId]);
   useFocusEffect(load);
 
-  if (!isLocalFinanceDataAvailable)
+  if (!isLocalFinanceDataAvailable) {
     return (
       <Screen>
         <NativeDataNotice />
       </Screen>
     );
-  if (loading)
+  }
+  if (loading) {
     return (
       <FormScreen title="Transaction">
-        <ScreenState
-          title="Loading transaction"
-          description="Reading this transaction from your local data..."
-        />
+        <DetailSkeleton />
       </FormScreen>
     );
-  if (failed || !transaction)
+  }
+  if (failed || !transaction) {
     return (
       <FormScreen title="Transaction">
-        <ScreenState
+        <ErrorState
           title="Transaction unavailable"
-          description={
-            routeId === null ? 'This link is invalid.' : 'This transaction may have been deleted.'
+          message={
+            routeId === null
+              ? 'This link is invalid.'
+              : 'This transaction may have been deleted since you opened it.'
           }
-          retry={load}
+          onRetry={routeId === null ? undefined : load}
         />
       </FormScreen>
     );
+  }
 
   const transactionId = transaction.id;
-  const expense = transaction.type === 'expense';
-  const income = transaction.type === 'income';
-  const title = getTransactionLabel(transaction);
+  const label = getTransactionLabel(transaction);
+  const direction = getTransactionDirection(transaction);
+  const editable = transaction.type === 'expense' || transaction.type === 'income';
+
   return (
-    <FormScreen title={title}>
-      <View style={styles.content}>
-        {error ? <AppText color={colors.danger}>{error}</AppText> : null}
-        <View style={styles.amount}>
-          <AppText
-            color={expense ? colors.danger : income ? colors.success : colors.text}
-            weight="700"
-          >
-            {title}
-          </AppText>
-          <AppText variant="title" weight="700">
-            {expense ? '- ' : income ? '+ ' : ''}
-            {formatMinorUnits(transaction.amountMinor, transaction.currency)}
-          </AppText>
+    <FormScreen
+      title="Transaction"
+      action={
+        editable
+          ? {
+              label: 'Edit',
+              onPress: () => router.push(`/transaction/${transactionId}/edit` as never),
+            }
+          : undefined
+      }
+    >
+      {error ? (
+        <View style={{ marginBottom: space.lg }}>
+          <Banner tone="negative" message={error} />
         </View>
-        {transaction.type === 'expense' || transaction.type === 'income' ? (
-          <DetailRow
-            label={expense ? 'Category' : 'Source'}
-            value={getTransactionLabel(transaction)}
-          />
-        ) : null}
-        {transaction.type === 'transfer' ? (
-          <>
-            <DetailRow label="From" value={transaction.sourceAccountName ?? 'Unknown account'} />
-            <DetailRow label="To" value={transaction.destinationAccountName ?? 'Unknown account'} />
-          </>
-        ) : null}
-        {transaction.type === 'lend' || transaction.type === 'repayment_paid' ? (
-          <DetailRow label="From" value={transaction.sourceAccountName ?? 'Unknown account'} />
-        ) : null}
-        {transaction.type === 'borrow' || transaction.type === 'repayment_received' ? (
-          <DetailRow label="To" value={transaction.destinationAccountName ?? 'Unknown account'} />
-        ) : null}
-        {transaction.personName ? (
-          <DetailRow label="Person" value={transaction.personName} />
-        ) : null}
-        {transaction.type === 'expense' || transaction.type === 'income' ? (
-          <DetailRow label="Account" value={getTransactionAccountLabel(transaction)} />
-        ) : null}
-        <DetailRow label="Date" value={formatTransactionDate(transaction.transactionDate)} />
-        {transaction.note ? <DetailRow label="Note" value={transaction.note} /> : null}
-        {transaction.paymentMode ? (
-          <DetailRow label="Payment Mode" value={paymentModeLabels[transaction.paymentMode]} />
-        ) : null}
-        {transaction.type === 'expense' || transaction.type === 'income' ? (
-          <AppButton
-            label="Edit"
-            onPress={() => router.push(`/transaction/${transaction.id}/edit` as never)}
-          />
-        ) : null}
-        <AppButton
-          label={deleting ? 'Deleting...' : 'Delete'}
-          disabled={deleting}
-          variant="secondary"
-          onPress={confirmDelete}
+      ) : null}
+
+      <View style={[styles.hero, { marginTop: space.lg, gap: space.md }]}>
+        <CategoryChip categoryIcon={transaction.categoryIcon} size={52} />
+        <Money
+          minorUnits={transaction.amountMinor}
+          currency={transaction.currency}
+          size="feature"
+          direction={direction}
+          align="center"
+        />
+        <Text variant="body" tone="secondary">
+          {label}
+        </Text>
+      </View>
+
+      <View style={{ marginTop: space.xxl }}>
+        <SectionHeader title="Details" />
+        <Card padding="none">
+          {rowsFor(transaction).map((row, index, rows) => (
+            <ListRow
+              key={row.label}
+              label={row.label}
+              value={row.value}
+              valueTone="primary"
+              chevron={false}
+              last={index === rows.length - 1}
+            />
+          ))}
+        </Card>
+      </View>
+
+      {transaction.note ? (
+        <View style={{ marginTop: space.xxl }}>
+          <SectionHeader title="Note" />
+          <Card>
+            <Text variant="body">{transaction.note}</Text>
+          </Card>
+        </View>
+      ) : null}
+
+      <View style={[styles.destructive, { marginTop: space.xl4 }]}>
+        <Button
+          label="Delete Transaction"
+          variant="destructive"
+          loading={deleting}
+          onPress={() => setConfirming(true)}
         />
       </View>
+
+      <Dialog
+        visible={confirming}
+        title="Delete this transaction?"
+        message={
+          'This removes it from your records and adjusts the balances it affected. It cannot be undone.'
+        }
+        confirmLabel="Delete"
+        destructive
+        loading={deleting}
+        onCancel={() => setConfirming(false)}
+        onConfirm={remove}
+      />
     </FormScreen>
   );
 
-  function confirmDelete() {
-    Alert.alert('Delete this transaction?', 'This action cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          if (deleting) return;
-          setDeleting(true);
-          setError('');
-          try {
-            deleteTransaction(transactionId);
-            router.back();
-          } catch (caught) {
-            console.error('Could not delete transaction.', caught);
-            const message = getUserErrorMessage(caught);
-            setError(
-              message.includes('cannot exceed money')
-                ? "This lending or borrowing record can't be deleted while repayment history exists. Delete the repayment records first."
-                : message,
-            );
-          } finally {
-            setDeleting(false);
-          }
-        },
-      },
-    ]);
+  function remove() {
+    if (deleting) return;
+    setDeleting(true);
+    setError('');
+    try {
+      deleteTransaction(transactionId);
+      setConfirming(false);
+      router.back();
+    } catch (caught) {
+      console.error('Could not delete transaction.', caught);
+      const message = getUserErrorMessage(caught);
+      setConfirming(false);
+      setError(
+        message.includes('cannot exceed money')
+          ? "This lending or borrowing record can't be deleted while repayment history exists. Delete the repayment records first."
+          : message,
+      );
+    } finally {
+      setDeleting(false);
+    }
   }
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+/**
+ * Which accounts a transaction names depends on what kind it is: a transfer has
+ * two, a loan has one and a person, an expense has a category. Building the
+ * list here keeps that shape in one place rather than spread over conditionals
+ * in the layout.
+ */
+function rowsFor(transaction: TransactionView): { label: string; value: string }[] {
+  const rows: { label: string; value: string }[] = [];
+  const unknown = 'Unknown account';
+
+  if (transaction.type === 'expense' || transaction.type === 'income') {
+    rows.push({
+      label: transaction.type === 'expense' ? 'Category' : 'Source',
+      value: getTransactionLabel(transaction),
+    });
+    rows.push({ label: 'Account', value: getTransactionAccountLabel(transaction) });
+  }
+  if (transaction.type === 'transfer') {
+    rows.push({ label: 'From', value: transaction.sourceAccountName ?? unknown });
+    rows.push({ label: 'To', value: transaction.destinationAccountName ?? unknown });
+  }
+  if (transaction.type === 'lend' || transaction.type === 'repayment_paid') {
+    rows.push({ label: 'From', value: transaction.sourceAccountName ?? unknown });
+  }
+  if (transaction.type === 'borrow' || transaction.type === 'repayment_received') {
+    rows.push({ label: 'To', value: transaction.destinationAccountName ?? unknown });
+  }
+  if (transaction.personName) rows.push({ label: 'Person', value: transaction.personName });
+
+  rows.push({ label: 'Date', value: formatTransactionDate(transaction.transactionDate) });
+  if (transaction.paymentMode) {
+    rows.push({ label: 'Payment Mode', value: paymentModeLabels[transaction.paymentMode] });
+  }
+  return rows;
+}
+
+function DetailSkeleton() {
+  const { space, radius, size } = useTheme();
   return (
-    <View style={styles.detailRow}>
-      <AppText color={colors.textMuted}>{label}</AppText>
-      <AppText weight="600">{value}</AppText>
+    <View style={{ marginTop: space.lg }}>
+      <Skeleton width={52} height={52} radius={radius.control} style={styles.centred} />
+      <Skeleton
+        width={180}
+        height={32}
+        radius="pill"
+        style={[styles.centred, { marginTop: space.md }]}
+      />
+      <Skeleton
+        width={110}
+        height={16}
+        radius="pill"
+        style={[styles.centred, { marginTop: space.md }]}
+      />
+      <View style={{ marginTop: space.xxl }}>
+        <Skeleton width={70} height={12} radius="pill" style={{ marginBottom: space.md }} />
+        <Skeleton height={size.listRow * 4} radius={radius.card} />
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  content: { gap: spacing.lg },
-  amount: { gap: spacing.sm, paddingVertical: spacing.md },
-  detailRow: {
-    gap: spacing.xs,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    paddingBottom: spacing.md,
-  },
+  hero: { alignItems: 'center' },
+  destructive: { alignItems: 'center' },
+  centred: { alignSelf: 'center' },
 });

@@ -41,6 +41,8 @@ export const SCREEN_GUTTER = space.xl;
 export const radius = {
   pill: 999,
   control: 14,
+  /** The pinned primary action at the foot of an entry form: taller, so slightly rounder. */
+  button: 16,
   card: 20,
   heroCard: 24,
   sheet: 28,
@@ -107,6 +109,17 @@ export const moneySize = {
   },
   stat: { integer: { ...type.title, fontSize: 24, lineHeight: 28 }, decimals: 15, gap: space.xs },
   row: { integer: type.amount, decimals: 11, gap: space.xs },
+  /**
+   * The figure being typed into an entry form. Same 44pt as the hero, but Inter
+   * rather than Instrument Serif: the serif is reserved for a settled balance,
+   * and a serif digit changing under the caret reads as decorative rather than
+   * as a number being entered.
+   */
+  entry: {
+    integer: { ...type.title, fontSize: 44, lineHeight: 48, letterSpacing: -0.66 },
+    decimals: 26,
+    gap: space.sm,
+  },
 } as const;
 
 export type MoneySize = keyof typeof moneySize;
@@ -142,6 +155,8 @@ export const size = {
   categoryChip: 36,
   categoryChipRadius: 12,
   button: 48,
+  /** The pinned action at the foot of an entry form, where it is the only target. */
+  buttonLarge: 54,
   buttonSmall: 40,
   control: 52,
   chip: 32,
@@ -152,6 +167,8 @@ export const size = {
   fab: 56,
   progressBar: 6,
   sheetHandle: { width: 38, height: 4 },
+  /** The blinking caret beside an amount being entered. */
+  caret: { width: 2, height: 40 },
 } as const;
 
 /** Backdrop behind a presented sheet. */

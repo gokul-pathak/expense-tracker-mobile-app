@@ -1,18 +1,32 @@
-import { zodResolver } from '@hookform/resolvers/zod';
-import { useCallback, useRef, useState } from 'react';
-import { useFocusEffect, router } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { z } from 'zod';
 
-import { AppButton, AppText, FormScreen, ScreenState } from '@/components/ui';
-import { colors, radii, spacing, typography } from '@/constants/theme';
+import {
+  AmountInput,
+  Banner,
+  Button,
+  CategoryChip,
+  EmptyState,
+  ErrorState,
+  FormScreen,
+  Icon,
+  isIconName,
+  PickerSheet,
+  SelectorField,
+  Skeleton,
+  Text,
+  TextField,
+  type PickerOption,
+} from '@/components/ui';
 import { PAYMENT_MODES, type PaymentMode } from '@/db/constants';
 import type { Account } from '@/features/accounts/account.types';
 import type { Category } from '@/features/categories/category.types';
 import type { Transaction, UpdateExpenseInput } from '@/features/transactions/transaction.types';
-import { getUserErrorMessage } from '@/features/ui/error-message';
 import {
   createExpense,
   createIncome,
@@ -23,6 +37,8 @@ import {
   updateExpense,
   updateIncome,
 } from '@/features/ui/data';
+import { getUserErrorMessage } from '@/features/ui/error-message';
+import { accountTypeIcon, useTheme } from '@/theme';
 import { parseMoneyToMinorUnits } from '@/utils/money';
 
 const paymentModeLabels: Record<PaymentMode, string> = {
@@ -66,6 +82,7 @@ export function TransactionEntryForm({
   type: EntryType;
   transaction?: Transaction;
 }) {
+  const { space } = useTheme();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -107,6 +124,7 @@ export function TransactionEntryForm({
       ? 'Add Expense'
       : 'Add Income';
   const categoryLabel = type === 'expense' ? 'Category' : 'Source';
+  const saveLabel = `Save ${type === 'expense' ? 'Expense' : 'Income'}`;
 
   const load = useCallback(() => {
     setLoading(true);
@@ -149,219 +167,201 @@ export function TransactionEntryForm({
 
   if (loading) {
     return (
-      <FormScreen title={title}>
-        <ScreenState title="Loading" description="Reading your local accounts and categories..." />
+      <FormScreen title={title} backIcon="x">
+        <EntrySkeleton />
       </FormScreen>
     );
   }
   if (failed) {
     return (
-      <FormScreen title={title}>
-        <ScreenState
-          title="Could not load transaction details"
-          description="Your local accounts or categories could not be read."
-          retry={load}
+      <FormScreen title={title} backIcon="x">
+        <ErrorState
+          message="Your local accounts or categories could not be read. Your data is safe."
+          onRetry={load}
         />
       </FormScreen>
     );
   }
   if (accounts.length === 0) {
     return (
-      <FormScreen title={title}>
-        <ScreenState
-          title={`You need an account before adding ${type === 'expense' ? 'an expense' : 'income'}.`}
-          description="Add an active account to record where this money came from or went."
+      <FormScreen title={title} backIcon="x">
+        <EmptyState
+          illustration="card"
+          title="Add an account first"
+          body={`An ${type === 'expense' ? 'expense' : 'income'} is recorded against the account the money left or arrived in.`}
+          action={{ label: 'Add Account', onPress: () => router.push('/accounts/new' as never) }}
         />
-        <AppButton label="Add Account" onPress={() => router.push('/accounts/new' as never)} />
       </FormScreen>
     );
   }
   if (categories.length === 0) {
     return (
-      <FormScreen title={title}>
-        <ScreenState
-          title={`No ${type} categories available.`}
-          description="Add a category before recording this transaction."
+      <FormScreen title={title} backIcon="x">
+        <EmptyState
+          illustration="ledger"
+          title={`No ${type} categories yet`}
+          body={`Every ${type} is filed under a category, so add one before recording this.`}
+          action={{ label: 'Go to Categories', onPress: () => router.push('/categories' as never) }}
         />
-        <AppButton label="Go to Categories" onPress={() => router.push('/categories' as never)} />
       </FormScreen>
     );
   }
 
-  return (
-    <FormScreen title={title}>
-      <View style={styles.form}>
-        {formError ? <AppText color={colors.danger}>{formError}</AppText> : null}
-        <View style={styles.amountBlock}>
-          <AppText color={colors.textMuted}>{selectedAccount?.currency ?? 'NPR'}</AppText>
-          <Controller
-            control={control}
-            name="amount"
-            render={({ field: { onBlur, onChange, value } }) => (
-              <TextInput
-                accessibilityLabel="Amount"
-                autoFocus
-                keyboardType="decimal-pad"
-                onBlur={onBlur}
-                onChangeText={onChange}
-                placeholder="0.00"
-                placeholderTextColor={colors.textMuted}
-                returnKeyType="done"
-                style={[styles.amountInput, errors.amount && styles.inputError]}
-                value={value}
-              />
-            )}
-          />
-          {errors.amount ? <AppText color={colors.danger}>{errors.amount.message}</AppText> : null}
-        </View>
+  const categoryOptions: PickerOption<number>[] = categories.map((category) => ({
+    value: category.id,
+    label: category.name,
+    leading: <CategoryChip categoryIcon={category.icon} size={28} />,
+  }));
+  const accountOptions: PickerOption<number>[] = accounts.map((account) => ({
+    value: account.id,
+    label: account.name,
+    detail: accountTypeLabel(account.type),
+    icon: accountIcon(account.type),
+  }));
+  const paymentModeOptions: PickerOption<PaymentMode>[] = PAYMENT_MODES.map((mode) => ({
+    value: mode,
+    label: paymentModeLabels[mode],
+  }));
 
-        <SelectorRow
+  return (
+    <FormScreen
+      title={title}
+      backIcon="x"
+      action={{ label: 'Save', onPress: handleSubmit(save), disabled: saving }}
+      footer={<Button label={saveLabel} large loading={saving} onPress={handleSubmit(save)} />}
+    >
+      {formError ? (
+        <View style={{ marginBottom: space.lg }}>
+          <Banner tone="negative" message={formError} />
+        </View>
+      ) : null}
+
+      <Controller
+        control={control}
+        name="amount"
+        render={({ field: { onChange, value } }) => (
+          <AmountInput
+            value={value}
+            onChangeText={onChange}
+            currency={selectedAccount?.currency ?? 'NPR'}
+            direction={type === 'expense' ? 'expense' : 'income'}
+            error={errors.amount?.message}
+          />
+        )}
+      />
+
+      <View style={[styles.fields, { marginTop: space.xl, gap: space.md }]}>
+        <SelectorField
           label={categoryLabel}
-          value={
-            selectedCategory
-              ? `${selectedCategory.icon ?? '•'}  ${selectedCategory.name}`
-              : 'Choose category'
+          value={selectedCategory?.name}
+          placeholder={`Choose ${categoryLabel.toLowerCase()}`}
+          leading={
+            selectedCategory ? (
+              <CategoryChip categoryIcon={selectedCategory.icon} size={28} />
+            ) : null
           }
           error={errors.categoryId?.message}
           onPress={() => setSelector('category')}
         />
-        <SelectorRow
+        <SelectorField
           label="Account"
-          value={
-            selectedAccount
-              ? `${selectedAccount.icon ?? '•'}  ${selectedAccount.name}`
-              : 'Choose account'
-          }
-          detail={selectedAccount?.type.replace('_', ' ')}
+          value={selectedAccount?.name}
+          placeholder="Choose account"
+          icon={selectedAccount ? accountIcon(selectedAccount.type) : undefined}
           error={errors.accountId?.message}
           onPress={() => setSelector('account')}
         />
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="More details"
-          accessibilityState={{ expanded: moreDetails }}
-          onPress={() => setMoreDetails((expanded) => !expanded)}
-          style={styles.moreDetails}
-        >
-          <AppText weight="600">More Details</AppText>
-          <AppText color={colors.textMuted}>{moreDetails ? '⌃' : '›'}</AppText>
-        </Pressable>
+        <MoreDetails expanded={moreDetails} onToggle={() => setMoreDetails((open) => !open)} />
 
         {moreDetails ? (
-          <View style={styles.details}>
-            <SelectorRow
+          <View style={{ gap: space.md }}>
+            <SelectorField
               label="Date"
-              value={formatDate(selectedDate)}
+              value={describeDate(selectedDate)}
               error={errors.transactionDate?.message}
               onPress={() => setShowDatePicker(true)}
             />
-            {showDatePicker ? (
-              <DateTimePicker
-                maximumDate={new Date()}
-                mode="date"
-                onChange={(_event, date) => {
-                  setShowDatePicker(false);
-                  if (!date) return;
-                  setSelectedDate(date);
-                  setValue('transactionDate', formatDate(date), { shouldValidate: true });
-                }}
-                value={selectedDate}
-              />
-            ) : null}
-            <Field
+            <SelectorField
+              label="Payment Mode"
+              value={selectedPaymentMode ? paymentModeLabels[selectedPaymentMode] : undefined}
+              placeholder="Optional"
+              onPress={() => setSelector('paymentMode')}
+            />
+            <Controller
               control={control}
               name="note"
-              label="Note"
-              placeholder="Optional note"
-              multiline
-            />
-            <SelectorRow
-              label="Payment Mode"
-              value={selectedPaymentMode ? paymentModeLabels[selectedPaymentMode] : 'Optional'}
-              onPress={() => setSelector('paymentMode')}
+              render={({ field: { onBlur, onChange, value }, fieldState }) => (
+                <TextField
+                  label="Note"
+                  placeholder="What was this for?"
+                  multiline
+                  value={value}
+                  onChangeText={onChange}
+                  onBlur={onBlur}
+                  error={fieldState.error?.message}
+                />
+              )}
             />
           </View>
         ) : null}
-
-        <AppButton
-          label={
-            saving
-              ? 'Saving...'
-              : transaction
-                ? `Save ${type === 'expense' ? 'Expense' : 'Income'}`
-                : `Save ${type === 'expense' ? 'Expense' : 'Income'}`
-          }
-          disabled={saving}
-          onPress={handleSubmit(save)}
-        />
       </View>
 
-      <SelectionModal
-        visible={selector === 'category'}
-        title={`Choose ${categoryLabel.toLowerCase()}`}
-        onClose={() => setSelector(null)}
-      >
-        {categories.map((category) => (
-          <SelectionRow
-            key={category.id}
-            label={`${category.icon ?? '•'}  ${category.name}`}
-            onPress={() => {
-              setValue('categoryId', category.id, { shouldValidate: true });
-              setSelectedCategoryId(category.id);
-              setSelector(null);
-            }}
-          />
-        ))}
-      </SelectionModal>
-      <SelectionModal
-        visible={selector === 'account'}
-        title="Choose account"
-        onClose={() => setSelector(null)}
-      >
-        {accounts.map((account) => (
-          <SelectionRow
-            key={account.id}
-            label={`${account.icon ?? '•'}  ${account.name}`}
-            detail={account.type.replace('_', ' ')}
-            onPress={() => {
-              setValue('accountId', account.id, { shouldValidate: true });
-              setSelectedAccountId(account.id);
-              setSelector(null);
-            }}
-          />
-        ))}
-        <AppButton
-          label="+ Add Account"
-          variant="secondary"
-          onPress={() => router.push('/accounts/new' as never)}
-        />
-      </SelectionModal>
-      <SelectionModal
-        visible={selector === 'paymentMode'}
-        title="Payment Mode"
-        onClose={() => setSelector(null)}
-      >
-        <SelectionRow
-          label="None"
-          onPress={() => {
-            setValue('paymentMode', null);
-            setSelectedPaymentMode(null);
-            setSelector(null);
+      {showDatePicker ? (
+        <DateTimePicker
+          maximumDate={new Date()}
+          mode="date"
+          value={selectedDate}
+          onChange={(_event, date) => {
+            setShowDatePicker(false);
+            if (!date) return;
+            setSelectedDate(date);
+            setValue('transactionDate', formatDate(date), { shouldValidate: true });
           }}
         />
-        {PAYMENT_MODES.map((mode) => (
-          <SelectionRow
-            key={mode}
-            label={paymentModeLabels[mode]}
-            onPress={() => {
-              setValue('paymentMode', mode);
-              setSelectedPaymentMode(mode);
-              setSelector(null);
-            }}
-          />
-        ))}
-      </SelectionModal>
+      ) : null}
+
+      <PickerSheet
+        visible={selector === 'category'}
+        onClose={() => setSelector(null)}
+        title={`Choose ${categoryLabel.toLowerCase()}`}
+        options={categoryOptions}
+        selected={selectedCategoryId}
+        onSelect={(id) => {
+          setValue('categoryId', id, { shouldValidate: true });
+          setSelectedCategoryId(id);
+        }}
+      />
+      <PickerSheet
+        visible={selector === 'account'}
+        onClose={() => setSelector(null)}
+        title="Choose account"
+        options={accountOptions}
+        selected={selectedAccountId}
+        onSelect={(id) => {
+          setValue('accountId', id, { shouldValidate: true });
+          setSelectedAccountId(id);
+        }}
+        footer={{ label: 'Add Account', onPress: () => router.push('/accounts/new' as never) }}
+      />
+      <PickerSheet
+        visible={selector === 'paymentMode'}
+        onClose={() => setSelector(null)}
+        title="Payment mode"
+        options={paymentModeOptions}
+        selected={selectedPaymentMode ?? undefined}
+        clearOption={{
+          label: 'None',
+          onSelect: () => {
+            setValue('paymentMode', null);
+            setSelectedPaymentMode(null);
+          },
+        }}
+        onSelect={(mode) => {
+          setValue('paymentMode', mode);
+          setSelectedPaymentMode(mode);
+        }}
+      />
     </FormScreen>
   );
 
@@ -427,161 +427,79 @@ export function TransactionEntryForm({
   }
 }
 
-function Field({
-  control,
-  name,
-  label,
-  placeholder,
-  multiline = false,
-}: {
-  control: ReturnType<typeof useForm<FormValues>>['control'];
-  name: 'note';
-  label: string;
-  placeholder: string;
-  multiline?: boolean;
-}) {
-  return (
-    <View style={styles.field}>
-      <AppText weight="600">{label}</AppText>
-      <Controller
-        control={control}
-        name={name}
-        render={({ field: { onBlur, onChange, value }, fieldState }) => (
-          <>
-            <TextInput
-              accessibilityLabel={label}
-              multiline={multiline}
-              onBlur={onBlur}
-              onChangeText={onChange}
-              placeholder={placeholder}
-              placeholderTextColor={colors.textMuted}
-              style={[
-                styles.textInput,
-                multiline && styles.noteInput,
-                fieldState.error && styles.inputError,
-              ]}
-              value={value}
-            />
-            {fieldState.error ? (
-              <AppText color={colors.danger}>{fieldState.error.message}</AppText>
-            ) : null}
-          </>
-        )}
-      />
-    </View>
-  );
-}
-
-function SelectorRow({
-  label,
-  value,
-  detail,
-  error,
-  onPress,
-}: {
-  label: string;
-  value: string;
-  detail?: string;
-  error?: string;
-  onPress: () => void;
-}) {
-  return (
-    <View style={styles.field}>
-      <AppText weight="600">{label}</AppText>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Choose ${label}`}
-        onPress={onPress}
-        style={styles.selector}
-      >
-        <View style={styles.selectorText}>
-          <AppText
-            color={
-              value.startsWith('Choose') || value === 'Optional' ? colors.textMuted : colors.text
-            }
-          >
-            {value}
-          </AppText>
-          {detail ? (
-            <AppText variant="caption" color={colors.textMuted}>
-              {detail}
-            </AppText>
-          ) : null}
-        </View>
-        <AppText color={colors.textMuted}>›</AppText>
-      </Pressable>
-      {error ? <AppText color={colors.danger}>{error}</AppText> : null}
-    </View>
-  );
-}
-
-function SelectionModal({
-  visible,
-  title,
-  onClose,
-  children,
-}: {
-  visible: boolean;
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.modal}>
-          <View style={styles.modalHeader}>
-            <AppText variant="heading" weight="700">
-              {title}
-            </AppText>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Close selector"
-              onPress={onClose}
-              hitSlop={12}
-            >
-              <AppText color={colors.primary} weight="600">
-                Done
-              </AppText>
-            </Pressable>
-          </View>
-          <ScrollView contentContainerStyle={styles.modalList}>{children}</ScrollView>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-function SelectionRow({
-  label,
-  detail,
-  onPress,
-}: {
-  label: string;
-  detail?: string;
-  onPress: () => void;
-}) {
+/**
+ * Date, payment mode and note are collapsed by default. Almost every entry
+ * takes today's date and no note, and a form that opens with six fields reads
+ * as more work than it is.
+ */
+function MoreDetails({ expanded, onToggle }: { expanded: boolean; onToggle: () => void }) {
+  const { palette, space, size } = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
-      style={styles.selectionRow}
+      accessibilityLabel="More details"
+      accessibilityState={{ expanded }}
+      onPress={onToggle}
+      style={({ pressed }) => [
+        styles.moreDetails,
+        { minHeight: size.touchTarget, paddingHorizontal: space.lg },
+        pressed && styles.pressed,
+      ]}
     >
-      <View>
-        <AppText weight="600">{label}</AppText>
-        {detail ? (
-          <AppText variant="caption" color={colors.textMuted}>
-            {detail}
-          </AppText>
-        ) : null}
-      </View>
+      <Text variant="smallStrong" tone="secondary">
+        More Details
+      </Text>
+      <Icon
+        name={expanded ? 'chevron-up' : 'chevron-down'}
+        size={18}
+        color={palette.textTertiary}
+      />
     </Pressable>
   );
 }
 
+function EntrySkeleton() {
+  const { space, radius, size } = useTheme();
+  return (
+    <View style={{ marginTop: space.lg }}>
+      <Skeleton width={72} height={12} radius="pill" style={styles.centred} />
+      <Skeleton width={220} height={44} radius="pill" style={[styles.centred, { marginTop: 14 }]} />
+      <View style={{ marginTop: space.xxl + space.lg, gap: space.md }}>
+        <Skeleton height={size.control} radius={radius.control} />
+        <Skeleton height={size.control} radius={radius.control} />
+      </View>
+    </View>
+  );
+}
+
+/** Today and yesterday are named; anything else states its date. */
+function describeDate(date: Date) {
+  const today = new Date();
+  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const startValue = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const difference = Math.round((startToday.getTime() - startValue.getTime()) / 86_400_000);
+  if (difference === 0) return 'Today';
+  if (difference === 1) return 'Yesterday';
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(date);
+}
+
+function accountIcon(accountType: string) {
+  const key = accountTypeIcon[accountType];
+  return isIconName(key) ? key : 'wallet';
+}
+
+function accountTypeLabel(accountType: string) {
+  return accountType.replace('_', ' ');
+}
+
 function formatDate(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
 }
 
 function formatAmountInput(minorUnits: number) {
@@ -620,66 +538,8 @@ function mapTransactionError(error: unknown, type: EntryType) {
 }
 
 const styles = StyleSheet.create({
-  form: { gap: spacing.lg },
-  amountBlock: { gap: spacing.xs },
-  amountInput: {
-    borderBottomWidth: 2,
-    borderColor: colors.primary,
-    color: colors.text,
-    fontSize: 42,
-    fontWeight: '700',
-    paddingVertical: spacing.sm,
-  },
-  field: { gap: spacing.sm },
-  textInput: {
-    minHeight: 48,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    backgroundColor: colors.surface,
-    color: colors.text,
-    paddingHorizontal: spacing.md,
-    fontSize: typography.body,
-  },
-  noteInput: { minHeight: 88, paddingTop: spacing.md, textAlignVertical: 'top' },
-  inputError: { borderColor: colors.danger },
-  selector: {
-    minHeight: 52,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    backgroundColor: colors.surface,
-    paddingHorizontal: spacing.md,
-  },
-  selectorText: { flex: 1, gap: spacing.xs },
-  moreDetails: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    minHeight: 44,
-  },
-  details: { gap: spacing.lg, paddingTop: spacing.sm },
-  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0, 0, 0, 0.32)' },
-  modal: {
-    maxHeight: '75%',
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
-    backgroundColor: colors.background,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: spacing.lg,
-  },
-  modalList: { gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.xxxl },
-  selectionRow: {
-    minHeight: 56,
-    justifyContent: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
+  fields: { width: '100%' },
+  moreDetails: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  pressed: { opacity: 0.7 },
+  centred: { alignSelf: 'center' },
 });
