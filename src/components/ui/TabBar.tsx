@@ -133,7 +133,7 @@ export function FAB({
   bottom: number;
   accessibilityLabel: string;
 }) {
-  const { palette, scheme, size, motion } = useTheme();
+  const { palette, scheme, size, motion, elevation } = useTheme();
   const glow =
     scheme === 'dark'
       ? {
@@ -144,7 +144,7 @@ export function FAB({
           elevation: 8,
         }
       : {
-          shadowColor: '#101828',
+          shadowColor: elevation.card.shadowColor,
           shadowOffset: { width: 0, height: 8 },
           shadowOpacity: 0.28,
           shadowRadius: 20,
