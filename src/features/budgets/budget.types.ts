@@ -44,6 +44,8 @@ export type BudgetProgress = {
   budget: Budget;
   /** The category's current name, so a rename shows through without moving the budget. */
   categoryName: string | null;
+  /** The category's identity icon, for the chip a budget row draws beside its name. */
+  categoryIcon: string | null;
   /** Sum of matching expenses. Integer minor units, like every amount here. */
   spentMinor: number;
   /** `amount - spent`. Negative when overspent, which is the point of keeping it signed. */

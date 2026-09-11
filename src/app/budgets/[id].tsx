@@ -1,11 +1,20 @@
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 
-import { ErrorState, FormScreen, NativeDataNotice, Screen, Skeleton } from '@/components/ui';
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  FormScreen,
+  NativeDataNotice,
+  Screen,
+  Skeleton,
+} from '@/components/ui';
 import { BudgetForm } from '@/features/budgets/BudgetForm';
-import { formatPeriodMonth } from '@/features/budgets/budget.period';
+import { currentPeriodMonth } from '@/features/budgets/budget-presentation';
 import type { Budget } from '@/features/budgets/budget.types';
 import type { Category } from '@/features/categories/category.types';
+import { NotFoundError } from '@/features/shared/errors';
 import {
   getAppSettings,
   getBudget,
@@ -15,29 +24,42 @@ import {
 import { useTheme } from '@/theme';
 import { parseRouteId } from '@/utils/route-id';
 
+type State =
+  | { kind: 'loading' }
+  /** The id is not a budget id, or names a budget that has been deleted. */
+  | { kind: 'missing' }
+  | { kind: 'failed' }
+  | { kind: 'ready'; budget: Budget; categories: Category[]; currency: string };
+
 export default function EditBudgetScreen() {
   const { space, radius, size } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [budget, setBudget] = useState<Budget>();
-  const [categories, setCategories] = useState<Category[]>();
-  const [currency, setCurrency] = useState('NPR');
-  const [error, setError] = useState('');
+  const [state, setState] = useState<State>({ kind: 'loading' });
   const routeId = parseRouteId(id);
 
   const load = useCallback(() => {
     if (!isLocalFinanceDataAvailable) return;
+    // A link with a nonsense id, and a link to a budget deleted here or on
+    // another device, are the same thing to the person looking at the screen:
+    // there is nothing to open. Neither is an error, and neither may crash.
     if (routeId === null) {
-      setError('This link is invalid.');
+      setState({ kind: 'missing' });
       return;
     }
-    setError('');
     try {
-      setBudget(getBudget(routeId));
-      setCategories(listExpenseCategories());
-      setCurrency(getAppSettings().defaultCurrency);
+      setState({
+        kind: 'ready',
+        budget: getBudget(routeId),
+        categories: listExpenseCategories(),
+        currency: getAppSettings().defaultCurrency,
+      });
     } catch (caught) {
+      if (caught instanceof NotFoundError) {
+        setState({ kind: 'missing' });
+        return;
+      }
       console.error('Could not load budget.', caught);
-      setError('This budget may have been deleted since you opened it.');
+      setState({ kind: 'failed' });
     }
   }, [routeId]);
   useFocusEffect(load);
@@ -49,18 +71,38 @@ export default function EditBudgetScreen() {
       </Screen>
     );
   }
-  if (error) {
+
+  if (state.kind === 'missing') {
     return (
       <FormScreen title="Budget" backIcon="x">
-        <ErrorState
-          title="Budget unavailable"
-          message={error}
-          onRetry={routeId === null ? undefined : load}
+        <EmptyState
+          illustration="arcs"
+          title="This budget no longer exists"
+          body="It may have been deleted on this device or on another one. Your transactions are unaffected."
+          action={{ label: 'View Budgets', onPress: () => router.replace('/budgets' as never) }}
         />
       </FormScreen>
     );
   }
-  if (!budget || !categories) {
+
+  if (state.kind === 'failed') {
+    return (
+      <FormScreen title="Budget" backIcon="x">
+        <ErrorState
+          title="Budget unavailable"
+          message="We couldn't load this budget. Your data is safe."
+          onRetry={load}
+        />
+        <Button
+          label="View Budgets"
+          variant="text"
+          onPress={() => router.replace('/budgets' as never)}
+        />
+      </FormScreen>
+    );
+  }
+
+  if (state.kind === 'loading') {
     return (
       <FormScreen title="Budget" backIcon="x">
         <Skeleton height={size.control} radius={radius.control} style={{ marginTop: space.xl }} />
@@ -70,10 +112,10 @@ export default function EditBudgetScreen() {
 
   return (
     <BudgetForm
-      budget={budget}
-      categories={categories}
-      defaultCurrency={currency}
-      initialMonth={budget.periodMonth ?? formatPeriodMonth(new Date())}
+      budget={state.budget}
+      categories={state.categories}
+      defaultCurrency={state.currency}
+      initialMonth={state.budget.periodMonth ?? currentPeriodMonth()}
     />
   );
 }

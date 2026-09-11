@@ -76,6 +76,43 @@ export function monthRange(month: PeriodMonth): MonthRange {
   };
 }
 
+/**
+ * The whole months a date range covers, or `null` when it does not cover whole
+ * months.
+ *
+ * This is what keeps a monthly budget monthly. A report over "this week", or
+ * over the 5th to the 22nd, covers part of a month, and a budget has no defined
+ * reading against part of a month — dividing September's 30,000 by the days in
+ * a week would invent a figure the user never set. So a range that does not
+ * begin at the first instant of a month and end at the first instant of another
+ * gets no budget comparison at all, rather than a prorated one.
+ */
+export function periodMonthsInRange(range: MonthRange): PeriodMonth[] | null {
+  if (!isMonthBoundary(range.start) || !isMonthBoundary(range.end)) return null;
+  if (range.end.getTime() <= range.start.getTime()) return null;
+
+  const months: PeriodMonth[] = [];
+  for (
+    let cursor = new Date(range.start.getFullYear(), range.start.getMonth(), 1);
+    cursor.getTime() < range.end.getTime();
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1)
+  ) {
+    months.push(formatPeriodMonth(cursor));
+  }
+  return months;
+}
+
+/** Midnight on the first of a month, in local time. */
+function isMonthBoundary(date: Date): boolean {
+  return (
+    date.getDate() === 1 &&
+    date.getHours() === 0 &&
+    date.getMinutes() === 0 &&
+    date.getSeconds() === 0 &&
+    date.getMilliseconds() === 0
+  );
+}
+
 /** Whether a financial date falls in a month, by the same half-open rule. */
 export function isInPeriodMonth(date: Date, month: PeriodMonth): boolean {
   const range = monthRange(month);

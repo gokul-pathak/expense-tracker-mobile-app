@@ -2,12 +2,11 @@ import * as settingsRepository from '@/features/settings/settings.repository';
 import { NotFoundError, ValidationError } from '@/features/shared/errors';
 
 import { monthRange, type PeriodMonth } from './budget.period';
+import { toBudgetProgress } from './budget.progress';
 import * as repository from './budget.repository';
-import type { BudgetRow } from './budget.repository';
 import type {
   Budget,
   BudgetProgress,
-  BudgetStatus,
   CreateBudgetInput,
   MonthlyBudgetSummary,
   UpdateBudgetInput,
@@ -104,7 +103,7 @@ export function getBudgetProgress(id: number): BudgetProgress {
     row.budget.currency,
     row.budget.categoryId,
   );
-  return toProgress(row, spentMinor);
+  return toBudgetProgress(row, spentMinor);
 }
 
 /**
@@ -136,9 +135,9 @@ export function getMonthlyBudgetSummary(
   const overallRow = rows.find((row) => row.budget.categoryId === null) ?? null;
   const categoryRows = rows.filter((row) => row.budget.categoryId !== null);
 
-  const overallBudget = overallRow === null ? null : toProgress(overallRow, totalSpentMinor);
+  const overallBudget = overallRow === null ? null : toBudgetProgress(overallRow, totalSpentMinor);
   const categoryBudgets = categoryRows.map((row) =>
-    toProgress(row, byCategory.get(row.budget.categoryId!) ?? 0),
+    toBudgetProgress(row, byCategory.get(row.budget.categoryId!) ?? 0),
   );
   const categoryBudgetedMinor = categoryBudgets.reduce(
     (total, progress) => total + progress.budget.amountMinor,
@@ -162,36 +161,6 @@ export function getMonthlyBudgetSummary(
           : categoryBudgetedMinor,
     totalSpentMinor,
   };
-}
-
-/**
- * The arithmetic, in one place.
- *
- * Money stays in integer minor units throughout. The percentage is the only
- * floating-point value, and it is display-only: it is derived from the integers
- * and never feeds back into one.
- */
-function toProgress(row: BudgetRow, spentMinor: number): BudgetProgress {
-  const amountMinor = row.budget.amountMinor;
-  const remainingMinor = amountMinor - spentMinor;
-  return {
-    budget: row.budget,
-    categoryName: row.categoryName ?? null,
-    spentMinor,
-    remainingMinor,
-    overspentMinor: Math.max(0, -remainingMinor),
-    // Uncapped on purpose: 125% is the true reading, and a bar that stops at
-    // 100% is a presentation choice, not a fact about the month.
-    percentage: (spentMinor / amountMinor) * 100,
-    status: statusOf(spentMinor, amountMinor),
-  };
-}
-
-function statusOf(spentMinor: number, amountMinor: number): BudgetStatus {
-  if (spentMinor === 0) return 'unused';
-  if (spentMinor < amountMinor) return 'within_budget';
-  if (spentMinor === amountMinor) return 'at_budget';
-  return 'over_budget';
 }
 
 function normalizeUpdate(input: UpdateBudgetInput): Omit<UpdateBudgetRecord, 'updatedAt'> {

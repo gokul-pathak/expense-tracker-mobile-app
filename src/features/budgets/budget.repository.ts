@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
 import { budgets } from '@/db/schema/budgets';
@@ -23,13 +23,22 @@ const live = isNull(budgets.deletedAt);
 
 const budgetOrder = [asc(budgets.periodMonth), asc(budgets.categoryId), asc(budgets.id)] as const;
 
-/** Budget rows carry the category's current name, so a rename shows through. */
+/**
+ * Budget rows carry the category's current name and icon, so a rename or a
+ * change of icon shows through without the budget moving, and so no screen has
+ * to fetch the category list a second time just to draw a row.
+ */
 const budgetView = {
   budget: budgets,
   categoryName: categories.name,
+  categoryIcon: categories.icon,
 };
 
-export type BudgetRow = { budget: typeof budgets.$inferSelect; categoryName: string | null };
+export type BudgetRow = {
+  budget: typeof budgets.$inferSelect;
+  categoryName: string | null;
+  categoryIcon: string | null;
+};
 
 function viewQuery() {
   // Left join: the overall budget has no category, and a category tombstoned on
@@ -68,6 +77,24 @@ export function getBudgetsForMonthAndCurrency(
 ): BudgetRow[] {
   return viewQuery()
     .where(and(live, eq(budgets.periodMonth, periodMonth), eq(budgets.currency, currency)))
+    .orderBy(...budgetOrder)
+    .all();
+}
+
+/**
+ * Every budget across several months, in one currency, in one query.
+ *
+ * A report covering six months asks for all six at once rather than a query per
+ * month. `inArray` on an empty list is not valid SQL, so nothing is asked when
+ * there is nothing to ask about.
+ */
+export function getBudgetsForMonthsAndCurrency(
+  periodMonths: PeriodMonth[],
+  currency: string,
+): BudgetRow[] {
+  if (periodMonths.length === 0) return [];
+  return viewQuery()
+    .where(and(live, inArray(budgets.periodMonth, periodMonths), eq(budgets.currency, currency)))
     .orderBy(...budgetOrder)
     .all();
 }
@@ -192,6 +219,32 @@ export function getMonthlyExpenseTotalsByCategory(
     .from(transactions)
     .where(expenseIn(range, currency))
     .groupBy(transactions.categoryId)
+    .all();
+}
+
+/**
+ * The same expenses across a span of months, still in one query.
+ *
+ * Rows come back per financial date and category; the caller drops each into
+ * its local calendar month. Bucketing here would mean asking SQLite to decide
+ * which calendar month an instant belongs to, and its answer would depend on
+ * the connection's time zone rather than on the device's — which is precisely
+ * the disagreement `period_month` exists to avoid. So SQLite sums, and the
+ * calendar stays where the rest of the calendar logic lives.
+ */
+export function getExpenseTotalsByDateAndCategory(
+  range: MonthRange,
+  currency: string,
+): { transactionDate: Date; categoryId: number | null; amountMinor: number }[] {
+  return db
+    .select({
+      transactionDate: transactions.transactionDate,
+      categoryId: transactions.categoryId,
+      amountMinor: sql<number>`sum(${transactions.amountMinor})`,
+    })
+    .from(transactions)
+    .where(expenseIn(range, currency))
+    .groupBy(transactions.transactionDate, transactions.categoryId)
     .all();
 }
 

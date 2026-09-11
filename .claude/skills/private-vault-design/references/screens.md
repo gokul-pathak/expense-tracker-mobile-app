@@ -11,16 +11,16 @@ phases compose primitives the earlier ones proved.
 
 ## Build order
 
-| Phase | What                                                                                 | Why here                                                         |
-| ----- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
-| **0** | Theme module, fonts, `Money` `Text` `Icon` `Button` `Card`                           | Nothing can be built correctly before tokens exist in code       |
-| **1** | Remaining primitives + **Home** end to end                                           | One screen proves the system before it is applied 35 times       |
-| **2** | Transactions, Reports, Quick Add, More                                               | The primary tabs — the app's whole first impression              |
-| **3** | Money entry: Add Expense → Income → Transfer → Lend/Borrow → Payment → Detail → Edit | Highest-traffic flows; all share `AmountInput` + `SelectorField` |
-| **4** | Accounts, People, Categories                                                         | Management surface; mostly `ListRow` + `SegmentedControl`        |
-| **5** | Budgets                                                                              | New feature — the M8A engine ships, the UI does not exist        |
-| **6** | Settings, Cloud Sync, Cloud Sync setup                                               | Dense, low-traffic, benefits from every primitive being settled  |
-| **7** | Auth and onboarding                                                                  | New product surface with real decisions — see below              |
+| Phase | What                                                                                 | Why here                                                          |
+| ----- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| **0** | Theme module, fonts, `Money` `Text` `Icon` `Button` `Card`                           | Nothing can be built correctly before tokens exist in code        |
+| **1** | Remaining primitives + **Home** end to end                                           | One screen proves the system before it is applied 35 times        |
+| **2** | Transactions, Reports, Quick Add, More                                               | The primary tabs — the app's whole first impression               |
+| **3** | Money entry: Add Expense → Income → Transfer → Lend/Borrow → Payment → Detail → Edit | Highest-traffic flows; all share `AmountInput` + `SelectorField`  |
+| **4** | Accounts, People, Categories                                                         | Management surface; mostly `ListRow` + `SegmentedControl`         |
+| **5** | Budgets                                                                              | The M8A engine, its screens, and its sections on Home and Reports |
+| **6** | Settings, Cloud Sync, Cloud Sync setup                                               | Dense, low-traffic, benefits from every primitive being settled   |
+| **7** | Auth and onboarding                                                                  | New product surface with real decisions — see below               |
 
 **Phase 1 is the checkpoint.** Build Home completely — both themes, all four states, real data — and
 look at it against the canvas before going wider. If the system is wrong, it is far cheaper to find
@@ -137,15 +137,28 @@ debt stands, not to rename them.
 
 ### F1 · Budgets overview
 
-Month stepper → overall ring card → category rows with a `ProgressBar` each.
+Month stepper → overall ring card → category rows with a `ProgressBar` each, sorted over-budget
+first. The rows are a `FlatList` and the stepper and hero are its header: a month holds as many
+category budgets as there are expense categories, and the app puts no ceiling on those.
 
 The ring reads as how much of the month's promise is gone. Past 100% it fills entirely in
 `negative` rather than wrapping: a ring that laps itself reads as being back near the start, which
 is the opposite of the truth. The category bars do wrap, because `ProgressBar` rescales so the
 overflow is visible past a marker — a bar can show how far over, a ring cannot.
 
-Copy states the gap and the days left and stops there. No advice, no warning, no suggestion about
-what to do with the remainder.
+Every state a colour signals is also written out — "remaining", "over budget", "Budget reached",
+"No spending yet" — and the row's spoken label carries the whole sentence, since a bar's width says
+nothing aloud. The words all come from `budget-presentation.ts`; a screen never composes one.
+
+Copy states the gap and stops there. No advice, no warning, no suggestion about what to do with the
+remainder.
+
+Budgets also appear in two other places, and neither becomes a second budgets screen. **Home** shows
+one section after the month card: the overall plan with a bar, then at most three category budgets,
+over budget first. It says "Monthly Budget" only when an overall budget exists — a sum of category
+budgets is not a monthly budget, because nobody chose that total. **Reports** shows "Budget vs
+Actual", one row per calendar month, and only for a period that covers whole months. A week gets a
+sentence saying budgets are tracked monthly, never a seventh of September's limit.
 
 ### F2 · Set a budget
 

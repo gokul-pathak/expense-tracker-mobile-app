@@ -1,5 +1,5 @@
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
@@ -28,6 +28,13 @@ import {
   type DonutSegment,
   type IconName,
 } from '@/components/ui';
+import {
+  formatBudgetPercentage,
+  getMonthLabel,
+  getShortMonthLabel,
+} from '@/features/budgets/budget-presentation';
+import { periodMonthsInRange } from '@/features/budgets/budget.period';
+import type { MonthlyBudgetComparison } from '@/features/budgets/budget.reporting';
 import type {
   CategoryBreakdownItem,
   ReportInsight,
@@ -39,6 +46,7 @@ import type {
 import { useRefreshOnSyncedData } from '@/features/sync/use-synced-data';
 import {
   getAppSettings,
+  getBudgetComparisonForMonths,
   getCustomRange,
   getExpenseCategoryBreakdown,
   getIncomeExpenseTrend,
@@ -56,6 +64,12 @@ type ReportData = {
   categories: CategoryBreakdownItem[];
   trend: TrendPoint[];
   insights: ReportInsight[];
+  /**
+   * One row per whole month the period covers, or null when the period does not
+   * cover whole months. Null is the answer, not an empty list: a budget has no
+   * defined reading against half a month and is never divided into one.
+   */
+  budgets: MonthlyBudgetComparison[] | null;
 };
 
 type PresetOption = { value: Exclude<ReportPreset, 'last_1_month'>; label: string };
@@ -92,11 +106,15 @@ export default function ReportsScreen() {
     setLoading(true);
     setFailed(false);
     try {
+      const months = periodMonthsInRange(range);
       setData({
         summary: getReportSummary(range),
         categories: getExpenseCategoryBreakdown(range),
         trend: getIncomeExpenseTrend(range, getRecommendedGranularity(preset)),
         insights: getSimpleInsights(range),
+        // Two queries for the whole span, however many months it holds — never
+        // one per month, and never one per budget.
+        budgets: months === null ? null : getBudgetComparisonForMonths(months),
       });
       setCurrency(getAppSettings().defaultCurrency);
     } catch (error) {
@@ -167,6 +185,20 @@ export default function ReportsScreen() {
           align="right"
         />
       </Card>
+
+      {data.budgets !== null || !empty ? (
+        <View style={{ marginTop: space.xxl }}>
+          <SectionHeader
+            title="Budget vs Actual"
+            action={{
+              label: 'View Budgets',
+              onPress: () => router.push('/budgets' as never),
+              accessibilityLabel: 'View budgets',
+            }}
+          />
+          <BudgetComparisonCard comparisons={data.budgets} currency={currency} />
+        </View>
+      ) : null}
 
       {empty ? (
         <EmptyState
@@ -375,6 +407,162 @@ function PeriodPill({ label, onPress }: { label: string; onPress: () => void }) 
   );
 }
 
+/**
+ * What was planned against what happened, one row per calendar month.
+ *
+ * A budget is monthly and stays monthly. A period that does not cover whole
+ * months — this week, or the 5th to the 22nd — gets a sentence saying so rather
+ * than a slice of one: dividing September's limit across seven days would invent
+ * a figure nobody set, and it would look exactly as authoritative as a real one.
+ *
+ * Months are never added together either. A six-month report shows six limits,
+ * because a limit is a promise about one month and a sum of six is not a
+ * promise anyone made.
+ */
+function BudgetComparisonCard({
+  comparisons,
+  currency,
+}: {
+  comparisons: MonthlyBudgetComparison[] | null;
+  currency: string;
+}) {
+  const { space } = useTheme();
+
+  if (comparisons === null) {
+    return (
+      <Card>
+        <Text variant="body" tone="secondary">
+          Budgets are tracked monthly.
+        </Text>
+        <Text variant="caption" tone="tertiary" style={{ marginTop: space.xs }}>
+          This period does not cover whole months, so there is no budget to compare it against.
+        </Text>
+      </Card>
+    );
+  }
+
+  if (comparisons.length === 0) {
+    return (
+      <Card>
+        <Text variant="body" tone="secondary">
+          No budget set for this period.
+        </Text>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <View style={{ gap: space.lg }}>
+        {comparisons.map((month) => (
+          <BudgetComparisonRow
+            key={month.month}
+            comparison={month}
+            single={comparisons.length === 1}
+          />
+        ))}
+      </View>
+      <Text variant="caption" tone="tertiary" style={{ marginTop: space.lg }}>
+        {'Budgets are set per currency and never converted. These are your ' +
+          currency +
+          ' budgets.'}
+      </Text>
+    </Card>
+  );
+}
+
+/** One month: the plan, what went against it, and the gap — or that there was no plan. */
+function BudgetComparisonRow({
+  comparison,
+  single,
+}: {
+  comparison: MonthlyBudgetComparison;
+  single: boolean;
+}) {
+  const { space } = useTheme();
+  const label = single ? getMonthLabel(comparison.month) : getShortMonthLabel(comparison.month);
+  const over = comparison.status === 'over_budget';
+
+  if (comparison.budgetedMinor === null) {
+    return (
+      <View
+        accessible
+        accessibilityLabel={
+          label +
+          ', no budget set, ' +
+          formatMinorUnits(comparison.spentMinor, comparison.currency) +
+          ' spent.'
+        }
+        style={{ gap: space.xs }}
+      >
+        <View style={styles.budgetHead}>
+          <Text variant="smallStrong" numberOfLines={1} style={styles.budgetMonth}>
+            {label}
+          </Text>
+          <Text variant="caption" tone="tertiary">
+            No budget set
+          </Text>
+        </View>
+        <Text variant="caption" tone="tertiary" tabular>
+          {splitMinorUnits(comparison.spentMinor, comparison.currency).integer + ' spent'}
+        </Text>
+      </View>
+    );
+  }
+
+  const remainingMinor = comparison.remainingMinor ?? 0;
+
+  return (
+    <View
+      accessible
+      accessibilityLabel={
+        label +
+        ', ' +
+        formatMinorUnits(comparison.spentMinor, comparison.currency) +
+        ' spent of ' +
+        formatMinorUnits(comparison.budgetedMinor, comparison.currency) +
+        ', ' +
+        (over
+          ? formatMinorUnits(-remainingMinor, comparison.currency) + ' over budget'
+          : formatMinorUnits(remainingMinor, comparison.currency) + ' remaining') +
+        ', ' +
+        formatBudgetPercentage(comparison.percentage ?? 0) +
+        ' of budget spent.'
+      }
+      style={{ gap: space.sm - 2 }}
+    >
+      <View style={styles.budgetHead}>
+        <Text variant="smallStrong" numberOfLines={1} style={styles.budgetMonth}>
+          {label}
+        </Text>
+        <Text variant="caption" tone="tertiary" tabular>
+          {splitMinorUnits(comparison.spentMinor, comparison.currency).integer +
+            ' of ' +
+            splitMinorUnits(comparison.budgetedMinor, comparison.currency).integer}
+        </Text>
+        <Text variant="captionStrong" tone={over ? 'negative' : 'secondary'} tabular>
+          {formatBudgetPercentage(comparison.percentage ?? 0)}
+        </Text>
+      </View>
+      <ProgressBar
+        value={comparison.spentMinor}
+        max={comparison.budgetedMinor}
+        accessibilityValueText={
+          formatBudgetPercentage(comparison.percentage ?? 0) + ' of budget spent'
+        }
+      />
+      <Text variant="caption" tone={over ? 'negative' : 'tertiary'} tabular>
+        {(over
+          ? splitMinorUnits(-remainingMinor, comparison.currency).integer + ' over budget'
+          : comparison.status === 'at_budget'
+            ? 'Budget reached'
+            : splitMinorUnits(remainingMinor, comparison.currency).integer + ' remaining') +
+          (comparison.source === 'categories' ? ' · category budgets only' : '')}
+      </Text>
+    </View>
+  );
+}
+
 /** The donut answers "what is the shape of this", the ranked bars answer "how much, exactly". */
 function CategoryCard({
   categories,
@@ -554,5 +742,7 @@ const styles = StyleSheet.create({
   divider: { height: StyleSheet.hairlineWidth },
   categoryRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
   categoryName: { flex: 1 },
+  budgetHead: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  budgetMonth: { flex: 1, minWidth: 0 },
   percent: { width: 34, textAlign: 'right' },
 });

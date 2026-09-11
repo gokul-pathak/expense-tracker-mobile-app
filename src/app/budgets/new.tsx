@@ -2,8 +2,9 @@ import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 
 import { ErrorState, FormScreen, NativeDataNotice, Screen, Skeleton } from '@/components/ui';
-import { BudgetForm } from '@/features/budgets/BudgetForm';
-import { formatPeriodMonth, isPeriodMonth } from '@/features/budgets/budget.period';
+import { BudgetForm, type BudgetFormType } from '@/features/budgets/BudgetForm';
+import { currentPeriodMonth } from '@/features/budgets/budget-presentation';
+import { isPeriodMonth } from '@/features/budgets/budget.period';
 import type { Category } from '@/features/categories/category.types';
 import {
   getAppSettings,
@@ -14,7 +15,7 @@ import { useTheme } from '@/theme';
 
 export default function NewBudgetScreen() {
   const { space, radius, size } = useTheme();
-  const { month } = useLocalSearchParams<{ month?: string }>();
+  const { month, type } = useLocalSearchParams<{ month?: string; type?: string }>();
   const [categories, setCategories] = useState<Category[]>();
   const [currency, setCurrency] = useState('NPR');
   const [failed, setFailed] = useState(false);
@@ -24,7 +25,9 @@ export default function NewBudgetScreen() {
     setFailed(false);
     try {
       // Only expenses can be budgeted: a budget is a ceiling on spending, and
-      // an income category has no ceiling to set.
+      // an income category has no ceiling to set. A category deleted here or on
+      // another device is not offered either, by the same rule that keeps it out
+      // of every other picker — a budget already filed under one still shows it.
       setCategories(listExpenseCategories());
       setCurrency(getAppSettings().defaultCurrency);
     } catch (error) {
@@ -63,7 +66,14 @@ export default function NewBudgetScreen() {
     <BudgetForm
       categories={categories}
       defaultCurrency={currency}
-      initialMonth={isPeriodMonth(month) ? month : formatPeriodMonth(new Date())}
+      initialMonth={isPeriodMonth(month) ? month : currentPeriodMonth()}
+      initialType={budgetType(type)}
     />
   );
+}
+
+/** The entry point's intent, when it had one. Anything else means "not decided". */
+function budgetType(value: string | undefined): BudgetFormType | undefined {
+  if (value === 'overall' || value === 'category') return value;
+  return undefined;
 }

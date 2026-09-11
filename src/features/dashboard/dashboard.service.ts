@@ -117,7 +117,7 @@ export function getExpenseByCategory(
   });
 }
 
-function assertLimit(value: number, field: string) {
+export function assertLimit(value: number, field: string) {
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new ValidationError(`${field} must be a positive integer.`);
   }

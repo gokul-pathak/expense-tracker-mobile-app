@@ -294,6 +294,11 @@ Over-budget is the interesting case: render the overflow segment in `negative` p
 marker at 100%, so the bar shows _how far_ past, not just "full". A capped bar hides the thing the
 user most needs to see.
 
+A width says nothing out loud, so any bar whose meaning is the proportion passes
+`accessibilityValueText` ("60% of budget spent"). That sets the platform's progress role and value
+rather than a label, which is what lets it survive inside a row that is itself one accessible
+element. `accessibilityLabel` is still there for a bar that stands alone and needs naming.
+
 ### `Sparkline`
 
 Inline trend for stat tiles. No axes, no labels — shape only.

@@ -5,24 +5,38 @@ import { StyleSheet, View } from 'react-native';
 import {
   BalanceCard,
   Card,
+  CategoryChip,
   DonutChart,
   type DonutSegment,
   EmptyState,
   ErrorState,
   Icon,
+  ListRow,
   Money,
   NativeDataNotice,
+  ProgressBar,
   Screen,
   SectionHeader,
   Skeleton,
   Text,
   TransactionRow,
 } from '@/components/ui';
-import type { DashboardSummary } from '@/features/dashboard/dashboard.types';
+import {
+  categoryLabel,
+  formatBudgetPercentage,
+  getBudgetAccessibilityLabel,
+  getBudgetProgressAccessibilityLabel,
+  getBudgetRemainderLabel,
+  getBudgetSpendLabel,
+  isOverBudget,
+} from '@/features/budgets/budget-presentation';
+import type { BudgetProgress } from '@/features/budgets/budget.types';
+import type { DashboardSummary, HomeBudgetSummary } from '@/features/dashboard/dashboard.types';
 import { useRefreshOnSyncedData } from '@/features/sync/use-synced-data';
 import {
   getAppSettings,
   getDashboardSummary,
+  getHomeBudgetSummary,
   isLocalFinanceDataAvailable,
   listActiveAccounts,
 } from '@/features/ui/data';
@@ -31,6 +45,7 @@ import { formatMinorUnits, splitMinorUnits } from '@/utils/money';
 
 export default function HomeScreen() {
   const [summary, setSummary] = useState<DashboardSummary>();
+  const [budget, setBudget] = useState<HomeBudgetSummary>();
   const [currency, setCurrency] = useState('NPR');
   const [accountCount, setAccountCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -42,6 +57,9 @@ export default function HomeScreen() {
     setFailed(false);
     try {
       setSummary(getDashboardSummary());
+      // A planning figure, read from the budget engine rather than recomputed
+      // here. Home has no second opinion about what was spent.
+      setBudget(getHomeBudgetSummary());
       setCurrency(getAppSettings().defaultCurrency);
       setAccountCount(listActiveAccounts().length);
     } catch (error) {
@@ -104,6 +122,8 @@ export default function HomeScreen() {
       </View>
 
       <MonthCard summary={summary} currency={currency} />
+
+      {budget ? <BudgetSection budget={budget} /> : null}
 
       <View style={styles.section}>
         <SectionHeader
@@ -207,6 +227,118 @@ function MonthCard({ summary, currency }: { summary: DashboardSummary; currency:
         />
       </View>
     </Card>
+  );
+}
+
+/**
+ * This month's plan, as a glance rather than a dashboard.
+ *
+ * Home shows a plan only where the user set one. With an overall budget it says
+ * "Monthly Budget" and shows that budget; with only category budgets it shows
+ * those and never sums them into something called a monthly budget, because a
+ * total the user never chose is not their budget. With nothing set it offers to
+ * set one and takes up a single row.
+ *
+ * Every figure comes from the budget summary the dashboard service composed.
+ * Nothing here adds up a transaction.
+ */
+function BudgetSection({ budget }: { budget: HomeBudgetSummary }) {
+  const { space } = useTheme();
+
+  if (!budget.hasAnyBudget) {
+    return (
+      <View style={styles.section}>
+        <Card padding="none">
+          <ListRow
+            icon="target"
+            label="Set a monthly budget"
+            detail="Compare what you planned with what you spent."
+            onPress={() => router.push('/budgets' as never)}
+            last
+          />
+        </Card>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.section}>
+      <SectionHeader
+        title={budget.overall ? 'Monthly Budget' : 'Budgets'}
+        action={{
+          label: 'View all',
+          onPress: () => router.push('/budgets' as never),
+          accessibilityLabel: 'View budgets',
+        }}
+      />
+      <Card style={{ gap: space.md }}>
+        {budget.overall ? <OverallSummary progress={budget.overall} /> : null}
+        {budget.highlights.length > 0 ? (
+          <View style={{ gap: space.sm + 2 }}>
+            {budget.highlights.map((progress) => (
+              <BudgetHighlight key={progress.budget.id} progress={progress} />
+            ))}
+          </View>
+        ) : null}
+        {budget.categoryBudgetCount > budget.highlights.length ? (
+          <Text variant="caption" tone="tertiary">
+            {'and ' +
+              (budget.categoryBudgetCount - budget.highlights.length) +
+              ' more category ' +
+              (budget.categoryBudgetCount - budget.highlights.length === 1 ? 'budget' : 'budgets')}
+          </Text>
+        ) : null}
+      </Card>
+    </View>
+  );
+}
+
+/** The overall plan: what has gone, what is left, and the bar between them. */
+function OverallSummary({ progress }: { progress: BudgetProgress }) {
+  const { space } = useTheme();
+  const over = isOverBudget(progress);
+  return (
+    <View
+      accessible
+      accessibilityLabel={getBudgetAccessibilityLabel(progress)}
+      style={{ gap: space.sm }}
+    >
+      <Text variant="body" tone="secondary" tabular>
+        {getBudgetSpendLabel(progress, { code: false }) + ' spent'}
+      </Text>
+      <Text variant="bodyStrong" tone={over ? 'negative' : 'primary'} tabular>
+        {getBudgetRemainderLabel(progress, { code: false })}
+      </Text>
+      <ProgressBar
+        value={progress.spentMinor}
+        max={progress.budget.amountMinor}
+        accessibilityValueText={getBudgetProgressAccessibilityLabel(progress)}
+      />
+    </View>
+  );
+}
+
+/** One category worth a glance: what it is, where it stands, and by how much. */
+function BudgetHighlight({ progress }: { progress: BudgetProgress }) {
+  const { space } = useTheme();
+  const over = isOverBudget(progress);
+  return (
+    <View
+      accessible
+      accessibilityLabel={getBudgetAccessibilityLabel(progress)}
+      style={[styles.highlight, { gap: space.sm }]}
+    >
+      <CategoryChip categoryIcon={progress.categoryIcon} size={24} />
+      <Text variant="small" numberOfLines={1} style={styles.highlightName}>
+        {categoryLabel(progress)}
+      </Text>
+      <Text variant="caption" tone={over ? 'negative' : 'tertiary'} tabular>
+        {over ? 'Over budget' : getBudgetRemainderLabel(progress, { code: false })}
+      </Text>
+      <Text variant="captionStrong" tabular tone={over ? 'negative' : 'secondary'}>
+        {formatBudgetPercentage(progress.percentage)}
+      </Text>
+    </View>
   );
 }
 
@@ -326,5 +458,7 @@ const styles = StyleSheet.create({
   legend: { flex: 1 },
   legendRow: { flexDirection: 'row', alignItems: 'center' },
   legendLabel: { flex: 1 },
+  highlight: { flexDirection: 'row', alignItems: 'center' },
+  highlightName: { flex: 1, minWidth: 0 },
   swatch: { width: 8, height: 8, borderRadius: 2 },
 });

@@ -9,6 +9,15 @@ type Props = {
   /** Fill colour. Defaults to the accent; category bars pass the category hue. */
   color?: string;
   accessibilityLabel?: string;
+  /**
+   * What the bar is worth, in words: "60% of budget spent".
+   *
+   * A bar's width says nothing out loud, so anything whose meaning is the
+   * proportion states it. This is the platform's progress value rather than a
+   * label, so it survives the bar sitting inside a row that is itself one
+   * accessible element.
+   */
+  accessibilityValueText?: string;
 };
 
 /**
@@ -19,7 +28,13 @@ type Props = {
  * capped bar hides exactly the thing an over-budget user needs to see, which is
  * how far past they are rather than merely that they are past.
  */
-export function ProgressBar({ value, max, color, accessibilityLabel }: Props) {
+export function ProgressBar({
+  value,
+  max,
+  color,
+  accessibilityLabel,
+  accessibilityValueText,
+}: Props) {
   const { palette, size, radius } = useTheme();
   const fill = color ?? palette.accent;
   const over = value > max && max > 0;
@@ -31,6 +46,14 @@ export function ProgressBar({ value, max, color, accessibilityLabel }: Props) {
     <View
       accessible={Boolean(accessibilityLabel)}
       accessibilityLabel={accessibilityLabel}
+      accessibilityRole={accessibilityValueText === undefined ? undefined : 'progressbar'}
+      // `now` is uncapped, like the figure beside it: a bar that reports 100%
+      // when the month is at 125% would say the opposite of what happened.
+      accessibilityValue={
+        accessibilityValueText === undefined
+          ? undefined
+          : { min: 0, max: Math.max(max, 1), now: value, text: accessibilityValueText }
+      }
       style={[
         styles.track,
         {

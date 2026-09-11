@@ -410,6 +410,77 @@ describe('two devices and a budget', () => {
     expect(received?.categoryId).toBe(foodCategory().id);
   });
 
+  it('shows a pulled budget on the other device without anything being restarted', async () => {
+    on(A);
+    const food = foodCategory();
+    const cash = makeCash();
+    budgetService.createBudget({ periodMonth: SEPTEMBER, amountMinor: rupees(40_000) });
+    budgetService.createBudget({
+      categoryId: food.id,
+      periodMonth: SEPTEMBER,
+      amountMinor: rupees(15_000),
+    });
+    transactionService.createExpense({
+      accountId: cash.id,
+      categoryId: food.id,
+      amountMinor: rupees(9_000),
+      title: 'Food',
+      transactionDate: new Date(2026, 8, 11),
+    });
+    await push();
+
+    on(B);
+    await pull();
+
+    // The read the budgets screen makes when a sync tells it to reload. Nothing
+    // here is a restart: the same query answers differently because the local
+    // database now holds A's rows.
+    const view = budgetService.getMonthlyBudgetSummary(SEPTEMBER);
+    expect(view.overallBudget?.budget.amountMinor).toBe(rupees(40_000));
+    expect(view.overallBudget?.spentMinor).toBe(rupees(9_000));
+    expect(view.categoryBudgets).toHaveLength(1);
+    expect(view.categoryBudgets[0]?.categoryName).toBe('Food');
+    expect(view.categoryBudgets[0]?.remainingMinor).toBe(rupees(6_000));
+  });
+
+  it('leaves the winner of a conflicting edit showing once, not twice', async () => {
+    on(A);
+    const budget = budgetService.createBudget({
+      periodMonth: SEPTEMBER,
+      amountMinor: rupees(40_000),
+    });
+    await push();
+    on(B);
+    await pull();
+
+    // Both devices edit the same plan while apart.
+    on(A);
+    budgetService.updateBudget(budget.id, { amountMinor: rupees(45_000) });
+    on(B);
+    const onB = budgetService.listBudgetsForMonth(SEPTEMBER)[0]!;
+    budgetService.updateBudget(onB.id, { amountMinor: rupees(50_000) });
+
+    on(A);
+    await push();
+    on(B);
+    await push();
+    await pull();
+    on(A);
+    await pull();
+
+    // One plan on each device, with the same amount, and no duplicate row for a
+    // screen to render twice.
+    const viewA = budgetService.getMonthlyBudgetSummary(SEPTEMBER);
+    on(B);
+    const viewB = budgetService.getMonthlyBudgetSummary(SEPTEMBER);
+
+    expect(viewA.categoryBudgets).toHaveLength(0);
+    expect(viewB.categoryBudgets).toHaveLength(0);
+    expect(viewA.overallBudget).not.toBeNull();
+    expect(viewA.overallBudget?.budget.amountMinor).toBe(viewB.overallBudget?.budget.amountMinor);
+    expect(budgetService.listBudgetsForMonth(SEPTEMBER)).toHaveLength(1);
+  });
+
   it('derives the same spending on both devices from the same transactions', async () => {
     on(A);
     const food = foodCategory();
