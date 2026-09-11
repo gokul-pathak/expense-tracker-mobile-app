@@ -6,6 +6,8 @@ import {
   mapPulledBudgetToLocal,
   mapPulledCategoryToLocal,
   mapPulledPersonToLocal,
+  mapPulledRecurringOccurrenceToLocal,
+  mapPulledRecurringTemplateToLocal,
   mapPulledSettingsToLocal,
   mapPulledTransactionToLocal,
 } from './mapping/remote-to-local';
@@ -16,6 +18,8 @@ import {
   type PulledBudgetRow,
   type PulledCategoryRow,
   type PulledPersonRow,
+  type PulledRecurringOccurrenceRow,
+  type PulledRecurringTemplateRow,
   type PulledSettingsRow,
   type PulledTransactionRow,
 } from './remote/remote-pull-rows';
@@ -24,8 +28,11 @@ import type { RemoteDataset } from './remote-apply.repository';
 import {
   findDebtViolation,
   findDuplicateBudget,
+  findDuplicateGeneratedTransaction,
   isDebtType,
   validateRemoteBudget,
+  validateRemoteRecurringOccurrence,
+  validateRemoteRecurringTemplate,
   validateRemoteTransaction,
   type DebtContribution,
   type DebtType,
@@ -50,6 +57,8 @@ export type CloudSnapshot = {
   people: PulledPersonRow[];
   settings: PulledSettingsRow[];
   transactions: PulledTransactionRow[];
+  recurringTemplates: PulledRecurringTemplateRow[];
+  recurringOccurrences: PulledRecurringOccurrenceRow[];
   /** Cursor position this snapshot corresponds to. */
   latestSequence: number;
 };
@@ -95,6 +104,8 @@ export async function downloadCloudSnapshot(
       'category',
       'person',
       'budget',
+      'recurring_template',
+      'recurring_occurrence',
       'transaction',
     ] as const) {
       raw[entityType] = await readAllCloudRows(snapshots, entityType);
@@ -110,6 +121,12 @@ export async function downloadCloudSnapshot(
     people: decodeAll('person', raw.person ?? [], linkedUserId),
     budgets: decodeAll('budget', raw.budget ?? [], linkedUserId),
     transactions: decodeAll('transaction', raw.transaction ?? [], linkedUserId),
+    recurringTemplates: decodeAll('recurring_template', raw.recurring_template ?? [], linkedUserId),
+    recurringOccurrences: decodeAll(
+      'recurring_occurrence',
+      raw.recurring_occurrence ?? [],
+      linkedUserId,
+    ),
     latestSequence,
   };
 }
@@ -150,6 +167,10 @@ export function validateCloudSnapshot(snapshot: CloudSnapshot): void {
     ),
     categoryTypes: new Map(snapshot.categories.map((row) => [row.sync_id, row.type])),
     people: new Set(snapshot.people.map((row) => row.sync_id)),
+    // Deleted ones included: the whole dataset is written, tombstones and all,
+    // so a deleted template is present for the occurrences that point at it.
+    recurringTemplates: new Set(snapshot.recurringTemplates.map((row) => row.sync_id)),
+    recurringOccurrences: new Set(snapshot.recurringOccurrences.map((row) => row.sync_id)),
   };
 
   for (const row of snapshot.transactions) {
@@ -175,6 +196,28 @@ export function validateCloudSnapshot(snapshot: CloudSnapshot): void {
   );
   if (duplicateBudget !== undefined) {
     throw new CloudSnapshotError('invalid_remote_data', 'duplicate_budget_period');
+  }
+
+  for (const row of snapshot.recurringTemplates) {
+    const problem = validateRemoteRecurringTemplate(row, relations, row.deleted_at !== null);
+    if (problem !== undefined) throw new CloudSnapshotError(problem.code, problem.detail);
+  }
+
+  for (const row of snapshot.recurringOccurrences) {
+    const problem = validateRemoteRecurringOccurrence(row, relations);
+    if (problem !== undefined) throw new CloudSnapshotError(problem.code, problem.detail);
+  }
+
+  // One generated transaction per occurrence, tombstones included: a deleted
+  // generated transaction still holds its occurrence's one identity.
+  const duplicateGenerated = findDuplicateGeneratedTransaction(
+    snapshot.transactions.map((row) => ({
+      key: row.sync_id,
+      recurringOccurrenceSyncId: row.recurring_occurrence_sync_id,
+    })),
+  );
+  if (duplicateGenerated !== undefined) {
+    throw new CloudSnapshotError('invalid_remote_data', 'duplicate_generated_transaction');
   }
 
   // Applied in a stable order so a repayment is never blamed for a principal
@@ -206,6 +249,8 @@ function assertUniqueIdentities(snapshot: CloudSnapshot) {
     ['transaction', snapshot.transactions],
     ['settings', snapshot.settings],
     ['budget', snapshot.budgets],
+    ['recurring_template', snapshot.recurringTemplates],
+    ['recurring_occurrence', snapshot.recurringOccurrences],
   ];
   for (const [entityType, rows] of groups) {
     const seen = new Set<string>();
@@ -232,6 +277,8 @@ export function toRemoteDataset(snapshot: CloudSnapshot): RemoteDataset {
     categories: snapshot.categories.map(mapPulledCategoryToLocal),
     people: snapshot.people.map(mapPulledPersonToLocal),
     budgets: snapshot.budgets.map(mapPulledBudgetToLocal),
+    recurringTemplates: snapshot.recurringTemplates.map(mapPulledRecurringTemplateToLocal),
+    recurringOccurrences: snapshot.recurringOccurrences.map(mapPulledRecurringOccurrenceToLocal),
     transactions: snapshot.transactions.map(mapPulledTransactionToLocal),
   };
 }
@@ -252,6 +299,8 @@ export function snapshotBaselines(snapshot: CloudSnapshot): {
     ['category', snapshot.categories],
     ['person', snapshot.people],
     ['budget', snapshot.budgets],
+    ['recurring_template', snapshot.recurringTemplates],
+    ['recurring_occurrence', snapshot.recurringOccurrences],
     ['transaction', snapshot.transactions],
   ];
   return groups.flatMap(([entityType, rows]) =>
@@ -274,6 +323,7 @@ export function cloudInventoryOf(snapshot: CloudSnapshot): DataInventory {
     people: live(snapshot.people).length,
     customCategories: live(snapshot.categories).filter((row) => !row.is_default).length,
     budgets: live(snapshot.budgets).length,
+    recurringTemplates: live(snapshot.recurringTemplates).length,
     settingsCurrency: live(snapshot.settings)[0]?.default_currency ?? null,
   });
 }

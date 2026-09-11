@@ -8,6 +8,8 @@ import {
   budgets,
   categories,
   people,
+  recurringOccurrences,
+  recurringTemplates,
   settings,
   syncBaselines,
   syncConflicts,
@@ -23,6 +25,8 @@ const syncableTables = [
   ['people', people],
   ['settings', settings],
   ['transactions', transactions],
+  ['recurring_templates', recurringTemplates],
+  ['recurring_occurrences', recurringOccurrences],
 ] as const;
 
 /**
@@ -35,6 +39,10 @@ const syncableTables = [
  */
 const requiredSyncReads = [
   ['budgets', () => db.select().from(budgets).limit(1).all()],
+  ['recurring_templates', () => db.select().from(recurringTemplates).limit(1).all()],
+  ['recurring_occurrences', () => db.select().from(recurringOccurrences).limit(1).all()],
+  // Every column, so the recurring link added in M8C is proven present too.
+  ['transactions', () => db.select().from(transactions).limit(1).all()],
   ['sync_outbox', () => db.select().from(syncOutbox).limit(1).all()],
   ['sync_state', () => db.select().from(syncState).limit(1).all()],
   ['sync_baselines', () => db.select().from(syncBaselines).limit(1).all()],

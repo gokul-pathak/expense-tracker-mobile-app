@@ -8,6 +8,8 @@ import {
   budgets,
   categories,
   people,
+  recurringOccurrences,
+  recurringTemplates,
   settings,
   transactions,
 } from '@/db/schema';
@@ -51,88 +53,130 @@ export function createBackup(): BackupEnvelope {
  */
 export function readBackupData(): BackupData {
   // Reads are performed in one SQLite transaction so the tables describe one logical snapshot.
-  return db.transaction((tx) => ({
-    accounts: tx
+  return db.transaction((tx) => {
+    // Recurring history travels with the live templates it belongs to. A deleted
+    // template schedules nothing, so its record of handled dates has nothing
+    // left to protect; the transactions it produced stay, as the ordinary
+    // transactions they are, without a link to a template the backup does not
+    // carry.
+    const liveTemplates = tx
       .select()
-      .from(accounts)
-      .where(isNull(accounts.deletedAt))
-      .orderBy(asc(accounts.id))
+      .from(recurringTemplates)
+      .where(isNull(recurringTemplates.deletedAt))
+      .orderBy(asc(recurringTemplates.id))
+      .all();
+    const liveTemplateIds = new Set(liveTemplates.map((item) => item.id));
+    const exportedOccurrences = tx
+      .select()
+      .from(recurringOccurrences)
+      .where(isNull(recurringOccurrences.deletedAt))
+      .orderBy(asc(recurringOccurrences.id))
       .all()
-      .map(({ deletedAt: _deletedAt, ...item }) => ({
+      .filter((item) => liveTemplateIds.has(item.templateId));
+    const exportedOccurrenceIds = new Set(exportedOccurrences.map((item) => item.id));
+
+    return {
+      accounts: tx
+        .select()
+        .from(accounts)
+        .where(isNull(accounts.deletedAt))
+        .orderBy(asc(accounts.id))
+        .all()
+        .map(({ deletedAt: _deletedAt, ...item }) => ({
+          ...item,
+          syncId: requireSyncId(item.syncId, 'account'),
+          createdAt: item.createdAt.getTime(),
+          updatedAt: item.updatedAt.getTime(),
+        })),
+      categories: tx
+        .select()
+        .from(categories)
+        .where(isNull(categories.deletedAt))
+        .orderBy(asc(categories.id))
+        .all()
+        .map(({ deletedAt: _deletedAt, ...item }) => ({
+          ...item,
+          syncId: requireSyncId(item.syncId, 'category'),
+          createdAt: item.createdAt.getTime(),
+          updatedAt: item.updatedAt.getTime(),
+        })),
+      people: tx
+        .select()
+        .from(people)
+        .where(isNull(people.deletedAt))
+        .orderBy(asc(people.id))
+        .all()
+        .map(({ deletedAt: _deletedAt, ...item }) => ({
+          ...item,
+          syncId: requireSyncId(item.syncId, 'person'),
+          createdAt: item.createdAt.getTime(),
+          updatedAt: item.updatedAt.getTime(),
+        })),
+      transactions: tx
+        .select()
+        .from(transactions)
+        .where(isNull(transactions.deletedAt))
+        .orderBy(asc(transactions.id))
+        .all()
+        .map(({ deletedAt: _deletedAt, ...item }) => ({
+          ...item,
+          syncId: requireSyncId(item.syncId, 'transaction'),
+          transactionDate: item.transactionDate.getTime(),
+          createdAt: item.createdAt.getTime(),
+          updatedAt: item.updatedAt.getTime(),
+          recurringOccurrenceId:
+            item.recurringOccurrenceId !== null &&
+            exportedOccurrenceIds.has(item.recurringOccurrenceId)
+              ? item.recurringOccurrenceId
+              : null,
+        })),
+      budgets: tx
+        .select()
+        .from(budgets)
+        .where(isNull(budgets.deletedAt))
+        .orderBy(asc(budgets.id))
+        .all()
+        .map(({ deletedAt: _deletedAt, ...item }) => ({
+          ...item,
+          syncId: requireSyncId(item.syncId, 'budget'),
+          createdAt: item.createdAt.getTime(),
+          updatedAt: item.updatedAt.getTime(),
+        })),
+      // A schedule and its decisions. What is due is not stored: it is recomputed
+      // from these after a restore, and comes out the same.
+      recurringTemplates: liveTemplates.map(({ deletedAt: _deletedAt, ...item }) => ({
         ...item,
-        syncId: requireSyncId(item.syncId, 'account'),
+        syncId: requireSyncId(item.syncId, 'recurring template'),
         createdAt: item.createdAt.getTime(),
         updatedAt: item.updatedAt.getTime(),
       })),
-    categories: tx
-      .select()
-      .from(categories)
-      .where(isNull(categories.deletedAt))
-      .orderBy(asc(categories.id))
-      .all()
-      .map(({ deletedAt: _deletedAt, ...item }) => ({
+      recurringOccurrences: exportedOccurrences.map(({ deletedAt: _deletedAt, ...item }) => ({
         ...item,
-        syncId: requireSyncId(item.syncId, 'category'),
+        syncId: requireSyncId(item.syncId, 'recurring occurrence'),
         createdAt: item.createdAt.getTime(),
         updatedAt: item.updatedAt.getTime(),
       })),
-    people: tx
-      .select()
-      .from(people)
-      .where(isNull(people.deletedAt))
-      .orderBy(asc(people.id))
-      .all()
-      .map(({ deletedAt: _deletedAt, ...item }) => ({
-        ...item,
-        syncId: requireSyncId(item.syncId, 'person'),
-        createdAt: item.createdAt.getTime(),
-        updatedAt: item.updatedAt.getTime(),
-      })),
-    transactions: tx
-      .select()
-      .from(transactions)
-      .where(isNull(transactions.deletedAt))
-      .orderBy(asc(transactions.id))
-      .all()
-      .map(({ deletedAt: _deletedAt, ...item }) => ({
-        ...item,
-        syncId: requireSyncId(item.syncId, 'transaction'),
-        transactionDate: item.transactionDate.getTime(),
-        createdAt: item.createdAt.getTime(),
-        updatedAt: item.updatedAt.getTime(),
-      })),
-    budgets: tx
-      .select()
-      .from(budgets)
-      .where(isNull(budgets.deletedAt))
-      .orderBy(asc(budgets.id))
-      .all()
-      .map(({ deletedAt: _deletedAt, ...item }) => ({
-        ...item,
-        syncId: requireSyncId(item.syncId, 'budget'),
-        createdAt: item.createdAt.getTime(),
-        updatedAt: item.updatedAt.getTime(),
-      })),
-    settings: tx
-      .select()
-      .from(settings)
-      .where(isNull(settings.deletedAt))
-      .orderBy(asc(settings.id))
-      .all()
-      .map(({ deletedAt: _deletedAt, ...item }) => ({
-        ...item,
-        syncId: requireSyncId(item.syncId, 'settings record'),
-        createdAt: item.createdAt.getTime(),
-        updatedAt: item.updatedAt.getTime(),
-      })),
-    // Migration state belongs to this installation. Only seed/domain metadata is portable.
-    appMetadata: tx
-      .select()
-      .from(appMetadata)
-      .where(like(appMetadata.key, 'seed.%'))
-      .orderBy(asc(appMetadata.key))
-      .all(),
-  }));
+      settings: tx
+        .select()
+        .from(settings)
+        .where(isNull(settings.deletedAt))
+        .orderBy(asc(settings.id))
+        .all()
+        .map(({ deletedAt: _deletedAt, ...item }) => ({
+          ...item,
+          syncId: requireSyncId(item.syncId, 'settings record'),
+          createdAt: item.createdAt.getTime(),
+          updatedAt: item.updatedAt.getTime(),
+        })),
+      // Migration state belongs to this installation. Only seed/domain metadata is portable.
+      appMetadata: tx
+        .select()
+        .from(appMetadata)
+        .where(like(appMetadata.key, 'seed.%'))
+        .orderBy(asc(appMetadata.key))
+        .all(),
+    };
+  });
 }
 
 export function parseAndValidateBackup(text: string): AnyBackupEnvelope {
@@ -153,8 +197,14 @@ export function restoreBackup(backup: AnyBackupEnvelope): void {
   // A backup written before budgets existed carries none, which restores as a
   // database with no budgets rather than as a reason to refuse the file.
   const restoredBudgets = 'budgets' in valid.data ? valid.data.budgets : [];
+  // The same for recurring data, which only a version 4 backup carries.
+  const restoredTemplates = 'recurringTemplates' in valid.data ? valid.data.recurringTemplates : [];
+  const restoredOccurrences =
+    'recurringOccurrences' in valid.data ? valid.data.recurringOccurrences : [];
   db.transaction((tx) => {
     tx.delete(transactions).run();
+    tx.delete(recurringOccurrences).run();
+    tx.delete(recurringTemplates).run();
     tx.delete(budgets).run();
     tx.delete(people).run();
     tx.delete(categories).run();
@@ -193,6 +243,25 @@ export function restoreBackup(backup: AnyBackupEnvelope): void {
         .values({
           ...item,
           syncId: resolveRestoredSyncId(item, withSyncIds, 'settings record'),
+          createdAt: new Date(item.createdAt),
+          updatedAt: new Date(item.updatedAt),
+        })
+        .run();
+    // Templates and their decisions before the transactions that point at them.
+    for (const item of restoredTemplates)
+      tx.insert(recurringTemplates)
+        .values({
+          ...item,
+          syncId: resolveRestoredSyncId(item, true, 'recurring template'),
+          createdAt: new Date(item.createdAt),
+          updatedAt: new Date(item.updatedAt),
+        })
+        .run();
+    for (const item of restoredOccurrences)
+      tx.insert(recurringOccurrences)
+        .values({
+          ...item,
+          syncId: resolveRestoredSyncId(item, true, 'recurring occurrence'),
           createdAt: new Date(item.createdAt),
           updatedAt: new Date(item.updatedAt),
         })

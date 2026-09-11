@@ -1,7 +1,11 @@
 import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
-import { PERIOD_MONTH_PATTERN } from '@/db/constants';
+import {
+  MAX_RECURRENCE_INTERVAL,
+  PERIOD_MONTH_PATTERN,
+  RECURRING_FREQUENCIES,
+} from '@/db/constants';
 import {
   accounts,
   budgets,
@@ -10,6 +14,8 @@ import {
   isSyncId,
   isSyncOperation,
   people,
+  recurringOccurrences,
+  recurringTemplates,
   settings,
   syncBaselines,
   syncConflicts,
@@ -18,6 +24,11 @@ import {
   transactions,
   type SyncEntityType,
 } from '@/db/schema';
+import {
+  deriveGeneratedTransactionSyncId,
+  deriveOccurrenceSyncId,
+} from '@/features/recurring/recurring-identity';
+import { isLocalDate } from '@/features/recurring/recurring-schedule';
 
 /**
  * A read-only audit of everything sync depends on locally.
@@ -56,6 +67,9 @@ export const SYNC_INTEGRITY_CODES = [
   'budget_invalid_month',
   'budget_invalid_category',
   'budget_duplicate_period',
+  'recurring_template_invalid',
+  'recurring_occurrence_invalid_identity',
+  'recurring_transaction_invalid_link',
 ] as const;
 
 export type SyncIntegrityCode = (typeof SYNC_INTEGRITY_CODES)[number];
@@ -78,6 +92,8 @@ export type SyncIntegrityReport = {
     settings: number;
     transactions: number;
     budgets: number;
+    recurringTemplates: number;
+    recurringOccurrences: number;
     pendingMutations: number;
     baselines: number;
     conflicts: number;
@@ -91,6 +107,8 @@ const SYNCABLE = [
   ['person', people],
   ['settings', settings],
   ['transaction', transactions],
+  ['recurring_template', recurringTemplates],
+  ['recurring_occurrence', recurringOccurrences],
 ] as const;
 
 export function verifySyncIntegrity(): SyncIntegrityReport {
@@ -103,6 +121,7 @@ export function verifySyncIntegrity(): SyncIntegrityReport {
   checkTombstonedParents(issues);
   checkTransactionRelations(issues);
   checkBudgets(issues);
+  checkRecurring(issues);
 
   return { ok: issues.length === 0, issues, counts: readCounts() };
 }
@@ -306,6 +325,7 @@ function checkTransactionRelations(issues: SyncIntegrityIssue[]) {
           OR (${transactions.sourceAccountId} IS NOT NULL AND ${transactions.sourceAccountId} NOT IN (SELECT id FROM accounts))
           OR (${transactions.destinationAccountId} IS NOT NULL AND ${transactions.destinationAccountId} NOT IN (SELECT id FROM accounts))
           OR (${transactions.personId} IS NOT NULL AND ${transactions.personId} NOT IN (SELECT id FROM people))
+          OR (${transactions.recurringOccurrenceId} IS NOT NULL AND ${transactions.recurringOccurrenceId} NOT IN (SELECT id FROM recurring_occurrences))
         )`,
       )
       .get()?.total ?? 0;
@@ -381,6 +401,81 @@ function checkBudgets(issues: SyncIntegrityIssue[]) {
   }
 }
 
+/**
+ * Recurring data, checked against the rules that make a schedule mean something
+ * and the identities that make two devices agree about it.
+ *
+ * The identity checks matter most. An occurrence whose identity is not the one
+ * derived from its template and date, or a generated transaction whose identity
+ * is not derived from its occurrence, is exactly the record a second device
+ * would not converge with — the rent recorded twice. Like everything here, these
+ * report and never repair.
+ */
+function checkRecurring(issues: SyncIntegrityIssue[]) {
+  const templates = db.select().from(recurringTemplates).all();
+  const invalidTemplates = templates.filter(
+    (template) =>
+      template.deletedAt === null &&
+      (!Number.isSafeInteger(template.amountMinor) ||
+        template.amountMinor <= 0 ||
+        !isLocalDate(template.startDate) ||
+        (template.endDate !== null &&
+          (!isLocalDate(template.endDate) || template.endDate < template.startDate)) ||
+        !Number.isSafeInteger(template.interval) ||
+        template.interval < 1 ||
+        template.interval > MAX_RECURRENCE_INTERVAL ||
+        !(RECURRING_FREQUENCIES as readonly string[]).includes(template.frequency)),
+  ).length;
+  if (invalidTemplates > 0) {
+    issues.push({
+      code: 'recurring_template_invalid',
+      entityType: 'recurring_template',
+      count: invalidTemplates,
+    });
+  }
+
+  const templateSyncIds = new Map(templates.map((template) => [template.id, template.syncId]));
+  const occurrences = db.select().from(recurringOccurrences).all();
+  const badIdentity = occurrences.filter((occurrence) => {
+    const templateSyncId = templateSyncIds.get(occurrence.templateId);
+    if (!isSyncId(templateSyncId) || !isLocalDate(occurrence.occurrenceDate)) return true;
+    return occurrence.syncId !== deriveOccurrenceSyncId(templateSyncId, occurrence.occurrenceDate);
+  }).length;
+  if (badIdentity > 0) {
+    issues.push({
+      code: 'recurring_occurrence_invalid_identity',
+      entityType: 'recurring_occurrence',
+      count: badIdentity,
+    });
+  }
+
+  const occurrenceSyncIds = new Map(
+    occurrences.map((occurrence) => [occurrence.id, occurrence.syncId]),
+  );
+  const linked = db
+    .select({
+      syncId: transactions.syncId,
+      type: transactions.type,
+      recurringOccurrenceId: transactions.recurringOccurrenceId,
+    })
+    .from(transactions)
+    .where(isNotNull(transactions.recurringOccurrenceId))
+    .all();
+  const badLinks = linked.filter((row) => {
+    const occurrenceSyncId = occurrenceSyncIds.get(row.recurringOccurrenceId!);
+    if (!isSyncId(occurrenceSyncId)) return true;
+    if (row.type !== 'expense' && row.type !== 'income') return true;
+    return row.syncId !== deriveGeneratedTransactionSyncId(occurrenceSyncId);
+  }).length;
+  if (badLinks > 0) {
+    issues.push({
+      code: 'recurring_transaction_invalid_link',
+      entityType: 'transaction',
+      count: badLinks,
+    });
+  }
+}
+
 function readCounts(): SyncIntegrityReport['counts'] {
   const count = (table: (typeof SYNCABLE)[number][1]) =>
     db
@@ -396,6 +491,8 @@ function readCounts(): SyncIntegrityReport['counts'] {
     settings: count(settings),
     transactions: count(transactions),
     budgets: count(budgets),
+    recurringTemplates: count(recurringTemplates),
+    recurringOccurrences: count(recurringOccurrences),
     pendingMutations:
       db
         .select({ total: sql<number>`count(*)` })

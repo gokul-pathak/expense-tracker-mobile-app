@@ -2,6 +2,7 @@ import type { Account } from '@/db/schema/accounts';
 import type { Budget } from '@/db/schema/budgets';
 import type { Category } from '@/db/schema/categories';
 import type { Person } from '@/db/schema/people';
+import type { RecurringOccurrence, RecurringTemplate } from '@/db/schema/recurring';
 import type { Setting } from '@/db/schema/settings';
 import type { Transaction } from '@/db/schema/transactions';
 
@@ -10,6 +11,8 @@ import type {
   RemoteBudgetRow,
   RemoteCategoryRow,
   RemotePersonRow,
+  RemoteRecurringOccurrenceRow,
+  RemoteRecurringTemplateRow,
   RemoteSettingsRow,
   RemoteTransactionRow,
 } from '../remote/remote-rows';
@@ -37,6 +40,8 @@ export type RelationResolver = {
   account: (localId: number) => string | undefined;
   category: (localId: number) => string | undefined;
   person: (localId: number) => string | undefined;
+  recurringTemplate: (localId: number) => string | undefined;
+  recurringOccurrence: (localId: number) => string | undefined;
 };
 
 export class MappingError extends Error {
@@ -171,6 +176,67 @@ export function mapLocalTransactionToRemote(
     created_at: toEpochMs(transaction.createdAt, 'transaction.createdAt'),
     updated_at: toEpochMs(transaction.updatedAt, 'transaction.updatedAt'),
     deleted_at: toNullableEpochMs(transaction.deletedAt),
+    // Provenance for a generated transaction, null for everything else.
+    recurring_occurrence_sync_id: resolveRelation(
+      resolve.recurringOccurrence,
+      transaction.recurringOccurrenceId,
+      'recurring occurrence',
+    ),
+  };
+}
+
+/**
+ * A template crosses the boundary as a plan. Its schedule travels as calendar
+ * dates, never instants, so "the 1st" means the 1st on every device. What is
+ * due is absent because it is not stored: each device derives it from the
+ * schedule and the occurrences it holds.
+ */
+export function mapLocalRecurringTemplateToRemote(
+  template: RecurringTemplate,
+  context: MappingContext,
+  resolve: RelationResolver,
+): RemoteRecurringTemplateRow {
+  return {
+    sync_id: requireSyncId(template.syncId, 'recurring template'),
+    user_id: context.userId,
+    type: template.type,
+    amount_minor: template.amountMinor,
+    currency: template.currency,
+    category_sync_id: requireRelation(resolve.category, template.categoryId, 'category'),
+    account_sync_id: requireRelation(resolve.account, template.accountId, 'account'),
+    payment_mode: template.paymentMode,
+    title: template.title,
+    note: template.note,
+    start_date: template.startDate,
+    frequency: template.frequency,
+    interval_count: template.interval,
+    end_date: template.endDate,
+    is_paused: template.isPaused,
+    created_at: toEpochMs(template.createdAt, 'recurringTemplate.createdAt'),
+    updated_at: toEpochMs(template.updatedAt, 'recurringTemplate.updatedAt'),
+    deleted_at: toNullableEpochMs(template.deletedAt),
+  };
+}
+
+/** A decision about one date. Its identity is derived from the template and the date. */
+export function mapLocalRecurringOccurrenceToRemote(
+  occurrence: RecurringOccurrence,
+  context: MappingContext,
+  resolve: RelationResolver,
+): RemoteRecurringOccurrenceRow {
+  return {
+    sync_id: requireSyncId(occurrence.syncId, 'recurring occurrence'),
+    user_id: context.userId,
+    template_sync_id: requireRelation(
+      resolve.recurringTemplate,
+      occurrence.templateId,
+      'recurring template',
+    ),
+    occurrence_date: occurrence.occurrenceDate,
+    status: occurrence.status,
+    created_at: toEpochMs(occurrence.createdAt, 'recurringOccurrence.createdAt'),
+    updated_at: toEpochMs(occurrence.updatedAt, 'recurringOccurrence.updatedAt'),
+    deleted_at: toNullableEpochMs(occurrence.deletedAt),
   };
 }
 
@@ -184,6 +250,17 @@ function resolveRelation(
   if (syncId === undefined) {
     throw new MappingError(`referenced ${label} has no sync identity`);
   }
+  return syncId;
+}
+
+/** A relation the row cannot exist without. */
+function requireRelation(
+  lookup: (localId: number) => string | undefined,
+  localId: number,
+  label: string,
+): string {
+  const syncId = lookup(localId);
+  if (syncId === undefined) throw new MappingError(`referenced ${label} has no sync identity`);
   return syncId;
 }
 

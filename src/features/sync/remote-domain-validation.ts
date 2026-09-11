@@ -1,6 +1,15 @@
 import type { TransactionType } from '@/db/constants';
+import {
+  deriveGeneratedTransactionSyncId,
+  deriveOccurrenceSyncId,
+} from '@/features/recurring/recurring-identity';
 
-import type { PulledBudgetRow, PulledTransactionRow } from './remote/remote-pull-rows';
+import type {
+  PulledBudgetRow,
+  PulledRecurringOccurrenceRow,
+  PulledRecurringTemplateRow,
+  PulledTransactionRow,
+} from './remote/remote-pull-rows';
 
 /**
  * The domain rules a downloaded transaction must satisfy before it is allowed
@@ -31,6 +40,13 @@ export type RemoteRelationIndex = {
   accounts: Map<string, { currency: string; isArchived: boolean }>;
   categoryTypes: Map<string, string>;
   people: Set<string>;
+  /**
+   * Templates and occurrences known locally or arriving in the batch, deleted
+   * ones included. A deleted template's occurrences and the transactions they
+   * produced are still real records, and they still need their parent to exist.
+   */
+  recurringTemplates: Set<string>;
+  recurringOccurrences: Set<string>;
 };
 
 export type RemoteRecordProblem = {
@@ -48,9 +64,28 @@ export function validateRemoteTransaction(
   if (UNSUPPORTED_TRANSACTION_TYPES.includes(row.type)) {
     return { code: 'unsupported_remote_data', detail: `type:${row.type}` };
   }
+
+  // A generated transaction's identity is derived from its occurrence. One that
+  // claims an occurrence under any other identity is a second transaction for a
+  // date that already has one, which is the duplication recurring identity
+  // exists to make impossible.
+  const occurrence = row.recurring_occurrence_sync_id;
+  if (occurrence !== null) {
+    if (row.type !== 'expense' && row.type !== 'income') {
+      return { code: 'invalid_remote_data', detail: 'recurring_type' };
+    }
+    if (row.sync_id !== deriveGeneratedTransactionSyncId(occurrence)) {
+      return { code: 'invalid_remote_data', detail: 'recurring_transaction_identity' };
+    }
+  }
+
   // A deleted record is invisible to every domain calculation, so its shape
   // cannot corrupt anything and is not re-litigated here.
   if (remoteDeleted) return undefined;
+
+  if (occurrence !== null && !index.recurringOccurrences.has(occurrence)) {
+    return { code: 'unknown_parent', detail: 'recurring_occurrence' };
+  }
 
   const source = row.source_account_sync_id;
   const destination = row.destination_account_sync_id;
@@ -149,6 +184,76 @@ export function validateRemoteBudget(
   if (type === undefined) return { code: 'unknown_parent', detail: 'category' };
   // A budget is a spending limit, so an income category has nothing to limit.
   if (type !== 'expense') return { code: 'invalid_remote_data', detail: 'category_type' };
+  return undefined;
+}
+
+/**
+ * The rules a downloaded recurring template must satisfy.
+ *
+ * Its parents must exist whether or not it is deleted: a deleted template is
+ * still written locally, because its occurrences and their transactions still
+ * point at it. The meaning checks — a category of the template's type, an
+ * account in the template's currency — apply only to a live one, since a
+ * deleted template schedules nothing.
+ */
+export function validateRemoteRecurringTemplate(
+  row: PulledRecurringTemplateRow,
+  index: RemoteRelationIndex,
+  remoteDeleted: boolean,
+): RemoteRecordProblem | undefined {
+  const categoryType = index.categoryTypes.get(row.category_sync_id);
+  if (categoryType === undefined) return { code: 'unknown_parent', detail: 'category' };
+  const account = index.accounts.get(row.account_sync_id);
+  if (account === undefined) return { code: 'unknown_parent', detail: 'account' };
+  if (remoteDeleted) return undefined;
+
+  if (row.end_date !== null && row.end_date < row.start_date) {
+    return { code: 'invalid_remote_data', detail: 'end_before_start' };
+  }
+  if (categoryType !== row.type) return { code: 'invalid_remote_data', detail: 'category_type' };
+  if (account.currency !== row.currency) {
+    return { code: 'invalid_remote_data', detail: 'account_currency' };
+  }
+  return undefined;
+}
+
+/**
+ * The rules a downloaded occurrence must satisfy.
+ *
+ * Its identity must be the one derived from its template and date. That is the
+ * guarantee two devices handling the same date converge on one record, and an
+ * occurrence carrying any other identity would let a second record of the same
+ * date exist.
+ *
+ * Whether the date is still on the template's schedule is deliberately not
+ * checked. A template can be rescheduled on one device while another, offline,
+ * handles a date from the old schedule; refusing that record would stall the
+ * download behind it forever. An off-schedule decision is harmless — the due
+ * engine only walks the schedule's own dates — so it is kept.
+ */
+export function validateRemoteRecurringOccurrence(
+  row: PulledRecurringOccurrenceRow,
+  index: RemoteRelationIndex,
+): RemoteRecordProblem | undefined {
+  if (row.sync_id !== deriveOccurrenceSyncId(row.template_sync_id, row.occurrence_date)) {
+    return { code: 'invalid_remote_data', detail: 'occurrence_identity' };
+  }
+  if (!index.recurringTemplates.has(row.template_sync_id)) {
+    return { code: 'unknown_parent', detail: 'recurring_template' };
+  }
+  return undefined;
+}
+
+/** One generated transaction per occurrence, across a whole dataset. */
+export function findDuplicateGeneratedTransaction<TKey>(
+  rows: readonly { key: TKey; recurringOccurrenceSyncId: string | null }[],
+): TKey | undefined {
+  const claimed = new Set<string>();
+  for (const row of rows) {
+    if (row.recurringOccurrenceSyncId === null) continue;
+    if (claimed.has(row.recurringOccurrenceSyncId)) return row.key;
+    claimed.add(row.recurringOccurrenceSyncId);
+  }
   return undefined;
 }
 

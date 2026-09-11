@@ -3,11 +3,16 @@ import { z } from 'zod';
 import {
   ACCOUNT_TYPES,
   CATEGORY_TYPES,
+  MAX_RECURRENCE_INTERVAL,
   PAYMENT_MODES,
   PERIOD_MONTH_PATTERN,
+  RECURRING_FREQUENCIES,
+  RECURRING_OCCURRENCE_STATUSES,
+  RECURRING_TRANSACTION_TYPES,
   TRANSACTION_TYPES,
 } from '@/db/constants';
 import { SYNC_ID_PATTERN, type SyncEntityType } from '@/db/schema';
+import { isLocalDate } from '@/features/recurring/recurring-schedule';
 
 /**
  * The cloud row contracts from `supabase/migrations/20260907000000_cloud_sync.sql`.
@@ -29,6 +34,9 @@ export const safeIntegerSchema = z.number().int().safe();
 export const currencySchema = z.string().regex(/^[A-Z]{3,16}$/);
 // A budget's month is calendar text, never an instant.
 export const periodMonthSchema = z.string().regex(PERIOD_MONTH_PATTERN);
+// So is a scheduled date, and it has to be a day that exists: 2026-02-30 is refused.
+export const localDateSchema = z.string().refine(isLocalDate, 'must be a YYYY-MM-DD calendar date');
+export const intervalSchema = z.number().int().min(1).max(MAX_RECURRENCE_INTERVAL);
 
 const syncId = syncIdSchema;
 const userId = userIdSchema;
@@ -126,6 +134,49 @@ export const remoteTransactionSchema = z
     created_at: timestamp,
     updated_at: timestamp,
     deleted_at: nullableTimestamp,
+    // Null for every transaction a person entered; the occurrence for a generated one.
+    recurring_occurrence_sync_id: syncId.nullable(),
+  })
+  .strict();
+
+/**
+ * A recurring template: a plan, never a figure. Nothing about it is financial
+ * until an occurrence is generated, and then it is the transaction that travels.
+ */
+export const remoteRecurringTemplateSchema = z
+  .object({
+    sync_id: syncId,
+    user_id: userId,
+    type: z.enum(RECURRING_TRANSACTION_TYPES),
+    amount_minor: safeInteger.positive(),
+    currency,
+    category_sync_id: syncId,
+    account_sync_id: syncId,
+    payment_mode: z.enum(PAYMENT_MODES).nullable(),
+    title: z.string(),
+    note: nullableText,
+    start_date: localDateSchema,
+    frequency: z.enum(RECURRING_FREQUENCIES),
+    interval_count: intervalSchema,
+    end_date: localDateSchema.nullable(),
+    is_paused: z.boolean(),
+    created_at: timestamp,
+    updated_at: timestamp,
+    deleted_at: nullableTimestamp,
+  })
+  .strict();
+
+/** A decision about one scheduled date. Its identity is derived, never random. */
+export const remoteRecurringOccurrenceSchema = z
+  .object({
+    sync_id: syncId,
+    user_id: userId,
+    template_sync_id: syncId,
+    occurrence_date: localDateSchema,
+    status: z.enum(RECURRING_OCCURRENCE_STATUSES),
+    created_at: timestamp,
+    updated_at: timestamp,
+    deleted_at: nullableTimestamp,
   })
   .strict();
 
@@ -135,6 +186,8 @@ export type RemotePersonRow = z.infer<typeof remotePersonSchema>;
 export type RemoteSettingsRow = z.infer<typeof remoteSettingsSchema>;
 export type RemoteBudgetRow = z.infer<typeof remoteBudgetSchema>;
 export type RemoteTransactionRow = z.infer<typeof remoteTransactionSchema>;
+export type RemoteRecurringTemplateRow = z.infer<typeof remoteRecurringTemplateSchema>;
+export type RemoteRecurringOccurrenceRow = z.infer<typeof remoteRecurringOccurrenceSchema>;
 
 export type RemoteRow =
   | RemoteAccountRow
@@ -142,7 +195,9 @@ export type RemoteRow =
   | RemoteCategoryRow
   | RemotePersonRow
   | RemoteSettingsRow
-  | RemoteTransactionRow;
+  | RemoteTransactionRow
+  | RemoteRecurringTemplateRow
+  | RemoteRecurringOccurrenceRow;
 
 /** Cloud table name and idempotency key for each local entity type. */
 export const REMOTE_TABLES = {
@@ -153,6 +208,8 @@ export const REMOTE_TABLES = {
   settings: { table: 'settings', onConflict: 'user_id' },
   transaction: { table: 'transactions', onConflict: 'sync_id' },
   budget: { table: 'budgets', onConflict: 'sync_id' },
+  recurring_template: { table: 'recurring_templates', onConflict: 'sync_id' },
+  recurring_occurrence: { table: 'recurring_occurrences', onConflict: 'sync_id' },
 } as const satisfies Record<SyncEntityType, { table: string; onConflict: string }>;
 
 export const REMOTE_SCHEMA = 'sync' as const;
@@ -164,6 +221,8 @@ const schemasByEntity = {
   settings: remoteSettingsSchema,
   transaction: remoteTransactionSchema,
   budget: remoteBudgetSchema,
+  recurring_template: remoteRecurringTemplateSchema,
+  recurring_occurrence: remoteRecurringOccurrenceSchema,
 } as const;
 
 /** Validates one mapped row. Returns an issue path only, never the row values. */

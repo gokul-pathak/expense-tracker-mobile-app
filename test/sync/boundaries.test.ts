@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,6 +28,10 @@ const localWritePaths = [
   'src/features/settings/settings.service.ts',
   'src/features/transactions/transaction.repository.ts',
   'src/features/transactions/transaction.service.ts',
+  'src/features/recurring/recurring.repository.ts',
+  'src/features/recurring/recurring.service.ts',
+  'src/features/recurring/recurring-identity.ts',
+  'src/features/recurring/recurring-schedule.ts',
   'src/features/backup/backup.service.ts',
   'src/features/sync/sync.repository.ts',
   'src/features/sync/sync-source.repository.ts',
@@ -149,6 +153,52 @@ describe('M7C boundaries', () => {
     }
   });
 
+  it('lets nothing generate a recurring transaction by itself', () => {
+    // M8C is an engine that answers when asked. Nothing generates on startup, on
+    // a timer, in the background or from a notification, and no screen asks yet:
+    // M8D owns the interface.
+    const engine = [
+      'src/features/recurring/recurring.service.ts',
+      'src/features/recurring/recurring.repository.ts',
+      'src/features/recurring/recurring-schedule.ts',
+      'src/features/recurring/recurring-identity.ts',
+      'src/features/recurring/recurring.validation.ts',
+    ];
+    for (const path of engine) {
+      const source = read(path);
+      expect(source, path).not.toMatch(
+        /setInterval|setTimeout|BackgroundFetch|TaskManager|expo-notifications|AppState|addEventListener/,
+      );
+      expect(source, path).not.toMatch(/supabase/i);
+    }
+
+    for (const path of [
+      'src/app/_layout.tsx',
+      'src/db/migrations.ts',
+      'src/db/seed.ts',
+      'src/features/sync/sync.provider.tsx',
+      'src/features/ui/data.native.ts',
+    ]) {
+      expect(read(path), path).not.toMatch(/features\/recurring|generateDueOccurrences/);
+    }
+    const screens = readdirSync(join(projectRoot, 'src/app'), { recursive: true })
+      .map(String)
+      .filter((file) => /\.(ts|tsx)$/.test(file));
+    for (const file of screens) {
+      expect(read(join('src/app', file)), file).not.toMatch(/features\/recurring/);
+    }
+
+    const manifest = JSON.parse(read('package.json')) as { dependencies: Record<string, string> };
+    for (const dependency of [
+      'expo-task-manager',
+      'expo-background-fetch',
+      'expo-background-task',
+      'expo-notifications',
+    ]) {
+      expect(manifest.dependencies[dependency], dependency).toBeUndefined();
+    }
+  });
+
   it('binds a database to a cloud account only through reconciliation', () => {
     // The engines read the binding; nothing but the first-link flow writes it.
     for (const path of [
@@ -176,6 +226,8 @@ describe('M7C boundaries', () => {
       'transaction',
       'settings',
       'budget',
+      'recurring_template',
+      'recurring_occurrence',
     ]);
     expect(SYNC_OPERATIONS).toEqual(['upsert', 'delete']);
   });

@@ -1,10 +1,20 @@
 import { z } from 'zod';
 
-import { ACCOUNT_TYPES, CATEGORY_TYPES, PAYMENT_MODES, TRANSACTION_TYPES } from '@/db/constants';
+import {
+  ACCOUNT_TYPES,
+  CATEGORY_TYPES,
+  PAYMENT_MODES,
+  RECURRING_FREQUENCIES,
+  RECURRING_OCCURRENCE_STATUSES,
+  RECURRING_TRANSACTION_TYPES,
+  TRANSACTION_TYPES,
+} from '@/db/constants';
 import { SYNC_ENTITY_TYPES, type SyncEntityType } from '@/db/schema';
 
 import {
   currencySchema,
+  intervalSchema,
+  localDateSchema,
   periodMonthSchema,
   syncIdSchema,
   userIdSchema,
@@ -161,6 +171,46 @@ export const pulledTransactionSchema = z
     created_at: epochMs,
     updated_at: epochMs,
     deleted_at: nullableEpochMs,
+    // Absent means what null means: a transaction nobody generated.
+    recurring_occurrence_sync_id: nullableSyncId.default(null),
+    ...serverColumns,
+  })
+  .strict();
+
+export const pulledRecurringTemplateSchema = z
+  .object({
+    sync_id: syncIdSchema,
+    user_id: userIdSchema,
+    type: z.enum(RECURRING_TRANSACTION_TYPES),
+    amount_minor: bigIntegerSchema.refine((value) => value > 0, { message: 'non_positive_amount' }),
+    currency: currencySchema,
+    category_sync_id: syncIdSchema,
+    account_sync_id: syncIdSchema,
+    payment_mode: z.union([z.null(), z.enum(PAYMENT_MODES)]),
+    title: z.string(),
+    note: nullableText,
+    start_date: localDateSchema,
+    frequency: z.enum(RECURRING_FREQUENCIES),
+    interval_count: intervalSchema,
+    end_date: z.union([z.null(), localDateSchema]),
+    is_paused: z.boolean(),
+    created_at: epochMs,
+    updated_at: epochMs,
+    deleted_at: nullableEpochMs,
+    ...serverColumns,
+  })
+  .strict();
+
+export const pulledRecurringOccurrenceSchema = z
+  .object({
+    sync_id: syncIdSchema,
+    user_id: userIdSchema,
+    template_sync_id: syncIdSchema,
+    occurrence_date: localDateSchema,
+    status: z.enum(RECURRING_OCCURRENCE_STATUSES),
+    created_at: epochMs,
+    updated_at: epochMs,
+    deleted_at: nullableEpochMs,
     ...serverColumns,
   })
   .strict();
@@ -171,6 +221,8 @@ export type PulledPersonRow = z.infer<typeof pulledPersonSchema>;
 export type PulledSettingsRow = z.infer<typeof pulledSettingsSchema>;
 export type PulledBudgetRow = z.infer<typeof pulledBudgetSchema>;
 export type PulledTransactionRow = z.infer<typeof pulledTransactionSchema>;
+export type PulledRecurringTemplateRow = z.infer<typeof pulledRecurringTemplateSchema>;
+export type PulledRecurringOccurrenceRow = z.infer<typeof pulledRecurringOccurrenceSchema>;
 
 export type PulledRow =
   | PulledAccountRow
@@ -178,7 +230,9 @@ export type PulledRow =
   | PulledCategoryRow
   | PulledPersonRow
   | PulledSettingsRow
-  | PulledTransactionRow;
+  | PulledTransactionRow
+  | PulledRecurringTemplateRow
+  | PulledRecurringOccurrenceRow;
 
 const pullSchemasByEntity = {
   account: pulledAccountSchema,
@@ -187,6 +241,8 @@ const pullSchemasByEntity = {
   settings: pulledSettingsSchema,
   transaction: pulledTransactionSchema,
   budget: pulledBudgetSchema,
+  recurring_template: pulledRecurringTemplateSchema,
+  recurring_occurrence: pulledRecurringOccurrenceSchema,
 } as const;
 
 /** Decodes one downloaded row. Returns an issue path only, never row values. */
@@ -208,6 +264,8 @@ export const PULLED_COLUMNS = {
   settings: Object.keys(pulledSettingsSchema.shape).join(','),
   transaction: Object.keys(pulledTransactionSchema.shape).join(','),
   budget: Object.keys(pulledBudgetSchema.shape).join(','),
+  recurring_template: Object.keys(pulledRecurringTemplateSchema.shape).join(','),
+  recurring_occurrence: Object.keys(pulledRecurringOccurrenceSchema.shape).join(','),
 } as const satisfies Record<SyncEntityType, string>;
 
 /**

@@ -16,8 +16,8 @@ values ('00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000
 select is(
   (select count(*) from information_schema.tables
     where table_schema = 'sync' and table_type = 'BASE TABLE'),
-  6::bigint,
-  'the sync schema holds exactly the five domain tables and the change feed'
+  9::bigint,
+  'the sync schema holds exactly the eight domain tables and the change feed'
 );
 select col_is_pk('sync', 'accounts', 'sync_id', 'an account is identified by its global sync id');
 select col_is_pk('sync', 'categories', 'sync_id', 'a category is identified by its global sync id');

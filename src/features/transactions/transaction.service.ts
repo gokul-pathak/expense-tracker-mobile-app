@@ -193,6 +193,32 @@ function createTransaction(
   type: CategorizedTransactionType,
   input: CreateExpenseInput | CreateIncomeInput,
 ) {
+  return repository.createTransaction(buildCategorizedRecord(type, input));
+}
+
+/**
+ * An expense or income, validated and built exactly as `createExpense` and
+ * `createIncome` build one, but not written.
+ *
+ * The recurring engine uses this so a generated transaction goes through every
+ * rule a hand-entered one does — active account, matching category, the
+ * account's currency, a positive safe-integer amount — rather than a second copy
+ * of those rules that could drift. The engine then writes it, together with the
+ * occurrence that accounts for it, in one SQLite transaction.
+ *
+ * Internal: the UI data boundary does not export it.
+ */
+export function prepareGeneratedTransaction(
+  type: CategorizedTransactionType,
+  input: CreateExpenseInput | CreateIncomeInput,
+): CreateTransactionRecord {
+  return buildCategorizedRecord(type, input);
+}
+
+function buildCategorizedRecord(
+  type: CategorizedTransactionType,
+  input: CreateExpenseInput | CreateIncomeInput,
+): CreateTransactionRecord {
   const account = getActiveAccount(input.accountId);
   const category = getCategoryById(input.categoryId) ?? categoryNotFound(input.categoryId);
   if (category.type !== type) {
@@ -201,7 +227,7 @@ function createTransaction(
 
   const now = new Date();
   const common = normalizeCreateCommon(input, account.currency);
-  const record: CreateTransactionRecord = {
+  return {
     ...common,
     type,
     categoryId: category.id,
@@ -211,7 +237,6 @@ function createTransaction(
     createdAt: now,
     updatedAt: now,
   };
-  return repository.createTransaction(record);
 }
 
 function createDebtTransaction(type: DebtTransactionType, input: DebtInput) {

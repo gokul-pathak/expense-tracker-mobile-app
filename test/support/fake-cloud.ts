@@ -97,10 +97,19 @@ export function createFakeCloud(): FakeCloud {
     });
   }
 
-  function write(entityType: SyncEntityType, incoming: Record<string, unknown>) {
+  function write(entityType: SyncEntityType, received: Record<string, unknown>) {
     const table = tables.get(entityType) ?? new Map<string, StoredRow>();
-    const identity = String(incoming[REMOTE_TABLES[entityType].onConflict]);
+    const identity = String(received[REMOTE_TABLES[entityType].onConflict]);
     const existing = table.get(identity);
+    // `sync.guard_recurring_occurrence()`: a generated occurrence is never turned
+    // back into a skipped one, in whichever order two devices' uploads arrive.
+    const incoming =
+      entityType === 'recurring_occurrence' &&
+      existing !== undefined &&
+      existing.row.status === 'generated' &&
+      received.status !== 'generated'
+        ? { ...received, status: 'generated' }
+        : received;
 
     if (existing !== undefined) {
       // The BEFORE INSERT branch fires before the conflict is detected, so the

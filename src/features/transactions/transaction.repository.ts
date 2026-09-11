@@ -4,6 +4,7 @@ import { and, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import type { TransactionType } from '@/db/constants';
 import { enqueueSyncMutation } from '@/features/sync/sync.repository';
+import type { SyncWriter } from '@/features/sync/sync.types';
 import { createSyncId, requireSyncId } from '@/features/sync/uuid';
 import { accounts } from '@/db/schema/accounts';
 import { categories } from '@/db/schema/categories';
@@ -119,6 +120,63 @@ export function createTransaction(data: CreateTransactionRecord) {
     });
     return transaction;
   });
+}
+
+/**
+ * Writes the transaction a recurring occurrence produces, inside the caller's
+ * SQLite transaction.
+ *
+ * Two things make this different from `createTransaction`, and both are why it
+ * takes a writer rather than opening its own transaction:
+ *
+ * - The identity is supplied, not created. It is derived from the occurrence, so
+ *   two devices generating the same date offline write the same identity and the
+ *   cloud keeps one transaction. Nothing a person can reach passes an identity
+ *   here — the UI data boundary does not export it, and only the recurring
+ *   repository calls it.
+ * - It must commit or roll back with the occurrence that records it. A handled
+ *   occurrence with no transaction, or a transaction no occurrence accounts for,
+ *   is exactly the half-state that would let a date be generated twice.
+ *
+ * A row with this identity can already exist in two ways. A live one is a
+ * transaction for this very occurrence — possibly edited since by the user — and
+ * is kept exactly as it is. A tombstone means the occurrence was retired with it
+ * by a cloud replacement of the dataset, and generating the date again revives it
+ * under the same identity rather than inventing a second one.
+ */
+export function writeGeneratedTransaction(
+  writer: SyncWriter,
+  data: CreateTransactionRecord & { recurringOccurrenceId: number },
+  syncId: string,
+): { transaction: typeof transactions.$inferSelect; written: boolean } {
+  const existing = writer.select().from(transactions).where(eq(transactions.syncId, syncId)).get();
+
+  if (existing !== undefined && existing.deletedAt === null) {
+    if (existing.recurringOccurrenceId !== data.recurringOccurrenceId) {
+      throw new Error('A generated transaction identity belongs to a different occurrence.');
+    }
+    return { transaction: existing, written: false };
+  }
+
+  const transaction =
+    existing === undefined
+      ? writer
+          .insert(transactions)
+          .values({ ...data, syncId })
+          .returning()
+          .get()
+      : writer
+          .update(transactions)
+          .set({ ...data, deletedAt: null })
+          .where(eq(transactions.id, existing.id))
+          .returning()
+          .get();
+  enqueueSyncMutation(writer, {
+    entityType: 'transaction',
+    entitySyncId: syncId,
+    operation: 'upsert',
+  });
+  return { transaction, written: true };
 }
 
 export function updateTransaction(id: number, data: UpdateTransactionRecord) {

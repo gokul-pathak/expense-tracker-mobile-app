@@ -52,6 +52,8 @@ const data: BackupData = {
     },
   ],
   budgets: [],
+  recurringTemplates: [],
+  recurringOccurrences: [],
   appMetadata: [],
   transactions: [
     {
@@ -70,6 +72,7 @@ const data: BackupData = {
       note: 'Dinner,\ndrinks',
       createdAt: 0,
       updatedAt: 0,
+      recurringOccurrenceId: null,
     },
   ],
 };

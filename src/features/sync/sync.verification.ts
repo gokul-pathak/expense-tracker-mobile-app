@@ -74,7 +74,10 @@ export function removeQueuedWorkForMissingRows(): void {
       sql`(${syncOutbox.entityType} = 'account' AND ${syncOutbox.entitySyncId} NOT IN (SELECT sync_id FROM accounts))
        OR (${syncOutbox.entityType} = 'category' AND ${syncOutbox.entitySyncId} NOT IN (SELECT sync_id FROM categories))
        OR (${syncOutbox.entityType} = 'person' AND ${syncOutbox.entitySyncId} NOT IN (SELECT sync_id FROM people))
-       OR (${syncOutbox.entityType} = 'transaction' AND ${syncOutbox.entitySyncId} NOT IN (SELECT sync_id FROM transactions))`,
+       OR (${syncOutbox.entityType} = 'transaction' AND ${syncOutbox.entitySyncId} NOT IN (SELECT sync_id FROM transactions))
+       OR (${syncOutbox.entityType} = 'budget' AND ${syncOutbox.entitySyncId} NOT IN (SELECT sync_id FROM budgets))
+       OR (${syncOutbox.entityType} = 'recurring_template' AND ${syncOutbox.entitySyncId} NOT IN (SELECT sync_id FROM recurring_templates))
+       OR (${syncOutbox.entityType} = 'recurring_occurrence' AND ${syncOutbox.entitySyncId} NOT IN (SELECT sync_id FROM recurring_occurrences))`,
     )
     .run();
 }

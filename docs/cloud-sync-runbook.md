@@ -55,6 +55,7 @@ schema in the dashboard, or the next `db reset` silently diverges from productio
 | `supabase/tests/pull.sql`           | the change feed: one change per mutation, incremental reads, exact BIGINT                       |
 | `supabase/tests/reconciliation.sql` | first-link contract: retryable upload, retirement, account isolation                            |
 | `supabase/tests/budgets.sql`        | budget isolation, ownership-safe category reference, and one live plan per month                |
+| `supabase/tests/recurring.sql`      | recurring isolation, the template → occurrence → transaction chain, and generated-wins          |
 
 A failure in `rls.sql`, `rls-matrix.sql` or `integrity.sql` is a release blocker. Do not mark those
 optional in CI on an environment that can run them.
@@ -90,7 +91,20 @@ budget_invalid_amount                   a budget amount is not a positive safe i
 budget_invalid_month                    a budget month is not YYYY-MM with a month in 01-12
 budget_invalid_category                 a budget points at something that is not a live expense category
 budget_duplicate_period                 two live plans for one month, currency and category
+recurring_template_invalid              a live template with an impossible amount, date, interval or frequency
+recurring_occurrence_invalid_identity   an occurrence whose identity is not derived from its template and date
+recurring_transaction_invalid_link      a generated transaction whose identity or type does not fit its occurrence
 ```
+
+### Deploying M8C
+
+Apply `supabase/migrations/20260911000000_recurring_transactions.sql` **before** releasing a build that
+contains recurring transactions. Every build from M8C on uploads and downloads
+`transactions.recurring_occurrence_sync_id`, and a cloud without that column refuses both.
+
+An M8B build pulling from a cloud where an M8C device has created a template stops at the first
+`recurring_templates` change, because it has no decoder for that table — the same thing a pre-M8A
+build does at the first budget. Update every device before recurring transactions are used.
 
 `verifySyncFoundation()` (`sync.verification.ts`) is the lighter development view: queue size by
 entity type, binding, cursor, progress markers and whether an engine is running.

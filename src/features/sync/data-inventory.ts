@@ -2,7 +2,16 @@ import { and, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
 import { DEFAULT_CURRENCY } from '@/db/constants';
-import { accounts, budgets, categories, people, settings, transactions } from '@/db/schema';
+import {
+  accounts,
+  budgets,
+  categories,
+  people,
+  recurringOccurrences,
+  recurringTemplates,
+  settings,
+  transactions,
+} from '@/db/schema';
 
 /**
  * Does this database, or this cloud account, actually hold anything a person
@@ -33,6 +42,11 @@ export type DataInventory = {
    * budget is a deliberate decision that would be a real loss to overwrite.
    */
   budgets: number;
+  /**
+   * Recurring templates are user-created plans too — nothing seeds or infers
+   * one — so a device holding one has data a person would not want replaced.
+   */
+  recurringTemplates: number;
   settingsChanged: boolean;
   hasMeaningfulData: boolean;
 };
@@ -44,6 +58,7 @@ export function emptyInventory(): DataInventory {
     people: 0,
     customCategories: 0,
     budgets: 0,
+    recurringTemplates: 0,
     settingsChanged: false,
     hasMeaningfulData: false,
   };
@@ -51,7 +66,14 @@ export function emptyInventory(): DataInventory {
 
 /** Tombstoned rows are deleted data and never make a database look populated. */
 export function readLocalDataInventory(): DataInventory {
-  const count = (table: typeof accounts | typeof transactions | typeof people | typeof budgets) =>
+  const count = (
+    table:
+      | typeof accounts
+      | typeof transactions
+      | typeof people
+      | typeof budgets
+      | typeof recurringTemplates,
+  ) =>
     db
       .select({ total: sql<number>`count(*)` })
       .from(table)
@@ -78,13 +100,23 @@ export function readLocalDataInventory(): DataInventory {
     people: count(people),
     customCategories,
     budgets: count(budgets),
+    recurringTemplates: count(recurringTemplates),
     settingsChanged,
   });
 }
 
 /** Local rows that carry a global identity, for reporting how much will upload. */
 export function countLocalSyncableRows(): number {
-  const tables = [accounts, budgets, categories, people, settings, transactions] as const;
+  const tables = [
+    accounts,
+    budgets,
+    categories,
+    people,
+    settings,
+    transactions,
+    recurringTemplates,
+    recurringOccurrences,
+  ] as const;
   return tables.reduce(
     (total, table) =>
       total +
@@ -103,6 +135,7 @@ export type CloudInventoryCounts = {
   people: number;
   customCategories: number;
   budgets: number;
+  recurringTemplates: number;
   settingsCurrency: string | null;
 };
 
@@ -120,6 +153,7 @@ export function summarizeCloudInventory(counts: CloudInventoryCounts): DataInven
     people: counts.people,
     customCategories: counts.customCategories,
     budgets: counts.budgets,
+    recurringTemplates: counts.recurringTemplates,
     settingsChanged:
       counts.settingsCurrency !== null && counts.settingsCurrency !== DEFAULT_CURRENCY,
   });
@@ -134,6 +168,7 @@ function summarize(counts: Omit<DataInventory, 'hasMeaningfulData'>): DataInvent
       counts.people > 0 ||
       counts.customCategories > 0 ||
       counts.budgets > 0 ||
+      counts.recurringTemplates > 0 ||
       counts.settingsChanged,
   };
 }

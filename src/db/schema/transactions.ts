@@ -1,11 +1,12 @@
 import { sql } from 'drizzle-orm';
-import { int, sqliteTable, text, check, index } from 'drizzle-orm/sqlite-core';
+import { int, sqliteTable, text, check, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 import { TRANSACTION_TYPES, type TransactionType, type PaymentMode } from '../constants';
 
 import { categories } from './categories';
 import { accounts } from './accounts';
 import { people } from './people';
+import { recurringOccurrences } from './recurring';
 
 const txTypeList = TRANSACTION_TYPES.map((v) => `'${v}'`).join(', ');
 
@@ -28,6 +29,17 @@ export const transactions = sqliteTable(
     updatedAt: int('updated_at', { mode: 'timestamp_ms' }).notNull(),
     syncId: text('sync_id'),
     deletedAt: int('deleted_at', { mode: 'timestamp_ms' }),
+    /**
+     * The recurring occurrence this transaction was generated for, or null for
+     * every transaction a person entered by hand.
+     *
+     * Provenance only. A generated transaction is an ordinary transaction in
+     * every calculation, and editing or deleting its template never touches it.
+     * The link lives here, on the child, rather than on the occurrence, so the
+     * two rows cannot disagree about each other and neither needs the other to
+     * exist first.
+     */
+    recurringOccurrenceId: int('recurring_occurrence_id').references(() => recurringOccurrences.id),
   },
   (t) => [
     check('valid_transaction_type', sql`\`type\` IN (${sql.raw(txTypeList)})`),
@@ -42,6 +54,9 @@ export const transactions = sqliteTable(
     index('idx_tx_source_account_id').on(t.sourceAccountId),
     index('idx_tx_destination_account_id').on(t.destinationAccountId),
     index('idx_tx_person_id').on(t.personId),
+    // One transaction per occurrence. SQLite lets any number of rows share a
+    // null here, which is every manually entered transaction.
+    uniqueIndex('uq_tx_recurring_occurrence').on(t.recurringOccurrenceId),
   ],
 );
 

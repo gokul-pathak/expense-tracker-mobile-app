@@ -96,7 +96,9 @@ function toLegacyEnvelope(backup: BackupEnvelope): LegacyBackupEnvelope {
       accounts: strip(backup.data.accounts),
       categories: strip(backup.data.categories),
       people: strip(backup.data.people),
-      transactions: strip(backup.data.transactions),
+      transactions: strip(backup.data.transactions).map(
+        ({ recurringOccurrenceId: _link, ...rest }) => rest,
+      ),
       settings: strip(backup.data.settings),
       appMetadata: backup.data.appMetadata,
     },

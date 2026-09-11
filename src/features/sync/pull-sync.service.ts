@@ -27,6 +27,8 @@ import {
   applyRemoteBudget,
   applyRemoteCategory,
   applyRemotePerson,
+  applyRemoteRecurringOccurrence,
+  applyRemoteRecurringTemplate,
   applyRemoteSettings,
   applyRemoteTombstone,
   applyRemoteTransaction,
@@ -432,6 +434,12 @@ function applyWrite(write: PlannedWrite, writer: SyncWriter): void {
       return;
     case 'transaction':
       applyRemoteTransaction(write.row, writer);
+      return;
+    case 'recurring_template':
+      applyRemoteRecurringTemplate(write.row, writer);
+      return;
+    case 'recurring_occurrence':
+      applyRemoteRecurringOccurrence(write.row, writer);
       return;
     case 'tombstone':
       applyRemoteTombstone(

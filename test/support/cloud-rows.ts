@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
-import type { AccountType, PaymentMode, TransactionType } from '@/db/constants';
+import type {
+  AccountType,
+  PaymentMode,
+  RecurringFrequency,
+  RecurringOccurrenceStatus,
+  TransactionType,
+} from '@/db/constants';
+import { deriveOccurrenceSyncId } from '@/features/recurring/recurring-identity';
 
 /**
  * Builders for rows another device would have written to the cloud.
@@ -126,6 +133,7 @@ export function cloudTransaction(
     transaction_date: number;
     title: string;
     note: string | null;
+    recurring_occurrence_sync_id: string | null;
   }> &
     Timestamps = {},
 ) {
@@ -143,6 +151,68 @@ export function cloudTransaction(
     transaction_date: overrides.transaction_date ?? new Date(2026, 0, 15).getTime(),
     title: overrides.title ?? 'Cloud lunch',
     note: overrides.note ?? null,
+    ...timestamps(overrides),
+    recurring_occurrence_sync_id: overrides.recurring_occurrence_sync_id ?? null,
+  };
+}
+
+export function cloudRecurringTemplate(
+  overrides: Partial<{
+    sync_id: string;
+    user_id: string;
+    type: 'expense' | 'income';
+    amount_minor: number | string;
+    currency: string;
+    category_sync_id: string;
+    account_sync_id: string;
+    payment_mode: PaymentMode | null;
+    title: string;
+    note: string | null;
+    start_date: string;
+    frequency: RecurringFrequency;
+    interval_count: number;
+    end_date: string | null;
+    is_paused: boolean;
+  }> &
+    Timestamps & { category_sync_id: string; account_sync_id: string },
+) {
+  return {
+    sync_id: overrides.sync_id ?? cloudSyncId(),
+    user_id: overrides.user_id ?? TEST_USER,
+    type: overrides.type ?? 'expense',
+    amount_minor: overrides.amount_minor ?? 2_000_000,
+    currency: overrides.currency ?? 'NPR',
+    category_sync_id: overrides.category_sync_id,
+    account_sync_id: overrides.account_sync_id,
+    payment_mode: overrides.payment_mode ?? null,
+    title: overrides.title ?? 'Rent',
+    note: overrides.note ?? null,
+    start_date: overrides.start_date ?? '2026-06-15',
+    frequency: overrides.frequency ?? 'monthly',
+    interval_count: overrides.interval_count ?? 1,
+    end_date: overrides.end_date ?? null,
+    is_paused: overrides.is_paused ?? false,
+    ...timestamps(overrides),
+  };
+}
+
+/** Its identity is derived from the template and date, as every device derives it. */
+export function cloudRecurringOccurrence(
+  overrides: Partial<{
+    sync_id: string;
+    user_id: string;
+    status: RecurringOccurrenceStatus;
+  }> &
+    Timestamps & { template_sync_id: string; occurrence_date: string },
+) {
+  return {
+    sync_id:
+      overrides.sync_id ??
+      deriveOccurrenceSyncId(overrides.template_sync_id, overrides.occurrence_date),
+    user_id: overrides.user_id ?? TEST_USER,
+    template_sync_id: overrides.template_sync_id,
+    occurrence_date: overrides.occurrence_date,
+    status: overrides.status ?? 'generated',
     ...timestamps(overrides),
   };
 }

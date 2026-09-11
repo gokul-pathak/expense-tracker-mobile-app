@@ -3,6 +3,8 @@ import type {
   PulledBudgetRow,
   PulledCategoryRow,
   PulledPersonRow,
+  PulledRecurringOccurrenceRow,
+  PulledRecurringTemplateRow,
   PulledSettingsRow,
   PulledTransactionRow,
 } from '../remote/remote-pull-rows';
@@ -11,6 +13,8 @@ import type {
   RemoteBudget,
   RemoteCategory,
   RemotePerson,
+  RemoteRecurringOccurrence,
+  RemoteRecurringTemplate,
   RemoteSettings,
   RemoteTransaction,
 } from '../remote-apply.repository';
@@ -115,6 +119,46 @@ export function mapPulledTransactionToLocal(row: PulledTransactionRow): RemoteTr
     transactionDate: new Date(row.transaction_date),
     title: row.title,
     note: row.note,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+    deletedAt: toNullableDate(row.deleted_at),
+    recurringOccurrenceSyncId: row.recurring_occurrence_sync_id,
+  };
+}
+
+/** A plan with its schedule. What is due is derived here, from this device's occurrences. */
+export function mapPulledRecurringTemplateToLocal(
+  row: PulledRecurringTemplateRow,
+): RemoteRecurringTemplate {
+  return {
+    syncId: row.sync_id,
+    type: row.type,
+    amountMinor: row.amount_minor,
+    currency: row.currency,
+    categorySyncId: row.category_sync_id,
+    accountSyncId: row.account_sync_id,
+    paymentMode: row.payment_mode,
+    title: row.title,
+    note: row.note,
+    startDate: row.start_date,
+    frequency: row.frequency,
+    interval: row.interval_count,
+    endDate: row.end_date,
+    isPaused: row.is_paused,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+    deletedAt: toNullableDate(row.deleted_at),
+  };
+}
+
+export function mapPulledRecurringOccurrenceToLocal(
+  row: PulledRecurringOccurrenceRow,
+): RemoteRecurringOccurrence {
+  return {
+    syncId: row.sync_id,
+    templateSyncId: row.template_sync_id,
+    occurrenceDate: row.occurrence_date,
+    status: row.status,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
     deletedAt: toNullableDate(row.deleted_at),

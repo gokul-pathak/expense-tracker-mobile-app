@@ -5,6 +5,8 @@ import {
   mapPulledBudgetToLocal,
   mapPulledCategoryToLocal,
   mapPulledPersonToLocal,
+  mapPulledRecurringOccurrenceToLocal,
+  mapPulledRecurringTemplateToLocal,
   mapPulledSettingsToLocal,
   mapPulledTransactionToLocal,
 } from './mapping/remote-to-local';
@@ -15,6 +17,8 @@ import {
   type PulledBudgetRow,
   type PulledCategoryRow,
   type PulledPersonRow,
+  type PulledRecurringOccurrenceRow,
+  type PulledRecurringTemplateRow,
   type PulledRow,
   type PulledSettingsRow,
   type PulledTransactionRow,
@@ -25,6 +29,8 @@ import type {
   RemoteBudget,
   RemoteCategory,
   RemotePerson,
+  RemoteRecurringOccurrence,
+  RemoteRecurringTemplate,
   RemoteSettings,
   RemoteTransaction,
 } from './remote-apply.repository';
@@ -32,6 +38,8 @@ import {
   findDebtViolation,
   isDebtType,
   validateRemoteBudget,
+  validateRemoteRecurringOccurrence,
+  validateRemoteRecurringTemplate,
   validateRemoteTransaction,
   type DebtContribution,
   type DebtType,
@@ -96,6 +104,8 @@ export type PlannedWrite =
   | { write: 'person'; row: RemotePerson }
   | { write: 'settings'; row: RemoteSettings }
   | { write: 'transaction'; row: RemoteTransaction }
+  | { write: 'recurring_template'; row: RemoteRecurringTemplate }
+  | { write: 'recurring_occurrence'; row: RemoteRecurringOccurrence }
   | { write: 'tombstone'; entityType: SyncEntityType; syncId: string; deletedAt: Date }
   | { write: 'rebind-category'; systemKey: string; syncId: string }
   | { write: 'rebind-settings'; syncId: string };
@@ -298,6 +308,8 @@ function readLocalContext(decoded: Map<string, DecodedEntry>): LocalContext {
   const referencedAccounts: string[] = [];
   const referencedCategories: string[] = [];
   const referencedPeople: string[] = [];
+  const referencedTemplates: string[] = [];
+  const referencedOccurrences: string[] = [];
   for (const row of transactionRows) {
     if (row.source_account_sync_id !== null) referencedAccounts.push(row.source_account_sync_id);
     if (row.destination_account_sync_id !== null) {
@@ -305,6 +317,22 @@ function readLocalContext(decoded: Map<string, DecodedEntry>): LocalContext {
     }
     if (row.category_sync_id !== null) referencedCategories.push(row.category_sync_id);
     if (row.person_sync_id !== null) referencedPeople.push(row.person_sync_id);
+    if (row.recurring_occurrence_sync_id !== null) {
+      referencedOccurrences.push(row.recurring_occurrence_sync_id);
+    }
+  }
+
+  // A template names an account and a category, and an occurrence names its
+  // template. Each may already exist locally or be arriving in this batch.
+  for (const entry of decoded.values()) {
+    if (entry.change.entityType === 'recurring_template') {
+      const row = entry.row as PulledRecurringTemplateRow;
+      referencedAccounts.push(row.account_sync_id);
+      referencedCategories.push(row.category_sync_id);
+    }
+    if (entry.change.entityType === 'recurring_occurrence') {
+      referencedTemplates.push((entry.row as PulledRecurringOccurrenceRow).template_sync_id);
+    }
   }
 
   // A budget names a category too, and must be able to resolve one that already
@@ -319,7 +347,25 @@ function readLocalContext(decoded: Map<string, DecodedEntry>): LocalContext {
     accounts: new Map(),
     categoryTypes: new Map(),
     people: new Set(),
+    recurringTemplates: new Set(
+      readLocalRowsBySyncIds('recurring_template', referencedTemplates).keys(),
+    ),
+    recurringOccurrences: new Set(
+      readLocalRowsBySyncIds('recurring_occurrence', referencedOccurrences).keys(),
+    ),
   };
+
+  // Recurring parents arriving in the batch count whether or not they are
+  // deleted: a deleted template is still written locally, because what it
+  // produced still points at it.
+  for (const entry of decoded.values()) {
+    if (entry.change.entityType === 'recurring_template') {
+      relations.recurringTemplates.add(entry.row.sync_id);
+    }
+    if (entry.change.entityType === 'recurring_occurrence') {
+      relations.recurringOccurrences.add(entry.row.sync_id);
+    }
+  }
 
   // Local parents first, so a parent that only exists locally still resolves.
   for (const [syncId, row] of readAccountCurrenciesBySyncId(referencedAccounts)) {
@@ -407,6 +453,27 @@ function decide(entry: DecodedEntry, context: LocalContext): Decision {
     }
   }
 
+  if (entityType === 'recurring_template') {
+    const problem = validateRemoteRecurringTemplate(
+      row as PulledRecurringTemplateRow,
+      context.relations,
+      remoteDeleted,
+    );
+    if (problem !== undefined) {
+      return { ok: false, failure: failureFor(change, problem.code, problem.detail) };
+    }
+  }
+
+  if (entityType === 'recurring_occurrence') {
+    const problem = validateRemoteRecurringOccurrence(
+      row as PulledRecurringOccurrenceRow,
+      context.relations,
+    );
+    if (problem !== undefined) {
+      return { ok: false, failure: failureFor(change, problem.code, problem.detail) };
+    }
+  }
+
   const rebind = findIdentityRebind(entityType, row, context);
   const pendingByType = context.pending.get(entityType);
   const pendingEntry =
@@ -476,6 +543,21 @@ function decide(entry: DecodedEntry, context: LocalContext): Decision {
     return { ok: true, item };
   }
 
+  // Generated wins over skipped. This device skipped a date another device has
+  // already generated: the other device's transaction is real, and a skip that
+  // has not even been uploaded yet does not get to erase the record of it. The
+  // cloud enforces the same rule, so the skip would lose there anyway; applying
+  // it here converges in this pull rather than one push and one pull later.
+  if (
+    entityType === 'recurring_occurrence' &&
+    generatedBeatsLocalSkip(row as PulledRecurringOccurrenceRow)
+  ) {
+    applyRemoteWinner(item, row, false, localRowExists);
+    item.outbox.push({ op: 'remove', id: pendingEntry.id, revision: pendingEntry.revision });
+    item.conflict = conflictOf(item, pendingEntry.operation, base, 'remote_wins', 'generated_wins');
+    return { ok: true, item };
+  }
+
   // Two ordinary edits. Under deterministic server-order last-write-wins the
   // local change has not reached the server yet, so it resolves later and wins.
   // Its queue entry stays; only its base moves, so the same remote revision is
@@ -500,6 +582,14 @@ function applyRemoteWinner(
   if (remoteDeleted) {
     item.counts.deleted += 1;
     if (!localRowExists) {
+      // A deleted template or occurrence is still written, as a tombstone: the
+      // transactions it produced are kept, and they need it to exist locally.
+      // A template created, used and deleted while this device was away arrives
+      // already deleted, and without this its occurrences could never apply.
+      if (MATERIALIZED_TOMBSTONES.has(item.entityType)) {
+        item.writes.push(domainWrite(item.entityType, row));
+        return;
+      }
       // Nothing to hide locally. The baseline still records the deletion, so no
       // later reconciliation can resurrect the record.
       return;
@@ -534,7 +624,30 @@ function domainWrite(entityType: SyncEntityType, row: PulledRow): PlannedWrite {
         write: 'transaction',
         row: mapPulledTransactionToLocal(row as PulledTransactionRow),
       };
+    case 'recurring_template':
+      return {
+        write: 'recurring_template',
+        row: mapPulledRecurringTemplateToLocal(row as PulledRecurringTemplateRow),
+      };
+    case 'recurring_occurrence':
+      return {
+        write: 'recurring_occurrence',
+        row: mapPulledRecurringOccurrenceToLocal(row as PulledRecurringOccurrenceRow),
+      };
   }
+}
+
+/** Entity types written even when they arrive already deleted. See `applyRemoteWinner`. */
+const MATERIALIZED_TOMBSTONES: ReadonlySet<SyncEntityType> = new Set([
+  'recurring_template',
+  'recurring_occurrence',
+]);
+
+/** A remote `generated` over a local, not yet uploaded, `skipped`. */
+function generatedBeatsLocalSkip(row: PulledRecurringOccurrenceRow): boolean {
+  if (row.status !== 'generated' || row.deleted_at !== null) return false;
+  const local = readLocalEntity('recurring_occurrence', row.sync_id);
+  return local?.entityType === 'recurring_occurrence' && local.row.status === 'skipped';
 }
 
 type IdentityRebind = { previousSyncId: string; systemKey?: string };
@@ -689,7 +802,38 @@ function remoteEqualsLocal(entityType: SyncEntityType, row: PulledRow): boolean 
         local.row.sourceAccountId === relations.sourceAccountId &&
         local.row.destinationAccountId === relations.destinationAccountId &&
         local.row.personId === relations.personId &&
+        local.row.recurringOccurrenceId === relations.recurringOccurrenceId &&
         sameInstant(local.row.transactionDate, remote.transaction_date) &&
+        sameInstant(local.row.updatedAt, remote.updated_at) &&
+        sameNullableInstant(local.row.deletedAt, remote.deleted_at)
+      );
+    }
+    case 'recurring_template': {
+      const remote = row as PulledRecurringTemplateRow;
+      return (
+        local.row.type === remote.type &&
+        local.row.amountMinor === remote.amount_minor &&
+        local.row.currency === remote.currency &&
+        local.row.categoryId === localIdOf('category', remote.category_sync_id) &&
+        local.row.accountId === localIdOf('account', remote.account_sync_id) &&
+        local.row.paymentMode === remote.payment_mode &&
+        local.row.title === remote.title &&
+        local.row.note === remote.note &&
+        local.row.startDate === remote.start_date &&
+        local.row.frequency === remote.frequency &&
+        local.row.interval === remote.interval_count &&
+        local.row.endDate === remote.end_date &&
+        local.row.isPaused === remote.is_paused &&
+        sameInstant(local.row.updatedAt, remote.updated_at) &&
+        sameNullableInstant(local.row.deletedAt, remote.deleted_at)
+      );
+    }
+    case 'recurring_occurrence': {
+      const remote = row as PulledRecurringOccurrenceRow;
+      return (
+        local.row.templateId === localIdOf('recurring_template', remote.template_sync_id) &&
+        local.row.occurrenceDate === remote.occurrence_date &&
+        local.row.status === remote.status &&
         sameInstant(local.row.updatedAt, remote.updated_at) &&
         sameNullableInstant(local.row.deletedAt, remote.deleted_at)
       );
@@ -697,16 +841,18 @@ function remoteEqualsLocal(entityType: SyncEntityType, row: PulledRow): boolean 
   }
 }
 
+function localIdOf(entityType: SyncEntityType, syncId: string | null): number | null {
+  if (syncId === null) return null;
+  return readLocalRowsBySyncIds(entityType, [syncId]).get(syncId)?.id ?? null;
+}
+
 function resolveLocalRelations(row: PulledTransactionRow) {
-  const localIdOf = (entityType: SyncEntityType, syncId: string | null): number | null => {
-    if (syncId === null) return null;
-    return readLocalRowsBySyncIds(entityType, [syncId]).get(syncId)?.id ?? null;
-  };
   return {
     categoryId: localIdOf('category', row.category_sync_id),
     sourceAccountId: localIdOf('account', row.source_account_sync_id),
     destinationAccountId: localIdOf('account', row.destination_account_sync_id),
     personId: localIdOf('person', row.person_sync_id),
+    recurringOccurrenceId: localIdOf('recurring_occurrence', row.recurring_occurrence_sync_id),
   };
 }
 
@@ -776,6 +922,12 @@ function validateDebtInvariants(
  * Parents before children, and children's tombstones before their parents'. A
  * transaction never reaches SQLite before the account, category or person it
  * points at, and a parent is never hidden while a live child still needs it.
+ *
+ * Recurring rows sit between their parents and the transactions that point at
+ * them — template, then occurrence, then transaction — and their tombstones share
+ * the row phase. A recurring tombstone may be the row itself, written because a
+ * child needs it (see `MATERIALIZED_TOMBSTONES`), and hiding a template never
+ * invalidates the transactions it produced.
  */
 const PHASE_ORDER: Record<string, number> = {
   'settings:row': 0,
@@ -783,13 +935,17 @@ const PHASE_ORDER: Record<string, number> = {
   'category:row': 1,
   'person:row': 1,
   'budget:row': 2,
-  'transaction:row': 2,
-  'budget:tombstone': 3,
-  'transaction:tombstone': 3,
-  'settings:tombstone': 4,
-  'account:tombstone': 4,
-  'category:tombstone': 4,
-  'person:tombstone': 4,
+  'recurring_template:row': 2,
+  'recurring_template:tombstone': 2,
+  'recurring_occurrence:row': 3,
+  'recurring_occurrence:tombstone': 3,
+  'transaction:row': 4,
+  'budget:tombstone': 5,
+  'transaction:tombstone': 5,
+  'settings:tombstone': 6,
+  'account:tombstone': 6,
+  'category:tombstone': 6,
+  'person:tombstone': 6,
 };
 
 function orderByDependency(items: PlannedItem[]): PlannedItem[] {

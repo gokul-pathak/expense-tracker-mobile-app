@@ -1,8 +1,25 @@
 import { eq } from 'drizzle-orm';
 
 import { db } from '@/db';
-import type { AccountType, CategoryType, PaymentMode, TransactionType } from '@/db/constants';
-import { accounts, budgets, categories, people, settings, transactions } from '@/db/schema';
+import type {
+  AccountType,
+  CategoryType,
+  PaymentMode,
+  RecurringFrequency,
+  RecurringOccurrenceStatus,
+  RecurringTransactionType,
+  TransactionType,
+} from '@/db/constants';
+import {
+  accounts,
+  budgets,
+  categories,
+  people,
+  recurringOccurrences,
+  recurringTemplates,
+  settings,
+  transactions,
+} from '@/db/schema';
 import type { SyncEntityType } from '@/db/schema';
 
 import type { SyncWriter } from './sync.types';
@@ -95,6 +112,39 @@ export type RemoteTransaction = {
   createdAt: Date;
   updatedAt: Date;
   deletedAt?: Date | null;
+  /** The occurrence a generated transaction came from. Absent or null for every other. */
+  recurringOccurrenceSyncId?: string | null;
+};
+
+/** A template references its account and category by global sync ID. */
+export type RemoteRecurringTemplate = {
+  syncId: string;
+  type: RecurringTransactionType;
+  amountMinor: number;
+  currency: string;
+  categorySyncId: string;
+  accountSyncId: string;
+  paymentMode: PaymentMode | null;
+  title: string;
+  note: string | null;
+  startDate: string;
+  frequency: RecurringFrequency;
+  interval: number;
+  endDate: string | null;
+  isPaused: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt?: Date | null;
+};
+
+export type RemoteRecurringOccurrence = {
+  syncId: string;
+  templateSyncId: string;
+  occurrenceDate: string;
+  status: RecurringOccurrenceStatus;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt?: Date | null;
 };
 
 export type RemoteTombstone = {
@@ -109,6 +159,8 @@ export type RemoteChangeBatch = {
   categories?: RemoteCategory[];
   people?: RemotePerson[];
   budgets?: RemoteBudget[];
+  recurringTemplates?: RemoteRecurringTemplate[];
+  recurringOccurrences?: RemoteRecurringOccurrence[];
   transactions?: RemoteTransaction[];
   tombstones?: RemoteTombstone[];
 };
@@ -119,6 +171,9 @@ export type RemoteDataset = {
   categories: RemoteCategory[];
   people: RemotePerson[];
   budgets: RemoteBudget[];
+  /** Absent in a dataset that predates recurring transactions, which then has none. */
+  recurringTemplates?: RemoteRecurringTemplate[];
+  recurringOccurrences?: RemoteRecurringOccurrence[];
   transactions: RemoteTransaction[];
 };
 
@@ -142,6 +197,8 @@ export function replaceLocalDataFromRemote(
     // Children first: foreign keys are enforced, so a parent cannot go before
     // the rows that reference it.
     tx.delete(transactions).run();
+    tx.delete(recurringOccurrences).run();
+    tx.delete(recurringTemplates).run();
     tx.delete(budgets).run();
     tx.delete(people).run();
     tx.delete(categories).run();
@@ -153,6 +210,8 @@ export function replaceLocalDataFromRemote(
     for (const row of dataset.categories) applyRemoteCategory(row, tx);
     for (const row of dataset.people) applyRemotePerson(row, tx);
     for (const row of dataset.budgets) applyRemoteBudget(row, tx);
+    for (const row of dataset.recurringTemplates ?? []) applyRemoteRecurringTemplate(row, tx);
+    for (const row of dataset.recurringOccurrences ?? []) applyRemoteRecurringOccurrence(row, tx);
     for (const row of dataset.transactions) applyRemoteTransaction(row, tx);
 
     finalize?.(tx);
@@ -167,6 +226,8 @@ export function applyRemoteChanges(batch: RemoteChangeBatch) {
     for (const row of batch.categories ?? []) applyRemoteCategory(row, tx);
     for (const row of batch.people ?? []) applyRemotePerson(row, tx);
     for (const row of batch.budgets ?? []) applyRemoteBudget(row, tx);
+    for (const row of batch.recurringTemplates ?? []) applyRemoteRecurringTemplate(row, tx);
+    for (const row of batch.recurringOccurrences ?? []) applyRemoteRecurringOccurrence(row, tx);
     for (const row of batch.transactions ?? []) applyRemoteTransaction(row, tx);
     for (const row of batch.tombstones ?? []) applyRemoteTombstone(row, tx);
   });
@@ -333,11 +394,90 @@ export function applyRemoteTransaction(row: RemoteTransaction, writer: SyncWrite
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt ?? null,
+    recurringOccurrenceId: resolveLocalId(
+      writer,
+      'recurring_occurrence',
+      row.recurringOccurrenceSyncId ?? null,
+    ),
   };
   writer
     .insert(transactions)
     .values({ ...values, syncId })
     .onConflictDoUpdate({ target: transactions.syncId, set: values })
+    .run();
+}
+
+/**
+ * A downloaded template. Nothing derived is written: which of its dates are due
+ * is this device's own calculation over the schedule and its occurrences.
+ */
+export function applyRemoteRecurringTemplate(
+  row: RemoteRecurringTemplate,
+  writer: SyncWriter = db,
+) {
+  const syncId = requireSyncId(row.syncId, 'remote recurring template');
+  const values = {
+    type: row.type,
+    amountMinor: row.amountMinor,
+    currency: row.currency,
+    categoryId: requireLocalId(writer, 'category', row.categorySyncId),
+    accountId: requireLocalId(writer, 'account', row.accountSyncId),
+    paymentMode: row.paymentMode,
+    title: row.title,
+    note: row.note,
+    startDate: row.startDate,
+    frequency: row.frequency,
+    interval: row.interval,
+    endDate: row.endDate,
+    isPaused: row.isPaused,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    deletedAt: row.deletedAt ?? null,
+  };
+  writer
+    .insert(recurringTemplates)
+    .values({ ...values, syncId })
+    .onConflictDoUpdate({ target: recurringTemplates.syncId, set: values })
+    .run();
+}
+
+/**
+ * A downloaded decision about one date.
+ *
+ * Generated wins over skipped, here as in the cloud: a date this device already
+ * generated is never turned back into a skipped one by a download, because the
+ * transaction it produced is real and a skip cannot un-happen it. The cloud's
+ * trigger holds the same rule, so the two sides cannot end up disagreeing.
+ */
+export function applyRemoteRecurringOccurrence(
+  row: RemoteRecurringOccurrence,
+  writer: SyncWriter = db,
+) {
+  const syncId = requireSyncId(row.syncId, 'remote recurring occurrence');
+  const local = writer
+    .select({ status: recurringOccurrences.status, deletedAt: recurringOccurrences.deletedAt })
+    .from(recurringOccurrences)
+    .where(eq(recurringOccurrences.syncId, syncId))
+    .get();
+  const keepGenerated =
+    local !== undefined &&
+    local.deletedAt === null &&
+    local.status === 'generated' &&
+    row.status !== 'generated' &&
+    (row.deletedAt ?? null) === null;
+
+  const values = {
+    templateId: requireLocalId(writer, 'recurring_template', row.templateSyncId),
+    occurrenceDate: row.occurrenceDate,
+    status: keepGenerated ? ('generated' as const) : row.status,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    deletedAt: row.deletedAt ?? null,
+  };
+  writer
+    .insert(recurringOccurrences)
+    .values({ ...values, syncId })
+    .onConflictDoUpdate({ target: recurringOccurrences.syncId, set: values })
     .run();
 }
 
@@ -364,17 +504,46 @@ export function applyRemoteTombstone(tombstone: RemoteTombstone, writer: SyncWri
     case 'settings':
       writer.update(settings).set({ deletedAt }).where(eq(settings.syncId, syncId)).run();
       return;
+    case 'recurring_template':
+      writer
+        .update(recurringTemplates)
+        .set({ deletedAt })
+        .where(eq(recurringTemplates.syncId, syncId))
+        .run();
+      return;
+    case 'recurring_occurrence':
+      writer
+        .update(recurringOccurrences)
+        .set({ deletedAt })
+        .where(eq(recurringOccurrences.syncId, syncId))
+        .run();
+      return;
   }
+}
+
+type RelationTable =
+  'account' | 'category' | 'person' | 'recurring_template' | 'recurring_occurrence';
+
+const RELATION_TABLES = {
+  account: accounts,
+  category: categories,
+  person: people,
+  recurring_template: recurringTemplates,
+  recurring_occurrence: recurringOccurrences,
+} as const;
+
+/** A relation the row cannot exist without; `resolveLocalId` throws when it is unknown. */
+function requireLocalId(writer: SyncWriter, entityType: RelationTable, syncId: string): number {
+  return resolveLocalId(writer, entityType, syncId)!;
 }
 
 function resolveLocalId(
   writer: SyncWriter,
-  entityType: 'account' | 'category' | 'person',
+  entityType: RelationTable,
   syncId: string | null,
 ): number | null {
   if (syncId === null) return null;
-  const table =
-    entityType === 'account' ? accounts : entityType === 'category' ? categories : people;
+  const table = RELATION_TABLES[entityType];
   const row = writer.select({ id: table.id }).from(table).where(eq(table.syncId, syncId)).get();
   if (row === undefined) {
     // Writing a null foreign key instead would silently change what the record

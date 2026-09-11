@@ -6,6 +6,8 @@ import {
   mapLocalBudgetToRemote,
   mapLocalCategoryToRemote,
   mapLocalPersonToRemote,
+  mapLocalRecurringOccurrenceToRemote,
+  mapLocalRecurringTemplateToRemote,
   mapLocalSettingsToRemote,
   mapLocalTransactionToRemote,
   type MappingContext,
@@ -41,7 +43,9 @@ export const CLOUD_IDENTITY_PAGE_SIZE = 500;
 
 /**
  * Parents before children: a cloud transaction has foreign keys to its account,
- * category and person, and a cloud budget has one to its category.
+ * category and person, and a cloud budget has one to its category. A recurring
+ * template names an account and a category, its occurrences name it, and a
+ * generated transaction names its occurrence.
  */
 const UPLOAD_ORDER: readonly SyncEntityType[] = [
   'settings',
@@ -49,12 +53,16 @@ const UPLOAD_ORDER: readonly SyncEntityType[] = [
   'category',
   'person',
   'budget',
+  'recurring_template',
+  'recurring_occurrence',
   'transaction',
 ];
 
 /** Children before parents, so an obsolete parent is never hidden first. */
 const TOMBSTONE_ORDER: readonly SyncEntityType[] = [
   'transaction',
+  'recurring_occurrence',
+  'recurring_template',
   'budget',
   'account',
   'category',
@@ -196,6 +204,8 @@ function localIdentitiesOf(snapshot: LocalSnapshot): Record<SyncEntityType, Set<
     person: identities(snapshot.people),
     settings: identities(snapshot.settings),
     transaction: identities(snapshot.transactions),
+    recurring_template: identities(snapshot.recurringTemplates),
+    recurring_occurrence: identities(snapshot.recurringOccurrences),
   };
 }
 
@@ -221,6 +231,14 @@ function mapEntity(
         return snapshot.transactions.map((row) =>
           mapLocalTransactionToRemote(row, context, resolver),
         );
+      case 'recurring_template':
+        return snapshot.recurringTemplates.map((row) =>
+          mapLocalRecurringTemplateToRemote(row, context, resolver),
+        );
+      case 'recurring_occurrence':
+        return snapshot.recurringOccurrences.map((row) =>
+          mapLocalRecurringOccurrenceToRemote(row, context, resolver),
+        );
     }
   })();
 
@@ -245,10 +263,14 @@ function buildResolver(snapshot: LocalSnapshot): RelationResolver {
   const accounts = index(snapshot.accounts);
   const categories = index(snapshot.categories);
   const people = index(snapshot.people);
+  const templates = index(snapshot.recurringTemplates);
+  const occurrences = index(snapshot.recurringOccurrences);
   return {
     account: (localId) => accounts.get(localId),
     category: (localId) => categories.get(localId),
     person: (localId) => people.get(localId),
+    recurringTemplate: (localId) => templates.get(localId),
+    recurringOccurrence: (localId) => occurrences.get(localId),
   };
 }
 

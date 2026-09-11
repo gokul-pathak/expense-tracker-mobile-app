@@ -7,6 +7,8 @@ import {
   mapLocalBudgetToRemote,
   mapLocalCategoryToRemote,
   mapLocalPersonToRemote,
+  mapLocalRecurringOccurrenceToRemote,
+  mapLocalRecurringTemplateToRemote,
   mapLocalSettingsToRemote,
   mapLocalTransactionToRemote,
   type MappingContext,
@@ -38,6 +40,8 @@ import {
 import {
   readLocalBudget,
   readLocalEntity,
+  readLocalRecurringOccurrence,
+  readLocalRecurringTemplate,
   readLocalTransaction,
   readSyncIdsByLocalId,
 } from './sync-source.repository';
@@ -70,12 +74,25 @@ export const PUSH_MAX_OPERATIONS_PER_RUN = 500;
  * category and person rows, and a cloud budget has one to its category, so those
  * must exist remotely first. Parent tombstones run last so a deletion never
  * precedes the child rows that reference it.
+ *
+ * Recurring data forms a chain: a template names an account and a category, an
+ * occurrence names its template, and a generated transaction names its
+ * occurrence. Each link gets its own phase, in that order.
+ *
+ * A template's tombstone goes up with its upserts rather than at the end. A
+ * deletion is uploaded as the row carrying `deleted_at`, and for a template
+ * created, used and deleted between two pushes, that tombstone is the only
+ * upload that will ever tell the cloud the template existed — which its
+ * occurrences' foreign keys need before they can be accepted. Holding it back
+ * would fail the occurrence phase on every run.
  */
 const PUSH_PHASES: readonly {
   entityTypes: readonly SyncEntityType[];
   operations: readonly SyncOperation[];
 }[] = [
   { entityTypes: ['settings', 'account', 'category', 'person'], operations: ['upsert'] },
+  { entityTypes: ['recurring_template'], operations: ['upsert', 'delete'] },
+  { entityTypes: ['recurring_occurrence'], operations: ['upsert', 'delete'] },
   { entityTypes: ['budget', 'transaction'], operations: ['upsert', 'delete'] },
   { entityTypes: ['settings', 'account', 'category', 'person'], operations: ['delete'] },
 ];
@@ -316,6 +333,12 @@ function prepareRow(
       case 'transaction':
         mapped = mapLocalTransactionToRemote(local.row, context, resolver);
         break;
+      case 'recurring_template':
+        mapped = mapLocalRecurringTemplateToRemote(local.row, context, resolver);
+        break;
+      case 'recurring_occurrence':
+        mapped = mapLocalRecurringOccurrenceToRemote(local.row, context, resolver);
+        break;
     }
   } catch (error) {
     return { ok: false, detail: error instanceof MappingError ? 'unresolved_relation' : 'mapping' };
@@ -332,6 +355,8 @@ function buildRelationResolver(
 ): RelationResolver {
   if (entityType === 'transaction') return transactionResolver(entries);
   if (entityType === 'budget') return budgetResolver(entries);
+  if (entityType === 'recurring_template') return recurringTemplateResolver(entries);
+  if (entityType === 'recurring_occurrence') return recurringOccurrenceResolver(entries);
   return emptyResolver();
 }
 
@@ -352,11 +377,52 @@ function transactionResolver(entries: SyncOutboxEntry[]): RelationResolver {
     'person',
     rows.map((row) => row.personId).filter((id) => id !== null),
   );
+  const occurrences = readSyncIdsByLocalId(
+    'recurring_occurrence',
+    rows.map((row) => row.recurringOccurrenceId).filter((id) => id !== null),
+  );
 
   return {
+    ...emptyResolver(),
     account: (localId) => accounts.get(localId),
     category: (localId) => categories.get(localId),
     person: (localId) => people.get(localId),
+    recurringOccurrence: (localId) => occurrences.get(localId),
+  };
+}
+
+/** A template names its account and category. */
+function recurringTemplateResolver(entries: SyncOutboxEntry[]): RelationResolver {
+  const rows = entries
+    .map((entry) => readLocalRecurringTemplate(entry.entitySyncId))
+    .filter((row) => row !== null);
+  const accounts = readSyncIdsByLocalId(
+    'account',
+    rows.map((row) => row.accountId),
+  );
+  const categories = readSyncIdsByLocalId(
+    'category',
+    rows.map((row) => row.categoryId),
+  );
+  return {
+    ...emptyResolver(),
+    account: (localId) => accounts.get(localId),
+    category: (localId) => categories.get(localId),
+  };
+}
+
+/** An occurrence names only its template. */
+function recurringOccurrenceResolver(entries: SyncOutboxEntry[]): RelationResolver {
+  const rows = entries
+    .map((entry) => readLocalRecurringOccurrence(entry.entitySyncId))
+    .filter((row) => row !== null);
+  const templates = readSyncIdsByLocalId(
+    'recurring_template',
+    rows.map((row) => row.templateId),
+  );
+  return {
+    ...emptyResolver(),
+    recurringTemplate: (localId) => templates.get(localId),
   };
 }
 
@@ -377,7 +443,13 @@ function budgetResolver(entries: SyncOutboxEntry[]): RelationResolver {
 
 function emptyResolver(): RelationResolver {
   const none = () => undefined;
-  return { account: none, category: none, person: none };
+  return {
+    account: none,
+    category: none,
+    person: none,
+    recurringTemplate: none,
+    recurringOccurrence: none,
+  };
 }
 
 function toRemoteError(error: unknown): PushRemoteError {

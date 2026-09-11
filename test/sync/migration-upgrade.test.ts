@@ -47,6 +47,7 @@ const MILESTONES = [
   ['M7D, push', '20260907180000_push_sync'],
   ['M7E, pull', '20260907210000_pull_sync'],
   ['M7F, cloud link', '20260908090000_cloud_link'],
+  ['M8A/M8B, budgets', '20260909120000_budgets'],
 ] as const;
 
 function insertLegacyAccount(name: string, withSyncId: boolean) {

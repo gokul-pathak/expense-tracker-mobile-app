@@ -2,12 +2,22 @@ import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 
 import { db } from '@/db';
 import type { TransactionType } from '@/db/constants';
-import { accounts, budgets, categories, people, settings, transactions } from '@/db/schema';
+import {
+  accounts,
+  budgets,
+  categories,
+  people,
+  recurringOccurrences,
+  recurringTemplates,
+  settings,
+  transactions,
+} from '@/db/schema';
 import type { SyncEntityType } from '@/db/schema';
 import type { Account } from '@/db/schema/accounts';
 import type { Budget } from '@/db/schema/budgets';
 import type { Category } from '@/db/schema/categories';
 import type { Person } from '@/db/schema/people';
+import type { RecurringOccurrence, RecurringTemplate } from '@/db/schema/recurring';
 import type { Setting } from '@/db/schema/settings';
 import type { Transaction } from '@/db/schema/transactions';
 
@@ -26,9 +36,12 @@ export type LocalSyncEntity =
   | { entityType: 'category'; row: Category }
   | { entityType: 'person'; row: Person }
   | { entityType: 'settings'; row: Setting }
-  | { entityType: 'transaction'; row: Transaction };
+  | { entityType: 'transaction'; row: Transaction }
+  | { entityType: 'recurring_template'; row: RecurringTemplate }
+  | { entityType: 'recurring_occurrence'; row: RecurringOccurrence };
 
-export type RelationEntityType = 'account' | 'category' | 'person';
+export type RelationEntityType =
+  'account' | 'category' | 'person' | 'recurring_template' | 'recurring_occurrence';
 
 export function readLocalEntity(
   entityType: SyncEntityType,
@@ -59,6 +72,22 @@ export function readLocalEntity(
       const row = db.select().from(transactions).where(eq(transactions.syncId, syncId)).get();
       return row === undefined ? null : { entityType, row };
     }
+    case 'recurring_template': {
+      const row = db
+        .select()
+        .from(recurringTemplates)
+        .where(eq(recurringTemplates.syncId, syncId))
+        .get();
+      return row === undefined ? null : { entityType, row };
+    }
+    case 'recurring_occurrence': {
+      const row = db
+        .select()
+        .from(recurringOccurrences)
+        .where(eq(recurringOccurrences.syncId, syncId))
+        .get();
+      return row === undefined ? null : { entityType, row };
+    }
   }
 }
 
@@ -69,6 +98,8 @@ const TABLES = {
   person: people,
   settings,
   transaction: transactions,
+  recurring_template: recurringTemplates,
+  recurring_occurrence: recurringOccurrences,
 } as const;
 
 /**
@@ -209,6 +240,8 @@ export type LocalSnapshot = {
   people: Person[];
   settings: Setting[];
   transactions: Transaction[];
+  recurringTemplates: RecurringTemplate[];
+  recurringOccurrences: RecurringOccurrence[];
 };
 
 /**
@@ -226,6 +259,8 @@ export function readLocalSnapshot(): LocalSnapshot {
     people: tx.select().from(people).all(),
     settings: tx.select().from(settings).all(),
     transactions: tx.select().from(transactions).all(),
+    recurringTemplates: tx.select().from(recurringTemplates).all(),
+    recurringOccurrences: tx.select().from(recurringOccurrences).all(),
   }));
 }
 
@@ -237,6 +272,21 @@ export function readLocalTransaction(syncId: string): Transaction | null {
 /** The same, for a budget. Tombstoned rows included: a deletion still uploads. */
 export function readLocalBudget(syncId: string): Budget | null {
   return db.select().from(budgets).where(eq(budgets.syncId, syncId)).get() ?? null;
+}
+
+/** The same, for a recurring template. */
+export function readLocalRecurringTemplate(syncId: string): RecurringTemplate | null {
+  return (
+    db.select().from(recurringTemplates).where(eq(recurringTemplates.syncId, syncId)).get() ?? null
+  );
+}
+
+/** The same, for a recurring occurrence. */
+export function readLocalRecurringOccurrence(syncId: string): RecurringOccurrence | null {
+  return (
+    db.select().from(recurringOccurrences).where(eq(recurringOccurrences.syncId, syncId)).get() ??
+    null
+  );
 }
 
 /**
@@ -251,8 +301,7 @@ export function readSyncIdsByLocalId(
   const unique = [...new Set(localIds)];
   if (unique.length === 0) return resolved;
 
-  const table =
-    entityType === 'account' ? accounts : entityType === 'category' ? categories : people;
+  const table = TABLES[entityType];
   const rows = db
     .select({ id: table.id, syncId: table.syncId })
     .from(table)
@@ -267,7 +316,16 @@ export function readSyncIdsByLocalId(
 
 /** Development helper: confirms the local sync foundation is queryable. */
 export function countSyncableRowsWithIdentity(): number {
-  return [accounts, budgets, categories, people, settings, transactions].reduce(
+  return [
+    accounts,
+    budgets,
+    categories,
+    people,
+    settings,
+    transactions,
+    recurringTemplates,
+    recurringOccurrences,
+  ].reduce(
     (total, table) =>
       total + db.select({ id: table.id }).from(table).where(isNotNull(table.syncId)).all().length,
     0,

@@ -93,6 +93,8 @@ function fixture(): BackupEnvelope {
           updatedAt: 1,
         },
       ],
+      recurringTemplates: [],
+      recurringOccurrences: [],
       appMetadata: [{ key: 'seed.categories.version', value: '1' }],
       transactions: [
         {
@@ -111,6 +113,7 @@ function fixture(): BackupEnvelope {
           note: 'Dinner, drinks',
           createdAt: 1,
           updatedAt: 1,
+          recurringOccurrenceId: null,
         },
       ],
     },
@@ -223,7 +226,9 @@ function legacyFixture(): LegacyBackupEnvelope {
       accounts: strip(current.data.accounts),
       categories: strip(current.data.categories),
       people: strip(current.data.people),
-      transactions: strip(current.data.transactions),
+      transactions: strip(current.data.transactions).map(
+        ({ recurringOccurrenceId: _link, ...rest }) => rest,
+      ),
       settings: strip(current.data.settings),
       appMetadata: current.data.appMetadata,
     },

@@ -7,6 +7,7 @@ import m0003 from './20260907180000_push_sync/migration.sql';
 import m0004 from './20260907210000_pull_sync/migration.sql';
 import m0005 from './20260908090000_cloud_link/migration.sql';
 import m0006 from './20260909120000_budgets/migration.sql';
+import m0007 from './20260911120000_recurring_transactions/migration.sql';
 
 export default {
   migrations: {
@@ -17,5 +18,6 @@ export default {
     '20260907210000_pull_sync': m0004,
     '20260908090000_cloud_link': m0005,
     '20260909120000_budgets': m0006,
+    '20260911120000_recurring_transactions': m0007,
   },
 };

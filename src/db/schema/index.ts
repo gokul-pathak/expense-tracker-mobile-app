@@ -28,4 +28,5 @@ export { budgets } from './budgets';
 export { categories } from './categories';
 export { settings } from './settings';
 export { people } from './people';
+export { recurringOccurrences, recurringTemplates } from './recurring';
 export { transactions } from './transactions';

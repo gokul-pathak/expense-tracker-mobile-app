@@ -194,13 +194,21 @@ describe('budgets in a backup', () => {
 /** The shape a build between M7C and M8A produced: sync identity, no budgets. */
 function syncEraBackup(): SyncBackupEnvelope {
   const current = createBackup();
-  const { budgets: _budgets, ...data } = current.data;
+  const {
+    budgets: _budgets,
+    recurringTemplates: _templates,
+    recurringOccurrences: _occurrences,
+    ...data
+  } = current.data;
   return {
     format: BACKUP_FORMAT,
     formatVersion: SYNC_BACKUP_FORMAT_VERSION,
     schemaVersion: SYNC_BACKUP_SCHEMA_VERSION,
     createdAt: current.createdAt,
     appVersion: current.appVersion,
-    data,
+    data: {
+      ...data,
+      transactions: data.transactions.map(({ recurringOccurrenceId: _link, ...rest }) => rest),
+    },
   };
 }

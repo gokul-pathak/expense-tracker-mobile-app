@@ -115,8 +115,11 @@ user's own session so row level security applies. There is no service-role path.
 upsert carrying `deleted_at`, so tombstones stay visible to other devices; archiving is an ordinary
 update and never becomes a cloud deletion.
 
-Uploads run in dependency-safe phases — parents, then transactions, then parent tombstones — so a
-cloud foreign key never sees a child before its parent. `mapping/local-to-remote.ts` resolves local
+Uploads run in dependency-safe phases — parents, then recurring templates, then recurring
+occurrences, then transactions, then parent tombstones — so a cloud foreign key never sees a child
+before its parent. A recurring template's tombstone goes up with its upserts, because for a template
+created, used and deleted between two pushes it is the only upload that tells the cloud the template
+existed. See `docs/recurring-m8c.md`. `mapping/local-to-remote.ts` resolves local
 integer foreign keys to global sync identities with one lookup per relation per batch; a local
 integer never leaves the device, and derived figures are never uploaded at all.
 
