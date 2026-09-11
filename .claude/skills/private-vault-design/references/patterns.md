@@ -203,7 +203,8 @@ haptics and `fontVariant` degrade gracefully; guard anything that does not.
 **A browser is not evidence about a device.** This is the most expensive lesson in this project: the
 hero balance rendered as a horizontal band with its top and bottom sliced off on Android while
 `npm run typecheck`, `npm run lint`, 548 tests and a browser were all green. Three fixes were made
-against browser evidence before the real cause was found.
+against browser evidence and each missed the cause, which was in React Native's Android text layout
+— see **A `lineHeight` on any span sets the whole line's height** below.
 
 So calibrate what each check can actually tell you:
 
@@ -231,12 +232,17 @@ computed values rather than by looking harder at the screen. **When a layout loo
 — print the element widths and computed styles. Both of these took several wrong guesses by eye and
 then fell out immediately once measured.
 
-**A forced `lineHeight` clips glyphs.** Android measures a `Text` from its line height and then clips
-whatever draws outside that box. Instrument Serif at 44pt needs more room than the type scale would
-give it, and the give-away was that the 12pt currency code and the decimals were sliced at the same
-height as the 44pt digits — a font overflowing its own metrics would only clip the large glyphs, so
-the whole box was too short. `<Money>` now takes the font's natural box at every size. Do not set an
-explicit `lineHeight` on large text in a custom font.
+**A `lineHeight` on any span sets the whole line's height.** On Android, React Native turns a span's
+`lineHeight` into a `CustomLineHeightSpan`, a `LineHeightSpan`, which Android applies to every line
+the span touches rather than to its own characters, and it centres the font in that height. So a
+12pt currency code carrying its 16pt eyebrow leading, nested inside a 44pt figure, squeezed the
+whole amount into a 16pt band through its middle. The give-away was that the code and the decimals
+were sliced at the same height as the digits: a font overflowing its own metrics would clip only the
+large glyphs. Three fixes adjusted the digits' leading and missed the code's; reading
+`CustomLineHeightSpan.kt` and `TextLayoutManager.kt` under `node_modules/react-native/ReactAndroid`
+is what found it. `<Money>` now strips the leading from every part. Never nest a span with a
+`lineHeight` inside larger text, and do not set an explicit `lineHeight` on large text in a custom
+font.
 
 **`flexShrink` governs the main axis, which in a column is height.** A control that stacks a value
 over a detail line is a column, so `flexShrink` there does nothing about width, and right-aligning it

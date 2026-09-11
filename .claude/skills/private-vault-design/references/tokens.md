@@ -150,6 +150,11 @@ The most important rule in the system. Three parts, three treatments:
 settled balance; a serif digit changing under a caret reads as decorative rather than as a number
 being entered.
 
+`hero` carries `minimumScale: 0.6` and shrinks to fit its card rather than ending in an ellipsis. A
+crore-scale balance outgrows the card on a narrow phone, and `NPR 1,24,5…` is unreadable where a
+smaller figure is merely smaller. Android shrinks only as far as the width needs (React Native's
+Android fit ignores the scale and floors at 4pt); iOS stops at 60%.
+
 Rules `<Money>` encodes:
 
 - **Tabular lining numerals.** Digits must align in columns down a list. A proportional figure in a
@@ -183,14 +188,19 @@ heroCard   24   balance card, budget hero
 sheet      28   bottom sheets, top corners only
 ```
 
-**`<Money>` ignores the leading in this table and takes the font's natural vertical box instead.**
-Android measures a `Text` from its line height and then clips whatever the glyphs draw outside that
-box. Instrument Serif at 44pt needs more room than any figure the scale would give it, so forcing
-leading sliced every amount horizontally through the middle — the small currency code and decimals
-along with the digits. An amount is always one line, so there is no leading to control anyway.
+**`<Money>` ignores the leading in this table and takes the font's natural vertical box instead**,
+for every part of an amount, the 12pt currency code included. On Android a `lineHeight` set on any
+span of a `Text` sets the height of the whole line that span sits on — React Native renders it as a
+`LineHeightSpan`, which Android applies per line rather than per span — and centres the font in that
+height. The code's 16pt eyebrow leading squeezed the 44pt serif into a 16pt band across its middle,
+which is why the code, the digits and the decimals were all sliced at the same height. Three earlier
+fixes adjusted the digits' leading and left the code's in place. An amount is always one line, so
+there is no leading to control anyway.
 
-The consequence for anything else: do not set an explicit `lineHeight` on large text in a custom
-font, especially the serif. If you need `display` somewhere new, let it size itself.
+The consequence for anything else: never nest a span that carries a `lineHeight` inside larger
+text, because the small span's leading becomes the whole line's height. And do not set an explicit
+`lineHeight` on large text in a custom font, especially the serif. If you need `display` somewhere
+new, let it size itself.
 
 Radii step up with the element's importance and size. A 20pt radius on a 44pt-tall button looks
 bulbous; a 14pt radius on a full-width hero card looks stingy. `button` exists because the pinned

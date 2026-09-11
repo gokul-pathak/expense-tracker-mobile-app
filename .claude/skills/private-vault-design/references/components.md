@@ -34,6 +34,10 @@ applies tabular numerals, sign, and semantic colour. Full spec in `tokens.md` �
 day total above a transaction list is still an amount, but rendering it in full direction colour
 would outshout the rows it summarises.
 
+At `hero` size the figure shrinks to fit its box rather than ending in an ellipsis
+(`moneySize.hero.minimumScale`). No part of an amount carries a `lineHeight`, the currency code
+included — see `tokens.md` → Money rendering for why.
+
 Amounts are stored as integer minor units throughout the app. Never convert to float for display —
 `parseMoneyToMinorUnits` and `formatMinorUnits` in `src/utils/money.ts` exist to avoid exactly that.
 

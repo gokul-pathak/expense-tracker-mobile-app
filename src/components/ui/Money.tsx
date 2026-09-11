@@ -36,6 +36,21 @@ const CODE_GAP = '  ';
 const tabular: TextStyle = { fontVariant: ['tabular-nums'] };
 
 /**
+ * A type style with its leading taken off. No part of an amount may carry a
+ * line height, the small currency code included: on Android a `lineHeight` on
+ * any span of a Text sets the height of the whole line that span sits on, and
+ * React Native centres the font in it. The code's 16pt eyebrow leading was
+ * squeezing the 44pt figure into a 16pt band across its middle, which is why
+ * the code, the digits and the decimals were all sliced at the same height.
+ * With no line height anywhere, the line takes the tallest font's own box and
+ * every glyph fits. An amount is always one line, so there is no leading to
+ * control anyway.
+ */
+function withoutLeading(style: TextStyle): TextStyle {
+  return { ...style, lineHeight: undefined };
+}
+
+/**
  * The most-used component in the app. An amount is three parts at three
  * treatments (code, integer, decimals), never one flat string. Digits are
  * tabular so columns of amounts align, and colour carries direction.
@@ -53,15 +68,10 @@ export function Money({
   const { palette, moneySize, type } = useTheme();
   const parts = splitMinorUnits(minorUnits, currency);
   const spec = moneySize[size];
-  /**
-   * The figure takes the font's own vertical box, with no leading forced onto
-   * it. Android measures a `Text` from its line height and then clips whatever
-   * the glyphs draw outside that box, and Instrument Serif at 44pt needs more
-   * room than the 56pt the scale asks for — which sliced every amount through
-   * the middle, the small currency code and decimals along with it. An amount
-   * is always one line, so there is no leading to control here anyway.
-   */
-  const integerFont = { ...spec.integer, lineHeight: undefined };
+  const integerFont = withoutLeading(spec.integer);
+  const codeFont = withoutLeading(type.eyebrow);
+  /** A size that states a minimum scale shrinks to fit its box instead of ending in an ellipsis. */
+  const minimumScale = 'minimumScale' in spec ? spec.minimumScale : undefined;
 
   let sign = '';
   let color = palette.textPrimary;
@@ -86,12 +96,14 @@ export function Money({
       accessible
       accessibilityLabel={spoken}
       numberOfLines={1}
+      adjustsFontSizeToFit={minimumScale !== undefined}
+      minimumFontScale={minimumScale}
       style={[integerFont, { textAlign: align }, style]}
     >
       {showCode ? (
         <RNText
           style={[
-            type.eyebrow,
+            codeFont,
             { letterSpacing: 0.48, color: palette.textTertiary, textTransform: 'none' },
           ]}
         >

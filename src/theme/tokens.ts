@@ -100,7 +100,12 @@ export type TypeVariant = keyof typeof type;
  * which is what stops an amount reading as an undifferentiated run of digits.
  */
 export const moneySize = {
-  hero: { integer: type.display, decimals: 26, gap: space.xs + 2 },
+  /**
+   * `minimumScale` lets the hero shrink to fit its card rather than end in an
+   * ellipsis. A crore-scale balance outgrows the card on a narrow phone, and a
+   * truncated balance is unreadable where a smaller one is merely smaller.
+   */
+  hero: { integer: type.display, decimals: 26, gap: space.xs + 2, minimumScale: 0.6 },
   /** The success screen's figure: larger than a stat, smaller than the hero, and not serif. */
   feature: {
     integer: { ...type.title, fontSize: 32, lineHeight: 36 },
