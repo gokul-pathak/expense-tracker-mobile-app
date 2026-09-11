@@ -22,11 +22,13 @@ import { useRefreshOnSyncedData } from '@/features/sync/use-synced-data';
 import { formatPeriodMonth } from '@/features/budgets/budget.period';
 import {
   getPeopleFinancialSummary,
+  getRecurringHomeSummary,
   isLocalFinanceDataAvailable,
   listActiveAccounts,
   listActivePeople,
   listBudgetsForMonth,
   listCategories,
+  listRecurringTemplates,
 } from '@/features/ui/data';
 import { useTheme } from '@/theme';
 
@@ -36,6 +38,8 @@ type Counts = {
   peoplePending: number;
   budgets: number;
   categories: number;
+  recurring: number;
+  recurringDue: number;
 };
 
 export default function MoreScreen() {
@@ -48,12 +52,15 @@ export default function MoreScreen() {
     setFailed(false);
     try {
       const summary = getPeopleFinancialSummary();
+      const recurring = getRecurringHomeSummary({ previewLimit: 0 });
       setCounts({
         accounts: listActiveAccounts().length,
         people: listActivePeople().length,
         peoplePending: summary.people.filter((person) => person.status !== 'settled').length,
         budgets: listBudgetsForMonth(formatPeriodMonth(new Date())).length,
         categories: listCategories().length,
+        recurring: listRecurringTemplates().length,
+        recurringDue: recurring.dueCount,
       });
     } catch (error) {
       console.error('Could not load your setup.', error);
@@ -120,6 +127,14 @@ export default function MoreScreen() {
             value={counts ? String(counts.categories) : undefined}
             trailing={counts ? undefined : <ValueSkeleton />}
             onPress={() => router.push('/categories' as never)}
+          />
+          <ListRow
+            icon="repeat"
+            label="Recurring"
+            value={counts ? recurringLabel(counts) : undefined}
+            valueTone={counts && counts.recurringDue > 0 ? 'warning' : 'tertiary'}
+            trailing={counts ? undefined : <ValueSkeleton />}
+            onPress={() => router.push('/recurring' as never)}
             last
           />
         </Card>
@@ -268,6 +283,13 @@ function countLabel(count: number, suffix: string) {
 function budgetLabel(count: number) {
   if (count === 0) return 'None set';
   return count === 1 ? '1 this month' : count + ' this month';
+}
+
+/** Recurring shows what needs handling when anything does, and how many plans exist otherwise. */
+function recurringLabel(counts: Counts) {
+  if (counts.recurringDue > 0) return counts.recurringDue + ' due';
+  if (counts.recurring === 0) return 'None';
+  return String(counts.recurring);
 }
 
 /** People are counted by what needs doing when anything does, and by size when nothing does. */

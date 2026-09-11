@@ -1,7 +1,7 @@
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
-import type { RecurringOccurrenceStatus } from '@/db/constants';
+import type { RecurringOccurrenceStatus, RecurringTransactionType } from '@/db/constants';
 import {
   accounts,
   categories,
@@ -44,6 +44,7 @@ const liveOccurrence = isNull(recurringOccurrences.deletedAt);
 export type TemplateRow = {
   template: RecurringTemplate;
   categoryName: string | null;
+  categoryIcon: string | null;
   categoryType: string | null;
   categoryDeletedAt: Date | null;
   accountName: string | null;
@@ -57,6 +58,7 @@ function templateQuery() {
     .select({
       template: recurringTemplates,
       categoryName: categories.name,
+      categoryIcon: categories.icon,
       categoryType: categories.type,
       categoryDeletedAt: categories.deletedAt,
       accountName: accounts.name,
@@ -214,6 +216,80 @@ export function getLatestHandledDate(templateId: number): LocalDate | null {
       .from(recurringOccurrences)
       .where(and(liveOccurrence, eq(recurringOccurrences.templateId, templateId)))
       .get()?.latest ?? null
+  );
+}
+
+/** One handled date of a template, for the detail screen's history. */
+export type OccurrenceHistoryRow = {
+  occurrenceDate: LocalDate;
+  status: RecurringOccurrenceStatus;
+  /** The live transaction a generated date produced, or null for a skip or a deleted one. */
+  transactionId: number | null;
+};
+
+/**
+ * The most recently handled dates of one template, newest first, bounded.
+ *
+ * Live occurrences only, left-joined to the transaction each generated one
+ * produced, so a deleted transaction shows the date as handled with no link.
+ * The bound is the caller's: the detail screen shows a short recent list, never
+ * years of history.
+ */
+export function getRecentOccurrences(templateId: number, limit: number): OccurrenceHistoryRow[] {
+  return db
+    .select({
+      occurrenceDate: recurringOccurrences.occurrenceDate,
+      status: recurringOccurrences.status,
+      transactionId: transactions.id,
+    })
+    .from(recurringOccurrences)
+    .leftJoin(
+      transactions,
+      and(
+        eq(transactions.recurringOccurrenceId, recurringOccurrences.id),
+        isNull(transactions.deletedAt),
+      ),
+    )
+    .where(and(liveOccurrence, eq(recurringOccurrences.templateId, templateId)))
+    .orderBy(desc(recurringOccurrences.occurrenceDate))
+    .limit(limit)
+    .all();
+}
+
+/** What a generated transaction was generated from, for a transaction's provenance line. */
+export type OccurrenceProvenanceRow = {
+  occurrenceDate: LocalDate;
+  templateId: number;
+  templateTitle: string;
+  templateType: RecurringTransactionType;
+  /** Null when the template has since been deleted. */
+  templateDeletedAt: Date | null;
+  categoryName: string | null;
+};
+
+/**
+ * The occurrence and its template behind one generated transaction.
+ *
+ * The template is joined without a tombstone filter: a transaction generated
+ * from a template that was later deleted still came from it, and a detail screen
+ * naming where it came from needs the name whether or not the plan still exists.
+ */
+export function getOccurrenceProvenance(occurrenceId: number): OccurrenceProvenanceRow | null {
+  return (
+    db
+      .select({
+        occurrenceDate: recurringOccurrences.occurrenceDate,
+        templateId: recurringTemplates.id,
+        templateTitle: recurringTemplates.title,
+        templateType: recurringTemplates.type,
+        templateDeletedAt: recurringTemplates.deletedAt,
+        categoryName: categories.name,
+      })
+      .from(recurringOccurrences)
+      .innerJoin(recurringTemplates, eq(recurringOccurrences.templateId, recurringTemplates.id))
+      .leftJoin(categories, eq(recurringTemplates.categoryId, categories.id))
+      .where(eq(recurringOccurrences.id, occurrenceId))
+      .get() ?? null
   );
 }
 

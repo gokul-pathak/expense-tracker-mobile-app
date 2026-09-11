@@ -32,11 +32,18 @@ import {
 } from '@/features/budgets/budget-presentation';
 import type { BudgetProgress } from '@/features/budgets/budget.types';
 import type { DashboardSummary, HomeBudgetSummary } from '@/features/dashboard/dashboard.types';
+import {
+  dueLabel,
+  formatScheduledShort,
+  recurringTypeDirection,
+} from '@/features/recurring/recurring-presentation';
+import type { RecurringHomeSummary } from '@/features/recurring/recurring.types';
 import { useRefreshOnSyncedData } from '@/features/sync/use-synced-data';
 import {
   getAppSettings,
   getDashboardSummary,
   getHomeBudgetSummary,
+  getRecurringHomeSummary,
   isLocalFinanceDataAvailable,
   listActiveAccounts,
 } from '@/features/ui/data';
@@ -46,6 +53,7 @@ import { formatMinorUnits, splitMinorUnits } from '@/utils/money';
 export default function HomeScreen() {
   const [summary, setSummary] = useState<DashboardSummary>();
   const [budget, setBudget] = useState<HomeBudgetSummary>();
+  const [recurring, setRecurring] = useState<RecurringHomeSummary>();
   const [currency, setCurrency] = useState('NPR');
   const [accountCount, setAccountCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -60,6 +68,8 @@ export default function HomeScreen() {
       // A planning figure, read from the budget engine rather than recomputed
       // here. Home has no second opinion about what was spent.
       setBudget(getHomeBudgetSummary());
+      // A bounded read: a few due dates and a count, never years of overdue ones.
+      setRecurring(getRecurringHomeSummary());
       setCurrency(getAppSettings().defaultCurrency);
       setAccountCount(listActiveAccounts().length);
     } catch (error) {
@@ -124,6 +134,8 @@ export default function HomeScreen() {
       <MonthCard summary={summary} currency={currency} />
 
       {budget ? <BudgetSection budget={budget} /> : null}
+
+      {recurring && recurring.dueCount > 0 ? <RecurringSection recurring={recurring} /> : null}
 
       <View style={styles.section}>
         <SectionHeader
@@ -342,6 +354,73 @@ function BudgetHighlight({ progress }: { progress: BudgetProgress }) {
   );
 }
 
+/**
+ * A glance at what recurring dates are waiting, never an accounting figure.
+ *
+ * A template moves no money, so this card changes nothing on Home until a date
+ * is generated. It shows a few due dates and links to the Due screen to act on
+ * them; it never generates anything itself, and it is absent when nothing is due.
+ */
+function RecurringSection({ recurring }: { recurring: RecurringHomeSummary }) {
+  const { space, palette } = useTheme();
+  const remainder = recurring.dueCount - recurring.preview.length;
+  return (
+    <View style={styles.section}>
+      <SectionHeader
+        title="Recurring"
+        action={{
+          label: 'View all',
+          onPress: () => router.push('/recurring/due' as never),
+          accessibilityLabel: 'View due recurring transactions',
+        }}
+      />
+      <Card padding="none">
+        {recurring.preview.map((occurrence, index) => (
+          <View
+            key={occurrence.templateId + ':' + occurrence.occurrenceDate}
+            accessible
+            accessibilityLabel={
+              dueLabel(occurrence) + ', due ' + formatScheduledShort(occurrence.occurrenceDate)
+            }
+            style={[
+              styles.recurringRow,
+              { paddingHorizontal: space.lg, paddingVertical: space.md, gap: space.md },
+              index < recurring.preview.length - 1 && {
+                borderBottomWidth: StyleSheet.hairlineWidth,
+                borderBottomColor: palette.divider,
+              },
+            ]}
+          >
+            <View style={styles.recurringText}>
+              <Text variant="bodyStrong" numberOfLines={1}>
+                {dueLabel(occurrence)}
+              </Text>
+              <Text variant="caption" tone="tertiary">
+                {'Due ' + formatScheduledShort(occurrence.occurrenceDate)}
+              </Text>
+            </View>
+            <Money
+              minorUnits={occurrence.amountMinor}
+              currency={occurrence.currency}
+              size="row"
+              direction={recurringTypeDirection(occurrence.type)}
+              showCode={false}
+              align="right"
+            />
+          </View>
+        ))}
+        {remainder > 0 ? (
+          <View style={{ paddingHorizontal: space.lg, paddingVertical: space.md }}>
+            <Text variant="caption" tone="tertiary">
+              {'and ' + (recurring.hasMore ? remainder + '+' : remainder) + ' more due'}
+            </Text>
+          </View>
+        ) : null}
+      </Card>
+    </View>
+  );
+}
+
 /** The month's category split: a donut with the total in its centre and a legend. */
 function SpendingCard({ summary, currency }: { summary: DashboardSummary; currency: string }) {
   const { space } = useTheme();
@@ -461,4 +540,6 @@ const styles = StyleSheet.create({
   highlight: { flexDirection: 'row', alignItems: 'center' },
   highlightName: { flex: 1, minWidth: 0 },
   swatch: { width: 8, height: 8, borderRadius: 2 },
+  recurringRow: { flexDirection: 'row', alignItems: 'center' },
+  recurringText: { flex: 1, minWidth: 0, gap: 2 },
 });

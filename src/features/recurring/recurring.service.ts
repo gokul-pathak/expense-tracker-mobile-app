@@ -24,7 +24,11 @@ import {
   type DueRecurringOccurrence,
   type GenerateDueResult,
   type GenerateOccurrenceResult,
+  type OccurrenceHistoryItem,
+  type OutstandingCount,
   type RecurringBlockedReason,
+  type RecurringHomeSummary,
+  type RecurringProvenance,
   type RecurringTemplate,
   type RecurringTemplateView,
   type SkipOccurrenceResult,
@@ -121,6 +125,7 @@ export function listRecurringTemplates(): RecurringTemplateView[] {
       return {
         ...row.template,
         categoryName: row.categoryName,
+        categoryIcon: row.categoryIcon,
         accountName: row.accountName,
         nextDueDate: firstUnhandledDate(scheduleOf(row.template), dates),
         handledCount: dates?.size ?? 0,
@@ -457,7 +462,82 @@ export function generateDueOccurrences(
   return result;
 }
 
+/** The most recent handled dates of a template, newest first, bounded. */
+export const TEMPLATE_HISTORY_LIMIT = 20;
+
+export function listTemplateHistory(
+  templateId: number,
+  limit: number = TEMPLATE_HISTORY_LIMIT,
+): OccurrenceHistoryItem[] {
+  getRecurringTemplate(templateId);
+  return repository.getRecentOccurrences(templateId, clampHistoryLimit(limit));
+}
+
+/**
+ * What one generated transaction was generated from, for its provenance line.
+ * Null when the occurrence id belongs to no recurring occurrence — a
+ * hand-entered transaction, which carries none.
+ */
+export function getRecurringProvenance(occurrenceId: number): RecurringProvenance | null {
+  const row = repository.getOccurrenceProvenance(occurrenceId);
+  if (row === null) return null;
+  const title = row.templateTitle.trim();
+  const label =
+    title || row.categoryName || (row.templateType === 'expense' ? 'Expense' : 'Income');
+  return {
+    occurrenceDate: row.occurrenceDate,
+    type: row.templateType,
+    label,
+    templateDeleted: row.templateDeletedAt !== null,
+  };
+}
+
+/**
+ * The compact recurring read a Home screen consumes: how many dates are due as
+ * of today and a few to preview, oldest first. Bounded by the due limit, so a
+ * long-neglected daily schedule cannot make Home enumerate years of dates.
+ */
+export function getRecurringHomeSummary(
+  options: { asOfDate?: LocalDate; previewLimit?: number } = {},
+): RecurringHomeSummary {
+  const due = listDueOccurrences({ asOfDate: options.asOfDate });
+  const previewLimit = Math.max(0, options.previewLimit ?? 3);
+  return {
+    dueCount: due.occurrences.length,
+    hasMore: due.hasMore,
+    preview: due.occurrences.slice(0, previewLimit),
+  };
+}
+
+/**
+ * How many of one template's dates are outstanding as of a day, whether or not
+ * it is paused. The resume flow uses it to warn that missed dates will become
+ * due again, since M8C does not forgive them. Bounded like the due list.
+ */
+export function countOutstandingOccurrences(
+  templateId: number,
+  options: { asOfDate?: LocalDate; limit?: number } = {},
+): OutstandingCount {
+  const asOfDate = resolveAsOfDate(options.asOfDate);
+  const limit = normalizeDueLimit(options.limit);
+  const template = getRecurringTemplate(templateId);
+  const handled = repository.getHandledDates([template.id]).get(template.id);
+
+  let count = 0;
+  for (const date of iterateOccurrenceDates(scheduleOf(template), { to: asOfDate })) {
+    if (handled?.has(date) === true) continue;
+    if (count === limit) return { count, hasMore: true };
+    count += 1;
+  }
+  return { count, hasMore: false };
+}
+
 // Internals ---------------------------------------------------------------
+
+function clampHistoryLimit(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 1) return 1;
+  return Math.min(value, DUE_OCCURRENCE_LIMIT);
+}
 
 function setPaused(id: number, isPaused: boolean): RecurringTemplate {
   const current = getRecurringTemplate(id);
@@ -537,6 +617,7 @@ function toDue(row: TemplateRow, date: LocalDate): DueRecurringOccurrence {
     currency: template.currency,
     categoryId: template.categoryId,
     categoryName: row.categoryName,
+    categoryIcon: row.categoryIcon,
     accountId: template.accountId,
     accountName: row.accountName,
     title: template.title,

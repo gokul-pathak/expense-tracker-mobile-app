@@ -24,9 +24,15 @@ import {
   getTransactionDirection,
   getTransactionLabel,
 } from '@/features/transactions/transaction-presentation';
+import {
+  getProvenanceDetail,
+  getProvenanceLabel,
+} from '@/features/recurring/recurring-presentation';
+import type { RecurringProvenance } from '@/features/recurring/recurring.types';
 import type { TransactionView } from '@/features/transactions/transaction.types';
 import {
   deleteTransaction,
+  getRecurringProvenance,
   getTransactionView,
   isLocalFinanceDataAvailable,
 } from '@/features/ui/data';
@@ -49,6 +55,7 @@ export default function TransactionDetailScreen() {
   const { space } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [transaction, setTransaction] = useState<TransactionView>();
+  const [provenance, setProvenance] = useState<RecurringProvenance | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -65,7 +72,15 @@ export default function TransactionDetailScreen() {
     setLoading(true);
     setFailed(false);
     try {
-      setTransaction(getTransactionView(routeId));
+      const view = getTransactionView(routeId);
+      setTransaction(view);
+      // Provenance is the only thing a generated transaction shows that a
+      // hand-entered one does not; it moves no money and changes no calculation.
+      setProvenance(
+        view.recurringOccurrenceId === null
+          ? null
+          : getRecurringProvenance(view.recurringOccurrenceId),
+      );
     } catch (caught) {
       console.error('Could not load transaction.', caught);
       setFailed(true);
@@ -141,6 +156,16 @@ export default function TransactionDetailScreen() {
           {label}
         </Text>
       </View>
+
+      {provenance ? (
+        <View style={{ marginTop: space.xl }}>
+          <Banner
+            tone="info"
+            icon="repeat"
+            message={getProvenanceLabel() + ' · ' + getProvenanceDetail(provenance)}
+          />
+        </View>
+      ) : null}
 
       <View style={{ marginTop: space.xxl }}>
         <SectionHeader title="Details" />

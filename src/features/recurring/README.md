@@ -14,15 +14,23 @@ The second thing: **occurrence and generated-transaction identities are derived,
 offline devices generating the same date must produce the same identities, or the rent is recorded
 twice. `recurring-identity.ts` and its namespace are part of the data format; never change either.
 
-| File                      | Holds                                                                   |
-| ------------------------- | ----------------------------------------------------------------------- |
-| `recurring-schedule.ts`   | pure calendar arithmetic: dates, clamping, occurrences, no clock, no DB |
-| `recurring-identity.ts`   | the fixed namespace and the UUIDv5 derivations                          |
-| `recurring.validation.ts` | what makes a template well-formed, and why one cannot generate          |
-| `recurring.repository.ts` | templates, handled dates, and the atomic generate and skip writes       |
-| `recurring.service.ts`    | the engine: templates, what is due, generate, skip, batch generation    |
-| `recurring.errors.ts`     | conflict and validation errors with codes a screen can switch on        |
-| `recurring.types.ts`      | the inputs and the read models                                          |
+| File                        | Holds                                                                     |
+| --------------------------- | ------------------------------------------------------------------------- |
+| `recurring-schedule.ts`     | pure calendar arithmetic: dates, clamping, occurrences, no clock, no DB   |
+| `recurring-identity.ts`     | the fixed namespace and the UUIDv5 derivations                            |
+| `recurring.validation.ts`   | what makes a template well-formed, and why one cannot generate            |
+| `recurring.repository.ts`   | templates, handled dates, history, and the atomic generate and skip writes |
+| `recurring.service.ts`      | the engine: templates, what is due, generate, skip, batch, home/history reads |
+| `recurring.errors.ts`       | conflict and validation errors with codes a screen can switch on          |
+| `recurring.types.ts`        | the inputs and the read models                                            |
+| `recurring-presentation.ts` | how a template and its due dates read: every string a screen shows        |
+| `RecurringForm.tsx`         | the add / edit form (M8D)                                                 |
+| `RecurringTemplateRow.tsx`  | a template as the list shows it (M8D)                                     |
+| `DueOccurrenceRow.tsx`      | one due date with its generate / skip actions (M8D)                       |
+| `IntervalStepper.tsx`       | the "every N units" control (M8D)                                         |
 
-No UI belongs here, and nothing here runs by itself. There is no startup hook, timer, background task
-or notification: a caller asks what is due as of a date and decides what to do. M8D is that caller.
+The engine still runs only when asked: no startup hook, timer, background task or notification. M8D
+(the screens under `src/app/recurring/`) is the caller — a person asks what is due and generates or
+skips it deliberately. UI co-located here is presentation and components only; every string a screen
+shows lives in `recurring-presentation.ts` so it is testable (the runner collects only `.ts`), and
+screens reach the engine through the `@/features/ui/data` facade, never the repository or `@/db`.

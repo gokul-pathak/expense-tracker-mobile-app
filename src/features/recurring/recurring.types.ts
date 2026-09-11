@@ -103,6 +103,7 @@ export type DueRecurringOccurrence = {
   currency: string;
   categoryId: number;
   categoryName: string | null;
+  categoryIcon: string | null;
   accountId: number;
   accountName: string | null;
   title: string;
@@ -120,6 +121,7 @@ export type DueOccurrencesResult = {
 /** A template as a list would show it. `nextDueDate` is derived, never stored. */
 export type RecurringTemplateView = RecurringTemplate & {
   categoryName: string | null;
+  categoryIcon: string | null;
   accountName: string | null;
   /**
    * The earliest scheduled date not yet generated or skipped, whether or not it
@@ -144,6 +146,39 @@ export type SkipOccurrenceResult = {
   outcome: 'skipped' | 'already_skipped';
   occurrence: RecurringOccurrence;
 };
+
+/**
+ * The compact recurring read a Home screen consumes: how many dates are due and
+ * a few of them to preview. Bounded — Home never enumerates years of overdue
+ * dates, and a combined total is deliberately absent, since due dates mix income
+ * and expenses.
+ */
+export type RecurringHomeSummary = {
+  dueCount: number;
+  hasMore: boolean;
+  preview: DueRecurringOccurrence[];
+};
+
+/** One handled date, for a template detail screen's short history. */
+export type OccurrenceHistoryItem = {
+  occurrenceDate: LocalDate;
+  status: RecurringOccurrenceStatus;
+  /** The live transaction a generated date produced, or null for a skip or a deleted one. */
+  transactionId: number | null;
+};
+
+/** Where a generated transaction came from, for its provenance line. */
+export type RecurringProvenance = {
+  occurrenceDate: LocalDate;
+  type: RecurringTransactionType;
+  /** The template's title, its category, or its type — never blank. */
+  label: string;
+  /** True when the template it came from has since been deleted. */
+  templateDeleted: boolean;
+};
+
+/** How many of a template's dates are outstanding as of a day, bounded. */
+export type OutstandingCount = { count: number; hasMore: boolean };
 
 type BatchItem = { templateId: number; occurrenceDate: LocalDate };
 

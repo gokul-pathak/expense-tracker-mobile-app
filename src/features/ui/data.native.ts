@@ -82,4 +82,23 @@ export {
   getPersonTransactionHistory,
 } from '@/features/transactions/transaction.service';
 
+export {
+  createRecurringTemplate,
+  getRecurringTemplate,
+  listRecurringTemplates,
+  updateRecurringTemplate,
+  pauseRecurringTemplate,
+  resumeRecurringTemplate,
+  deleteRecurringTemplate,
+  listDueOccurrences,
+  getNextDueDate,
+  generateOccurrence,
+  skipOccurrence,
+  generateDueOccurrences,
+  getRecurringHomeSummary,
+  listTemplateHistory,
+  getRecurringProvenance,
+  countOutstandingOccurrences,
+} from '@/features/recurring/recurring.service';
+
 export const isLocalFinanceDataAvailable = true;

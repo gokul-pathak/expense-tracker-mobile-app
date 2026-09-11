@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -154,9 +154,10 @@ describe('M7C boundaries', () => {
   });
 
   it('lets nothing generate a recurring transaction by itself', () => {
-    // M8C is an engine that answers when asked. Nothing generates on startup, on
-    // a timer, in the background or from a notification, and no screen asks yet:
-    // M8D owns the interface.
+    // The engine answers when asked. Nothing generates on startup, on a timer, in
+    // the background or from a notification — M8D gives the person a Due screen to
+    // generate from deliberately, and that is the only way a recurring transaction
+    // is ever created.
     const engine = [
       'src/features/recurring/recurring.service.ts',
       'src/features/recurring/recurring.repository.ts',
@@ -172,20 +173,18 @@ describe('M7C boundaries', () => {
       expect(source, path).not.toMatch(/supabase/i);
     }
 
+    // Generation is a person's action on the Due screen, never a side effect of a
+    // lifecycle moment: these paths must not reach the engine on startup, in a
+    // migration or seed, or when a sync lands.
     for (const path of [
       'src/app/_layout.tsx',
       'src/db/migrations.ts',
       'src/db/seed.ts',
       'src/features/sync/sync.provider.tsx',
-      'src/features/ui/data.native.ts',
     ]) {
-      expect(read(path), path).not.toMatch(/features\/recurring|generateDueOccurrences/);
-    }
-    const screens = readdirSync(join(projectRoot, 'src/app'), { recursive: true })
-      .map(String)
-      .filter((file) => /\.(ts|tsx)$/.test(file));
-    for (const file of screens) {
-      expect(read(join('src/app', file)), file).not.toMatch(/features\/recurring/);
+      expect(read(path), path).not.toMatch(
+        /features\/recurring|generateOccurrence|generateDueOccurrences/,
+      );
     }
 
     const manifest = JSON.parse(read('package.json')) as { dependencies: Record<string, string> };
