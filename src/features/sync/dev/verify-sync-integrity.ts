@@ -5,6 +5,7 @@ import {
   MAX_RECURRENCE_INTERVAL,
   PERIOD_MONTH_PATTERN,
   RECURRING_FREQUENCIES,
+  RECURRING_OCCURRENCE_STATUSES,
 } from '@/db/constants';
 import {
   accounts,
@@ -28,7 +29,7 @@ import {
   deriveGeneratedTransactionSyncId,
   deriveOccurrenceSyncId,
 } from '@/features/recurring/recurring-identity';
-import { isLocalDate } from '@/features/recurring/recurring-schedule';
+import { isLocalDate, isScheduledDate } from '@/features/recurring/recurring-schedule';
 
 /**
  * A read-only audit of everything sync depends on locally.
@@ -66,9 +67,16 @@ export const SYNC_INTEGRITY_CODES = [
   'budget_invalid_amount',
   'budget_invalid_month',
   'budget_invalid_category',
+  'budget_invalid_currency',
   'budget_duplicate_period',
   'recurring_template_invalid',
+  'recurring_template_invalid_relation',
   'recurring_occurrence_invalid_identity',
+  'recurring_occurrence_invalid_status',
+  'recurring_occurrence_duplicate_date',
+  'recurring_occurrence_unscheduled_date',
+  'recurring_generated_without_transaction',
+  'recurring_skipped_with_transaction',
   'recurring_transaction_invalid_link',
 ] as const;
 
@@ -389,6 +397,16 @@ function checkBudgets(issues: SyncIntegrityIssue[]) {
     issues.push({ code: 'budget_invalid_category', entityType: 'budget', count: invalidCategory });
   }
 
+  // What `normalizeCurrency` would have produced. A budget whose currency is
+  // not canonical matches no expense, so it reads as permanently unused rather
+  // than as wrong.
+  const invalidCurrency = rows.filter(
+    (row) => row.currency.length === 0 || row.currency !== row.currency.trim().toUpperCase(),
+  ).length;
+  if (invalidCurrency > 0) {
+    issues.push({ code: 'budget_invalid_currency', entityType: 'budget', count: invalidCurrency });
+  }
+
   const identities = new Set<string>();
   let duplicates = 0;
   for (const row of rows) {
@@ -434,8 +452,96 @@ function checkRecurring(issues: SyncIntegrityIssue[]) {
     });
   }
 
+  // A live template has to point at rows that still exist, and at a category of
+  // its own type. An *archived* account is not a fault: the template stays and
+  // its due dates are reported as blocked, which is a state the app creates on
+  // purpose. Neither is a soft-deleted category, for the same reason.
+  const accountIds = new Set(
+    db
+      .select({ id: accounts.id })
+      .from(accounts)
+      .all()
+      .map((r) => r.id),
+  );
+  const categoryTypeById = new Map(
+    db
+      .select({ id: categories.id, type: categories.type })
+      .from(categories)
+      .all()
+      .map((row) => [row.id, row.type]),
+  );
+  const invalidRelations = templates.filter((template) => {
+    if (template.deletedAt !== null) return false;
+    if (!accountIds.has(template.accountId)) return true;
+    const categoryType = categoryTypeById.get(template.categoryId);
+    return categoryType === undefined || categoryType !== template.type;
+  }).length;
+  if (invalidRelations > 0) {
+    issues.push({
+      code: 'recurring_template_invalid_relation',
+      entityType: 'recurring_template',
+      count: invalidRelations,
+    });
+  }
+
   const templateSyncIds = new Map(templates.map((template) => [template.id, template.syncId]));
+  const templateById = new Map(templates.map((template) => [template.id, template]));
   const occurrences = db.select().from(recurringOccurrences).all();
+
+  const invalidStatus = occurrences.filter(
+    (occurrence) =>
+      !(RECURRING_OCCURRENCE_STATUSES as readonly string[]).includes(occurrence.status),
+  ).length;
+  if (invalidStatus > 0) {
+    issues.push({
+      code: 'recurring_occurrence_invalid_status',
+      entityType: 'recurring_occurrence',
+      count: invalidStatus,
+    });
+  }
+
+  // `(template_id, occurrence_date)` is unique outright in SQLite, tombstones
+  // included, so this can only fire on a database whose index never arrived —
+  // which is exactly when two decisions about one date become possible.
+  const dateKeys = new Set<string>();
+  let duplicateDates = 0;
+  for (const occurrence of occurrences) {
+    const key = `${occurrence.templateId}|${occurrence.occurrenceDate}`;
+    if (dateKeys.has(key)) duplicateDates += 1;
+    dateKeys.add(key);
+  }
+  if (duplicateDates > 0) {
+    issues.push({
+      code: 'recurring_occurrence_duplicate_date',
+      entityType: 'recurring_occurrence',
+      count: duplicateDates,
+    });
+  }
+
+  // A decision about a date the template never lands on. The schedule is locked
+  // once anything is handled, so a live occurrence off the schedule means the
+  // template or the occurrence was rewritten outside the app.
+  const unscheduled = occurrences.filter((occurrence) => {
+    if (occurrence.deletedAt !== null) return false;
+    const template = templateById.get(occurrence.templateId);
+    if (template === undefined || !isLocalDate(occurrence.occurrenceDate)) return false;
+    return !isScheduledDate(
+      {
+        startDate: template.startDate,
+        frequency: template.frequency,
+        interval: template.interval,
+        endDate: template.endDate,
+      },
+      occurrence.occurrenceDate,
+    );
+  }).length;
+  if (unscheduled > 0) {
+    issues.push({
+      code: 'recurring_occurrence_unscheduled_date',
+      entityType: 'recurring_occurrence',
+      count: unscheduled,
+    });
+  }
   const badIdentity = occurrences.filter((occurrence) => {
     const templateSyncId = templateSyncIds.get(occurrence.templateId);
     if (!isSyncId(templateSyncId) || !isLocalDate(occurrence.occurrenceDate)) return true;
@@ -456,11 +562,57 @@ function checkRecurring(issues: SyncIntegrityIssue[]) {
     .select({
       syncId: transactions.syncId,
       type: transactions.type,
+      deletedAt: transactions.deletedAt,
       recurringOccurrenceId: transactions.recurringOccurrenceId,
     })
     .from(transactions)
     .where(isNotNull(transactions.recurringOccurrenceId))
     .all();
+
+  const linkedByOccurrence = new Map<number, typeof linked>();
+  for (const row of linked) {
+    const list = linkedByOccurrence.get(row.recurringOccurrenceId!);
+    if (list === undefined) linkedByOccurrence.set(row.recurringOccurrenceId!, [row]);
+    else list.push(row);
+  }
+
+  // Partial generation: the occurrence says money was recorded and no record of
+  // it was ever written. Generation is one SQLite transaction precisely so this
+  // cannot happen, which is what makes it worth checking — it would mean the
+  // atomicity guarantee failed.
+  //
+  // A transaction the user *deleted* is not this. The row still exists,
+  // tombstoned, and that is what proves generation completed; M8C keeps the
+  // occurrence handled and never regenerates it. So existence is the test, not
+  // liveness.
+  const generatedWithoutTransaction = occurrences.filter(
+    (occurrence) =>
+      occurrence.deletedAt === null &&
+      occurrence.status === 'generated' &&
+      (linkedByOccurrence.get(occurrence.id) ?? []).length === 0,
+  ).length;
+  if (generatedWithoutTransaction > 0) {
+    issues.push({
+      code: 'recurring_generated_without_transaction',
+      entityType: 'recurring_occurrence',
+      count: generatedWithoutTransaction,
+    });
+  }
+
+  // The mirror image: a date deliberately not taken that nonetheless moved money.
+  const skippedWithTransaction = occurrences.filter(
+    (occurrence) =>
+      occurrence.deletedAt === null &&
+      occurrence.status === 'skipped' &&
+      (linkedByOccurrence.get(occurrence.id) ?? []).some((row) => row.deletedAt === null),
+  ).length;
+  if (skippedWithTransaction > 0) {
+    issues.push({
+      code: 'recurring_skipped_with_transaction',
+      entityType: 'recurring_occurrence',
+      count: skippedWithTransaction,
+    });
+  }
   const badLinks = linked.filter((row) => {
     const occurrenceSyncId = occurrenceSyncIds.get(row.recurringOccurrenceId!);
     if (!isSyncId(occurrenceSyncId)) return true;
