@@ -87,3 +87,18 @@ export const MAX_RECURRENCE_INTERVAL = 999;
  * the shape; whether the day exists in its month is checked by the schedule.
  */
 export const LOCAL_DATE_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+/**
+ * Where a receipt has got to.
+ *
+ * `failed` is a state of its own rather than an empty draft: a receipt that
+ * could not be read must never look like an expense of zero.
+ */
+export const RECEIPT_PROCESSING_STATUSES = [
+  'captured',
+  'processing',
+  'ready_for_review',
+  'failed',
+] as const;
+
+export type ReceiptProcessingStatusName = (typeof RECEIPT_PROCESSING_STATUSES)[number];

@@ -17,7 +17,15 @@
           "faceIDPermission": "Use Face ID to unlock your personal finance data."
         }
       ],
-      "expo-font"
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Allow Expense Tracker to use the camera so you can scan a receipt. Recording expenses by hand never needs the camera.",
+          "photosPermission": "Allow Expense Tracker to access your photos so you can import a receipt you already took.",
+          "microphonePermission": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
