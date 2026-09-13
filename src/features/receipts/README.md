@@ -48,5 +48,10 @@ Receipt images, raw OCR text and draft candidates are local-only: excluded from 
 from Cloud Sync, and never logged. The feature contains no `console.*` call and no network call at
 all, and `test/receipts/receipt-privacy.test.ts` fails if either appears.
 
+M9C's optional AI category suggestion does not change that: the request is made by
+`features/ai`, never from here, and carries only the redacted merchant candidate and category names.
+`review/receipt-suggestion.model.ts` is where a suggestion meets the review — and the only way one
+reaches the form is a person tapping it.
+
 Read [`docs/receipt-scanning-architecture.md`](../../../docs/receipt-scanning-architecture.md)
 before adding an OCR engine, persisting raw text, or putting a receipt anywhere near the sync feed.

@@ -23,6 +23,10 @@ import {
   type PickerOption,
 } from '@/components/ui';
 import {
+  loadAiSuggestionPreference,
+  saveAiSuggestionPreference,
+} from '@/features/ai/ai-preference.storage';
+import {
   changePin,
   disableAppLock,
   disableBiometrics,
@@ -82,11 +86,14 @@ export default function SettingsScreen() {
   const [pinMode, setPinMode] = useState<PinMode>();
   const [busy, setBusy] = useState('');
   const [restorePrompt, setRestorePrompt] = useState<RestorePrompt>();
+  const [aiPreference, setAiPreference] = useState(loadAiSuggestionPreference);
 
   const load = useCallback(() => {
     if (!isLocalFinanceDataAvailable) return;
     setLoading(true);
     setError('');
+    // May have been answered on Review Receipt since this screen last showed.
+    setAiPreference(loadAiSuggestionPreference());
     try {
       setCurrency(getAppSettings().defaultCurrency);
     } catch (caught) {
@@ -211,6 +218,32 @@ export default function SettingsScreen() {
             </>
           ) : null}
         </Card>
+        <Card padding="none" style={{ marginTop: space.md }}>
+          <ListRow
+            icon="sparkle"
+            label="AI Category Suggestions"
+            detail="For scanned receipts. Needs a Cloud Account."
+            chevron={false}
+            trailing={
+              <Switch
+                value={aiPreference === 'enabled'}
+                accessibilityLabel="AI Category Suggestions"
+                onValueChange={(next) => {
+                  const choice = next ? 'enabled' : 'disabled';
+                  saveAiSuggestionPreference(choice);
+                  setAiPreference(choice);
+                }}
+              />
+            }
+            last
+          />
+        </Card>
+        <Text variant="caption" tone="tertiary" style={{ marginTop: space.sm }}>
+          When on, the merchant name read from a receipt and the names of your expense categories
+          are sent to an AI service to suggest a category. Amounts, dates, accounts, notes and
+          receipt photos are not sent. A suggestion is never saved until you choose it and save the
+          expense. This choice applies to this device only.
+        </Text>
       </View>
 
       <View style={{ marginTop: space.xxl }}>

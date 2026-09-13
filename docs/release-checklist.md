@@ -136,6 +136,31 @@ records.
 - [ ] Camera, photo import, review and Save Expense verified on a real Android and iOS device,
       including large text and a small screen
 
+## AI category suggestions (M9C)
+
+- [ ] **blocker** no provider key, service-role key or AI-related `EXPO_PUBLIC_` variable anywhere
+      in the app, its config or its bundle (`test/ai/ai-boundary.test.ts`)
+- [ ] **blocker** `features/ai` references no transaction, repository, database, outbox or backup
+      API; a suggestion creates no transaction, balance, report, budget or outbox change
+- [ ] **blocker** a suggestion never selects a category by arriving; Save Expense stays disabled
+      until a person chooses one, and a later choice always wins
+- [ ] **blocker** the request carries only `version`, `merchantText` and category `id`/`name`; no
+      image, OCR text, amount, date, account or note
+- [ ] **blocker** server and app each reject a category outside the request's set, and any
+      malformed or over-length answer, whole
+- [ ] **blocker** the quota migration is applied and `supabase/tests/ai-suggestion-quota.sql` passes
+- [ ] Suggestions are off until the person agrees, and Local Only reviews and saves receipts with
+      no Cloud Account
+- [ ] Function logs contain metadata only (`requestId`, status, timings, token counts)
+- [ ] **external** `ANTHROPIC_API_KEY` set with `supabase secrets set` on staging and production,
+      never in `.env` or Git; `supabase functions deploy suggest-expense-category` done per project
+- [ ] **external** one synthetic request against staging returns a validated suggestion (no real
+      receipt); a request without a session returns 401; the seventh in a minute returns 429
+- [ ] **external** the Anthropic organization's data-retention arrangement is confirmed before any
+      copy says more than what is sent
+- [ ] **external** consent card, suggestion card, merchant card, loading and failure states verified
+      on Android and iOS, in both themes and at large text
+
 ## Performance
 
 - [ ] A large dataset (5,000+ transactions) uploads and restores in bounded batches

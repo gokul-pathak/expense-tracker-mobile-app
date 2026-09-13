@@ -54,6 +54,34 @@ compare that owner to the authenticated user, and cross-user references are reje
 client checks ownership again on everything it downloads, because a client that trusts the server
 completely has no defence left if that assumption ever breaks.
 
+## Receipts and AI category suggestions
+
+Receipt scanning reads the photograph **on the device**. The photo, the text read from it and the
+draft stay on the device and are never backed up or synchronized.
+
+AI category suggestions are **optional and off until the person agrees**, on the review screen or
+in Settings. They need a signed-in Cloud Account; Local Only works fully without them. When they are
+on, reviewing a receipt sends, over TLS, to this app's own Supabase Edge Function:
+
+- the merchant name read from the receipt, after phone numbers, card numbers, email addresses,
+  links and labelled identifiers such as loyalty or VAT numbers are removed where recognizable
+- the names of the person's current expense categories, under throwaway ids (`c1`, `c2`…)
+
+The function forwards those to the configured AI provider (Anthropic's Claude API) and returns a
+suggested category, a cleaner merchant name and a one-sentence reason. **The photo, the receipt's
+text, the amount, date, currency, payment mode, account, notes, balances, budgets, people and
+transaction history are never sent.** Removal of identifiers is pattern-based and cannot recognize
+everything; the stronger protection is that only a merchant name is sent at all.
+
+The suggestion is advice shown on the review screen. It is not stored, not backed up and not
+synchronized, and it changes nothing until the person taps it and saves the expense. The function
+logs technical metadata — a request id, status, timing and token counts — and never the text it was
+sent or the answer. A per-account request count is kept in the cloud to limit cost; it holds counts
+only. How the AI provider retains API data is described, with its sources, in
+[`ai-assistance-architecture.md`](ai-assistance-architecture.md#provider-data-handling).
+
+The on/off choice is a device preference, like the theme: it is not synchronized to other devices.
+
 ## Encryption
 
 Data is encrypted in transit (TLS) and at rest by the cloud provider. **This is not end-to-end

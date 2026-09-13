@@ -45,7 +45,12 @@ web already runs with SQLite closed (see `src/db/index.web.ts`).
 | ---------------- | ---------------------------------------- | ----------------- |
 | Receipt image    | private cache directory                  | **never**         |
 | Raw OCR text     | memory, for the length of one extraction | **never**         |
-| Draft candidates | `receipt_drafts`, local-only table       | **never**         |
+| Draft candidates | `receipt_drafts`, local-only table       | **never** ¹       |
+
+¹ Since M9C, one candidate can leave the device: the merchant name, redacted, and only when the
+person has turned on AI category suggestions and is signed in to a Cloud Account. The amount,
+date, currency, payment mode, photo and OCR text still never leave. See the M9C section below and
+[`ai-assistance-architecture.md`](ai-assistance-architecture.md).
 
 Concretely, in M9A:
 
@@ -381,8 +386,48 @@ because it is one. A receipt dated 31 August and saved on 12 September moves the
 lands in August's report and August's budget. The photo, the OCR text and the draft never reach the
 outbox, the backup or a log.
 
-### Verification limits
+### Verification limits (M9B)
 
 The screens are thin arrangements of the reducer and view model, which are tested; this repository
 has no component-rendering test harness, so layout, keyboard behaviour and large text are **not**
 machine-verified. And without an OCR engine, the full flow has not run on a device.
+
+## M9C: AI suggestions on Review Receipt
+
+M9C adds optional advice to the review, and nothing else. The full design is in
+[`ai-assistance-architecture.md`](ai-assistance-architecture.md); what changes for receipts is:
+
+```
+Review Receipt ready
+  ↓  person has agreed, is signed in          otherwise nothing is sent
+  ↓  merchant candidate, redacted             the only receipt-derived text sent
+  ↓  Edge Function → AI provider → validated  on the server, then again on the phone
+  ↓  "Suggested category: Food  [Use Food] [Choose Another]"
+  ↓  person taps, or doesn't
+  ↓  Save Expense                             unchanged from M9B
+```
+
+- **OCR is still on-device, and the receipt pipeline still sends nothing.** `features/receipts`
+  contains no network call; `test/receipts/receipt-privacy.test.ts` still enforces it. The request
+  is made by `features/ai`, from the merchant candidate the review hands it.
+- **What may be sent:** the merchant candidate, with phone, card, email, link and labelled
+  identifier patterns removed, and the names of the person's current expense categories. **Never
+  sent:** the photo, the OCR text, the amount, the date, the currency, the payment mode, the
+  account, the note.
+- **Category still starts empty.** A suggestion is a card under the Category field; it selects
+  nothing until **Use Food** is tapped. After that the category is an ordinary choice, and choosing
+  another replaces it for good.
+- **The merchant stays as read** in Merchant / Note. A cleaner name is offered beside it — Detected
+  / Suggested, with Use Suggestion and Keep Detected Text — only while the field is untouched.
+- **Save Expense never waits.** Pressing it cancels a suggestion still on its way; an answer that
+  arrives afterwards is dropped.
+- **Nothing is stored.** The suggestion lives in the screen's memory. It is not written to
+  `receipt_drafts`, the backup, the outbox or the cloud, so reopening a draft after a restart shows
+  the manual review exactly as M9B defines it, and asks again only if the person is still opted in.
+
+### Verification limits (M9C)
+
+The reducer, presentation, validation, request building, server handler and Claude provider are
+tested without a network or credentials. The Edge Function has **not** been deployed or invoked
+against a real provider from this environment, and the suggestion card has not been seen on a
+device — which, with no OCR engine shipping, cannot reach Review Receipt on a real build anyway.

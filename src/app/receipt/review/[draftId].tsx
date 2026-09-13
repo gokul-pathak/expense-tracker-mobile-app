@@ -1,12 +1,13 @@
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 
 import {
   AmountInput,
   Banner,
   Button,
+  Card,
   Dialog,
   EmptyState,
   ErrorState,
@@ -24,7 +25,24 @@ import {
 } from '@/components/ui';
 import { DEFAULT_CURRENCY, PAYMENT_MODES, type PaymentMode } from '@/db/constants';
 import type { Account } from '@/features/accounts/account.types';
+import {
+  describeCategorySuggestion,
+  describeMerchantSuggestion,
+  SUGGESTION_COPY,
+  type CategorySuggestionView,
+  type MerchantSuggestionView,
+  type SuggestionAvailability,
+} from '@/features/ai/expense-suggestion.presentation';
+import { useExpenseSuggestion } from '@/features/ai/useExpenseSuggestion';
 import type { Category } from '@/features/categories/category.types';
+import {
+  acceptCategorySuggestion,
+  acceptMerchantSuggestion,
+  noteIsReceiptReading,
+  receiptSuggestionContext,
+  receiptSuggestionScope,
+  toCategoryCandidates,
+} from '@/features/receipts/review/receipt-suggestion.model';
 import { ReceiptReading } from '@/features/receipts/scanner/ReceiptReading';
 import {
   buildReceiptReview,
@@ -116,9 +134,22 @@ function ReceiptReviewForm({ draftId }: { draftId: number }) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [confirm, setConfirm] = useState<'discard' | 'rescan' | null>(null);
+  const [detectedMerchant, setDetectedMerchant] = useState<string | null>(null);
   const latest = useRef<ReceiptReview | null>(null);
   const loaded = useRef(false);
   const submitting = useRef(false);
+
+  // Optional AI advice about the category and merchant. It is handed no setter:
+  // a suggestion reaches this form only through the accept handlers below,
+  // which run when the person taps them.
+  const categoryCandidates = useMemo(() => toCategoryCandidates(categories), [categories]);
+  const suggestion = useExpenseSuggestion({
+    scope: receiptSuggestionScope(draftId),
+    context: { merchantCandidate: detectedMerchant },
+    categories: categoryCandidates,
+    active: phase.kind === 'review',
+  });
+  const { cancel: cancelSuggestion, refreshPreference } = suggestion;
 
   const show = useCallback((next: ReceiptReview) => {
     latest.current = next;
@@ -144,6 +175,7 @@ function ReceiptReviewForm({ draftId }: { draftId: number }) {
         return;
       }
       show(buildReceiptReview(draft, new Date()));
+      setDetectedMerchant(receiptSuggestionContext(draft).merchantCandidate);
       try {
         setDefaultCurrency(getAppSettings().defaultCurrency);
       } catch {
@@ -186,7 +218,9 @@ function ReceiptReviewForm({ draftId }: { draftId: number }) {
         loadDraft();
       }
       refreshSelections();
-    }, [loadDraft, refreshSelections]),
+      // Suggestions may have been turned on or off in Settings meanwhile.
+      refreshPreference();
+    }, [loadDraft, refreshSelections, refreshPreference]),
   );
 
   const update = useCallback(
@@ -207,6 +241,9 @@ function ReceiptReviewForm({ draftId }: { draftId: number }) {
     const input = toExpenseInput(current.values);
     if (input === null) return;
 
+    // The person's action wins. Save never waits for a suggestion, and an
+    // answer still on its way is dropped rather than shown on a saved receipt.
+    cancelSuggestion();
     submitting.current = true;
     setSaving(true);
     setSaveError('');
@@ -234,7 +271,7 @@ function ReceiptReviewForm({ draftId }: { draftId: number }) {
       submitting.current = false;
       setSaving(false);
     }
-  }, [draftId, show, toast]);
+  }, [draftId, show, toast, cancelSuggestion]);
 
   const discard = useCallback(async () => {
     setConfirm(null);
@@ -379,6 +416,39 @@ function ReceiptReviewForm({ draftId }: { draftId: number }) {
     label: paymentModeLabels[mode],
   }));
 
+  const categoryView = describeCategorySuggestion(suggestion.state, {
+    categories: categoryCandidates,
+    selectedCategoryId: values.categoryId,
+  });
+  const merchantView = describeMerchantSuggestion(suggestion.state, {
+    detectedMerchant,
+    fieldIsReceiptReading: noteIsReceiptReading(review),
+  });
+  const answer =
+    suggestion.state.phase.status === 'ready' ? suggestion.state.phase.suggestion : null;
+  // Asking only makes sense while there is a category to choose and a merchant to ask about.
+  const askable = values.categoryId === null && detectedMerchant !== null;
+
+  const acceptSuggestedCategory = () => {
+    const current = latest.current;
+    if (current === null || answer === null) return;
+    const next = acceptCategorySuggestion(
+      current,
+      answer,
+      categoryCandidates.map((item) => item.id),
+    );
+    if (next !== current) {
+      show(next);
+      setSaveError('');
+    }
+  };
+  const acceptSuggestedMerchant = () => {
+    const current = latest.current;
+    if (current === null || answer === null) return;
+    const next = acceptMerchantSuggestion(current, answer);
+    if (next !== current) show(next);
+  };
+
   return (
     <FormScreen
       title="Review Receipt"
@@ -436,6 +506,16 @@ function ReceiptReviewForm({ draftId }: { draftId: number }) {
           icon={category !== null && isIconName(category.icon) ? category.icon : undefined}
           onPress={() => setSelector('category')}
         />
+        <CategorySuggestion
+          availability={suggestion.availability}
+          askable={askable}
+          view={categoryView}
+          onAgree={() => suggestion.choosePreference('enabled')}
+          onDecline={() => suggestion.choosePreference('disabled')}
+          onUse={acceptSuggestedCategory}
+          onChooseAnother={() => setSelector('category')}
+          onRetry={suggestion.retry}
+        />
 
         {accounts.length === 0 ? (
           <View style={{ gap: space.md }}>
@@ -481,6 +561,13 @@ function ReceiptReviewForm({ draftId }: { draftId: number }) {
             required={false}
             empty={values.note === ''}
           />
+          {merchantView.kind === 'suggestion' ? (
+            <MerchantSuggestion
+              view={merchantView}
+              onUse={acceptSuggestedMerchant}
+              onKeep={suggestion.dismissMerchant}
+            />
+          ) : null}
         </View>
 
         <View>
@@ -602,6 +689,188 @@ function FieldNote({
 }
 
 /**
+ * The AI's part of the Category field, directly beneath it so a screen reader
+ * reaches it next. It asks before anything is sent, then suggests — and never
+ * selects. A low-confidence answer is headed "Possible category" with a quiet
+ * text action; confidence is always a phrase, never only a colour.
+ */
+function CategorySuggestion({
+  availability,
+  askable,
+  view,
+  onAgree,
+  onDecline,
+  onUse,
+  onChooseAnother,
+  onRetry,
+}: {
+  availability: SuggestionAvailability;
+  askable: boolean;
+  view: CategorySuggestionView;
+  onAgree: () => void;
+  onDecline: () => void;
+  onUse: () => void;
+  onChooseAnother: () => void;
+  onRetry: () => void;
+}) {
+  const { palette, space } = useTheme();
+
+  if (availability === 'needs_consent') {
+    if (!askable) return null;
+    return (
+      <Card style={{ gap: space.md }}>
+        <View style={[styles.note, { gap: space.md }]}>
+          <Icon name="sparkle" size="inline" color={palette.textTertiary} />
+          <Text variant="bodyStrong" style={styles.noteText}>
+            {SUGGESTION_COPY.consentTitle}
+          </Text>
+        </View>
+        <Text variant="small" tone="secondary">
+          {SUGGESTION_COPY.consentBody}
+        </Text>
+        <Text variant="caption" tone="tertiary">
+          {SUGGESTION_COPY.consentFootnote}
+        </Text>
+        <View style={[styles.actions, { gap: space.md }]}>
+          <Button
+            label={SUGGESTION_COPY.consentAccept}
+            variant="secondary"
+            small
+            fullWidth={false}
+            onPress={onAgree}
+          />
+          <Button label={SUGGESTION_COPY.consentDecline} variant="text" small onPress={onDecline} />
+        </View>
+      </Card>
+    );
+  }
+  if (availability === 'sign_in_required') {
+    return askable ? (
+      <Text variant="small" tone="secondary">
+        {SUGGESTION_COPY.signIn}
+      </Text>
+    ) : null;
+  }
+  if (availability !== 'available') return null;
+
+  switch (view.kind) {
+    case 'hidden':
+      return null;
+    case 'loading':
+      return (
+        <View
+          accessible
+          accessibilityLabel={view.message}
+          accessibilityLiveRegion="polite"
+          style={[styles.note, { gap: space.md }]}
+        >
+          <Icon name="sparkle" size="inline" color={palette.textTertiary} />
+          <Text variant="small" tone="secondary" style={styles.noteText}>
+            {view.message}
+          </Text>
+        </View>
+      );
+    case 'message':
+      return (
+        <View style={{ gap: space.sm }}>
+          <Text variant="small" tone="secondary" accessibilityLiveRegion="polite">
+            {view.message}
+          </Text>
+          {view.canRetry ? (
+            <Button
+              label={SUGGESTION_COPY.retry}
+              variant="text"
+              icon="refresh-cw"
+              small
+              onPress={onRetry}
+            />
+          ) : null}
+        </View>
+      );
+    case 'suggestion':
+      return (
+        <Card style={{ gap: space.md }}>
+          <View
+            accessible
+            accessibilityLabel={[view.accessibilityLabel, view.reason]
+              .filter((part): part is string => part !== null)
+              .join(' ')}
+            style={{ gap: space.xs }}
+          >
+            <Text variant="eyebrow" tone="tertiary">
+              {view.title}
+            </Text>
+            <Text variant={view.prominent ? 'bodyStrong' : 'body'}>{view.categoryName}</Text>
+            <Text variant="caption" tone="secondary">
+              {view.confidenceLabel}
+            </Text>
+            {view.reason !== null ? (
+              <Text variant="small" tone="secondary">
+                {view.reason}
+              </Text>
+            ) : null}
+          </View>
+          <View style={[styles.actions, { gap: space.md }]}>
+            <Button
+              label={view.actionLabel}
+              accessibilityLabel={view.actionAccessibilityLabel}
+              variant={view.prominent ? 'secondary' : 'text'}
+              small
+              fullWidth={false}
+              onPress={onUse}
+            />
+            <Button label="Choose Another" variant="text" small onPress={onChooseAnother} />
+          </View>
+        </Card>
+      );
+  }
+}
+
+/**
+ * A cleaner merchant name, beside the receipt's own reading — which stays in
+ * the field until the person taps Use Suggestion. Shown only while the field
+ * is untouched; text someone typed is never offered a replacement.
+ */
+function MerchantSuggestion({
+  view,
+  onUse,
+  onKeep,
+}: {
+  view: Extract<MerchantSuggestionView, { kind: 'suggestion' }>;
+  onUse: () => void;
+  onKeep: () => void;
+}) {
+  const { space } = useTheme();
+  return (
+    <Card style={{ gap: space.md, marginTop: space.md }}>
+      <View accessible accessibilityLabel={view.accessibilityLabel} style={{ gap: space.xs }}>
+        <Text variant="caption" tone="tertiary">
+          Detected
+        </Text>
+        <Text variant="small" tone="secondary">
+          {view.detected}
+        </Text>
+        <Text variant="caption" tone="tertiary">
+          Suggested
+        </Text>
+        <Text variant="bodyStrong">{view.suggested}</Text>
+      </View>
+      <View style={[styles.actions, { gap: space.md }]}>
+        <Button
+          label="Use Suggestion"
+          accessibilityLabel={`Use ${view.suggested} as the merchant`}
+          variant="secondary"
+          small
+          fullWidth={false}
+          onPress={onUse}
+        />
+        <Button label="Keep Detected Text" variant="text" small onPress={onKeep} />
+      </View>
+    </Card>
+  );
+}
+
+/**
  * The receipt, as context beside the form. Rendered at a fixed, small size and
  * downsampled by the platform, so a 12-megapixel photo never becomes a
  * full-resolution bitmap in memory just to be glanced at.
@@ -677,6 +946,8 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'flex-start' },
   headerText: { flex: 1 },
   note: { flexDirection: 'row', alignItems: 'flex-start' },
+  // Wraps under large text rather than crowding the form.
+  actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
   noteText: { flex: 1 },
   photoFallback: { alignItems: 'center', justifyContent: 'center' },
 });

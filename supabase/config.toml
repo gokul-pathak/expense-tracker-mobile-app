@@ -4,3 +4,9 @@ project_id = "personal-expense-tracker"
 enabled = true
 schemas = ["public", "sync"]
 extra_search_path = ["public", "extensions"]
+
+# M9C AI category suggestions. The gateway's legacy JWT check does not support
+# asymmetric signing keys, so the function verifies every caller itself with
+# auth.getClaims() before reading the request body. It is not an open endpoint.
+[functions.suggest-expense-category]
+verify_jwt = false

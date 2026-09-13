@@ -60,6 +60,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "0.125.0",
     "@types/node": "^26.4.1",
     "@types/react": "~19.2.2",
     "drizzle-kit": "^1.0.0-rc.4",

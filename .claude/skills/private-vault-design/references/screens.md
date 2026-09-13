@@ -418,3 +418,13 @@ rather than anything that implies the reading is right.
 - The photo sits at `size.receiptPreview` beside the form as context. There is no image viewer.
 - The button says Save Expense because that is what it does. It disables while saving, and a saved
   receipt cannot be saved a second time from a stale screen.
+- **AI suggestions (M9C)** compose from `Card`, `Text`, `Button` and the `sparkle` icon — no new
+  component. Directly under Category: a consent card the first time (what is sent, what is not,
+  Suggest a Category / No Thanks), then "Finding a category suggestion…", then a card with an
+  eyebrow **Suggested category** (or **Possible category** at low confidence), the name, the
+  confidence in words, a one-line reason, and **Use Food** (secondary; a text button at low
+  confidence) beside **Choose Another**. The category field stays empty until Use is tapped, and the
+  card disappears once any category is chosen. Under Merchant / Note, while it is untouched: Detected
+  / Suggested with Use Suggestion and Keep Detected Text. Failures are one line of secondary text that
+  ends "Choose a category manually." Confidence is never colour alone, and actions wrap under large
+  text.
