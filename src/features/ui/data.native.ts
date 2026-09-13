@@ -116,4 +116,10 @@ export { getReceiptDraft } from '@/features/receipts/receipt-draft.repository';
 export { isReceiptScanningAvailable } from '@/features/receipts/ocr/receipt-ocr';
 export { saveReceiptExpense } from '@/features/receipts/review/receipt-save.service';
 
+// Spending Insights reads only. Nothing exported here for it can write.
+export { buildFinancialContext } from '@/features/insights/financial-context.service';
+export { buildLocalInsights } from '@/features/insights/local-insights';
+export { resolvePresetPeriod as resolveInsightPeriod } from '@/features/insights/insight-period';
+export { contextPlanFor, routeInsightQuestion } from '@/features/insights/insight-router';
+
 export const isLocalFinanceDataAvailable = true;

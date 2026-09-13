@@ -221,13 +221,13 @@ export default function SettingsScreen() {
         <Card padding="none" style={{ marginTop: space.md }}>
           <ListRow
             icon="sparkle"
-            label="AI Category Suggestions"
-            detail="For scanned receipts. Needs a Cloud Account."
+            label="AI Assistance"
+            detail="Receipt category suggestions and Spending Insights explanations. Needs a Cloud Account."
             chevron={false}
             trailing={
               <Switch
                 value={aiPreference === 'enabled'}
-                accessibilityLabel="AI Category Suggestions"
+                accessibilityLabel="AI Assistance"
                 onValueChange={(next) => {
                   const choice = next ? 'enabled' : 'disabled';
                   saveAiSuggestionPreference(choice);
@@ -239,10 +239,11 @@ export default function SettingsScreen() {
           />
         </Card>
         <Text variant="caption" tone="tertiary" style={{ marginTop: space.sm }}>
-          When on, the merchant name read from a receipt and the names of your expense categories
-          are sent to an AI service to suggest a category. Amounts, dates, accounts, notes and
-          receipt photos are not sent. A suggestion is never saved until you choose it and save the
-          expense. This choice applies to this device only.
+          When on, suggesting a receipt&apos;s category sends its merchant name and your expense
+          category names to an AI service; explaining a Spending Insights answer sends your question
+          and the figures the app calculated for it. Receipt photos, your full transaction list,
+          notes and contact details are not sent. AI never changes your records, and your numbers
+          are always shown without it. This choice applies to this device only.
         </Text>
       </View>
 

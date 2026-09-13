@@ -204,7 +204,7 @@ async function withDeadline(
 }
 
 /** The body as text, or null once it passes `max` bytes — whatever Content-Length claimed. */
-async function readBoundedText(request: Request, max: number): Promise<string | null> {
+export async function readBoundedText(request: Request, max: number): Promise<string | null> {
   if (request.body === null) return '';
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];

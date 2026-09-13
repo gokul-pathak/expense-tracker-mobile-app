@@ -338,6 +338,15 @@ export function getPeopleDebtTotals() {
     .all();
 }
 
+/** The currency of each person's debts. One per person: the service refuses a second. */
+export function getPeopleDebtCurrencies() {
+  return db
+    .selectDistinct({ personId: transactions.personId, currency: transactions.currency })
+    .from(transactions)
+    .where(and(notDeleted, inArray(transactions.type, debtTypes)))
+    .all();
+}
+
 export function getPersonTransactionItems(personId: number): PersonTransactionItem[] {
   const account = alias(accounts, 'person_transaction_account');
   return db

@@ -14,6 +14,7 @@ import type {
   CreateRepaymentReceivedInput,
   CreateTransferInput,
   CreateTransactionRecord,
+  PeopleFinancialSummaryByCurrency,
   PersonFinancialSummary,
   Transaction,
   UpdateBorrowInput,
@@ -182,6 +183,36 @@ export function getPeopleFinancialSummary() {
     totalLiabilityMinor: people.reduce((total, person) => total + person.liabilityMinor, 0),
     people,
   };
+}
+
+/**
+ * `getPeopleFinancialSummary`, split by currency.
+ *
+ * Each person's debts are held in one currency (a second is refused when it is
+ * recorded), but different people can be owed in different currencies, and the
+ * overall totals above add them together. This groups the same per-person
+ * balances by currency first, so no total mixes two kinds of money. Settled
+ * people stay in their currency's list with zero balances.
+ */
+export function getPeopleFinancialSummaryByCurrency(): PeopleFinancialSummaryByCurrency[] {
+  const currencyOf = new Map<number, string>();
+  for (const row of repository.getPeopleDebtCurrencies()) {
+    if (row.personId !== null) currencyOf.set(row.personId, row.currency);
+  }
+  const groups = new Map<string, PersonFinancialSummary[]>();
+  for (const person of getPeopleFinancialSummary().people) {
+    const currency = currencyOf.get(person.personId);
+    if (currency === undefined) continue;
+    groups.set(currency, [...(groups.get(currency) ?? []), person]);
+  }
+  return [...groups.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([currency, people]) => ({
+      currency,
+      totalReceivableMinor: people.reduce((total, person) => total + person.receivableMinor, 0),
+      totalLiabilityMinor: people.reduce((total, person) => total + person.liabilityMinor, 0),
+      people,
+    }));
 }
 
 export function getPersonTransactionHistory(personId: number) {

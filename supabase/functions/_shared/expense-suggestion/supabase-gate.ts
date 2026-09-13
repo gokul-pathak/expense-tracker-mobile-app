@@ -21,7 +21,14 @@ export type SupabaseGate = {
   consumeQuota(token: string): Promise<QuotaDecision>;
 };
 
-export function createSupabaseGate(url: string, publishableKey: string): SupabaseGate {
+/** Each AI endpoint has its own quota function, so one feature cannot spend the other's allowance. */
+export type QuotaFunction = 'consume_expense_suggestion_quota' | 'consume_financial_insight_quota';
+
+export function createSupabaseGate(
+  url: string,
+  publishableKey: string,
+  quotaFunction: QuotaFunction = 'consume_expense_suggestion_quota',
+): SupabaseGate {
   const verifier = createClient(url, publishableKey, NO_SESSION);
 
   return {
@@ -35,7 +42,7 @@ export function createSupabaseGate(url: string, publishableKey: string): Supabas
         ...NO_SESSION,
         global: { headers: { Authorization: `Bearer ${token}` } },
       });
-      const { data, error } = await asCaller.rpc('consume_expense_suggestion_quota');
+      const { data, error } = await asCaller.rpc(quotaFunction);
       return error !== null ? 'unavailable' : quotaDecisionOf(data);
     },
   };

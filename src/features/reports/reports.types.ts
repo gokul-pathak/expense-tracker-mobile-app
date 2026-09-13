@@ -15,6 +15,21 @@ export type ReportPreset =
 export type ReportFilters = {
   accountId?: number;
   categoryId?: number;
+  /**
+   * Only transactions recorded in this currency. The app never converts, so a
+   * total that must mean one amount of one money asks for one currency.
+   */
+  currency?: string;
+};
+
+/** One expense among the largest in a range. The note is untrusted personal text. */
+export type LargestExpenseItem = {
+  amountMinor: number;
+  currency: string;
+  transactionDate: Date;
+  categoryName: string | null;
+  title: string;
+  note: string | null;
 };
 
 export type ReportSummary = {

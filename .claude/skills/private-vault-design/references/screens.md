@@ -70,6 +70,7 @@ out on one screen.
 | H5  | Use Face ID                             | lock screen + Settings switch    | Drawn  | 7     | ☑    |
 | I1  | Scan Receipt                            | `receipt/scan.tsx`               | Spec   | 8     | ☑    |
 | I2  | Review Receipt                          | `receipt/review/[draftId].tsx`   | Spec   | 8     | ☑    |
+| I3  | Spending Insights                       | `insights/index.tsx`             | Spec   | 9     | ☐    |
 | —   | Feedback states (Success, Toast, Error) | shared                           | Drawn  | 1     | ☑    |
 
 Tick the box when a screen is done in **both themes** with **all its states**.
@@ -428,3 +429,23 @@ rather than anything that implies the reading is right.
   / Suggested with Use Suggestion and Keep Detected Text. Failures are one line of secondary text that
   ends "Choose a category manually." Confidence is never colour alone, and actions wrap under large
   text.
+
+### I3 · Spending Insights
+
+Not drawn; composes from `FormScreen`, `Chip`, `Card`, `ListRow`, `TextField`, `Button`, `Money`,
+`Text` and `Icon` — no new component. Reached from Reports through **Ask About Your Spending**, a
+one-row card under the summary; never a tab, and Home is unchanged.
+
+- Period chips are the Reports presets; This Month by default.
+- **Your numbers**: one card of hairline-separated rows — caption title, `<Money>` at row size where
+  there is a figure, one factual sentence. Over-budget rows add `triangle-alert` and the words "Over
+  budget"; never colour alone.
+- **Ask about your spending**: six static suggested questions as `ListRow`s, then a labelled
+  `TextField` and **Ask**.
+- **Answer card**: the question in body strong; "Figures for …" in caption; a **From your records**
+  eyebrow over label-and-`<Money>` rows; the app's notes in caption tertiary; then the inline
+  disclosure (**Explain With AI** secondary, **Numbers Only** text), a one-line state, or an **AI
+  explanation** eyebrow with the answer, key points as bullet rows, caveats, and the one-line
+  disclaimer. **Clear** is a text button.
+- A statement, not a chat: no bubbles, no avatars, no judgement words, and no number the app did not
+  calculate shown outside the explanation.

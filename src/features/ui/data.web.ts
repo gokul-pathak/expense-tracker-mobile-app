@@ -103,3 +103,10 @@ export const cleanupExpiredReceiptDrafts = unavailable;
 export const keepReceiptDraftAlive = unavailable;
 export const getReceiptDraft = unavailable;
 export const saveReceiptExpense = unavailable;
+
+// Spending Insights is built from local SQLite, which web does not open.
+export const buildFinancialContext = unavailable;
+export const buildLocalInsights = unavailable;
+export const resolveInsightPeriod = unavailable;
+export const contextPlanFor = unavailable;
+export const routeInsightQuestion = unavailable;

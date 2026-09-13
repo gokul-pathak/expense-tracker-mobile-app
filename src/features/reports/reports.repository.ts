@@ -59,6 +59,45 @@ export function getDailyIncomeExpenseTotals(range: ReportRange, filters?: Report
     .all();
 }
 
+/** The currencies income and expenses in a range were recorded in, alphabetically. */
+export function getIncomeExpenseCurrencies(range: ReportRange) {
+  return db
+    .selectDistinct({ currency: transactions.currency })
+    .from(transactions)
+    .where(
+      and(
+        or(eq(transactions.type, 'income'), eq(transactions.type, 'expense')),
+        rangeCondition(range),
+      ),
+    )
+    .orderBy(transactions.currency)
+    .all()
+    .map((row) => row.currency);
+}
+
+/** The largest expenses in a range, one bounded query. Ties go to the later, then newer, row. */
+export function getLargestExpenses(range: ReportRange, limit: number, filters?: ReportFilters) {
+  return db
+    .select({
+      amountMinor: transactions.amountMinor,
+      currency: transactions.currency,
+      transactionDate: transactions.transactionDate,
+      categoryName: categories.name,
+      title: transactions.title,
+      note: transactions.note,
+    })
+    .from(transactions)
+    .leftJoin(categories, and(liveCategory, eq(transactions.categoryId, categories.id)))
+    .where(and(eq(transactions.type, 'expense'), rangeCondition(range), filterCondition(filters)))
+    .orderBy(
+      desc(transactions.amountMinor),
+      desc(transactions.transactionDate),
+      desc(transactions.id),
+    )
+    .limit(limit)
+    .all();
+}
+
 function rangeCondition(range: ReportRange) {
   return and(
     liveTransaction,
@@ -72,6 +111,7 @@ function filterCondition(filters?: ReportFilters) {
   const conditions = [];
   if (filters.categoryId !== undefined)
     conditions.push(eq(transactions.categoryId, filters.categoryId));
+  if (filters.currency !== undefined) conditions.push(eq(transactions.currency, filters.currency));
   if (filters.accountId !== undefined) {
     conditions.push(
       or(

@@ -358,6 +358,14 @@ Supabase Edge Function logs follow the project's Supabase plan; they hold only t
 - The quota's database guarantees are pgTAP tests in `supabase/tests/ai-suggestion-quota.sql`, run
   by the CI database job.
 
+## Since M9D
+
+Spending Insights reuses this pattern in its own endpoint, `explain-financial-insight`: the same
+authentication and configuration, a separate quota, a closed response schema, numeric grounding of
+every answer, and metadata-only logs. It sends calculated financial figures rather than a merchant
+name, so it has its own disclosure. See
+[`ai-financial-insights-architecture.md`](ai-financial-insights-architecture.md).
+
 ## What M9C does not do
 
 No automatic saving, no automatic category acceptance, no Account inference, no historical

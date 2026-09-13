@@ -82,6 +82,40 @@ only. How the AI provider retains API data is described, with its sources, in
 
 The on/off choice is a device preference, like the theme: it is not synchronized to other devices.
 
+## Spending Insights
+
+Spending Insights shows figures calculated **on the device** from the local database — totals,
+categories, comparisons, budgets, amounts owed and due recurring transactions. The cards and the
+figures beside every answer need no network, no account and no AI.
+
+An **AI explanation** of an answer is optional. It uses the same AI Assistance switch, needs a
+signed-in Cloud Account, and is requested only after a one-time disclosure on the device, and only
+when the person asks a question. Then the question — with phone, card and email patterns removed —
+and the figures the app calculated **for that question** are sent over TLS to this app's
+`explain-financial-insight` Edge Function, which forwards them to Anthropic's Claude API. Depending on
+the question, that can include:
+
+- income, expense and savings totals for the chosen period
+- spending by category, and category changes against the previous period
+- the five largest expenses of the period, each with a short, redacted description
+- the month's budget amounts, spending and remaining
+- total balance per currency, with account names only when the question asks about accounts
+- totals owed to and by the person, with a name only when the question names that person (a ranking
+  uses "Person 1", "Person 2", mapped back to names on the device)
+- due recurring transactions, by type, category, date and amount
+
+**Only the figures for that question are sent.** A spending question sends no balances, budgets,
+people or schedules. Transaction lists, notes other than the largest-expense descriptions, contact
+details, account identifiers, sync and user identifiers, and receipt photos, text and drafts are
+never sent. **Summarized financial information is sent when an explanation is requested; this app
+does not claim otherwise.**
+
+Explanations are shown and discarded: not stored, not backed up, not synchronized. The function logs
+technical metadata and which kinds of figure were present, never their values, the question or the
+answer. A per-account request count is kept to limit cost. Explanations are paused while Cloud Sync
+is linked to a different account than the one signed in, so one person's figures are never sent under
+another's session. Nothing in Spending Insights can change a record.
+
 ## Encryption
 
 Data is encrypted in transit (TLS) and at rest by the cloud provider. **This is not end-to-end

@@ -10,3 +10,7 @@ extra_search_path = ["public", "extensions"]
 # auth.getClaims() before reading the request body. It is not an open endpoint.
 [functions.suggest-expense-category]
 verify_jwt = false
+
+# M9D Spending Insights explanations. Same reason: verified in the function.
+[functions.explain-financial-insight]
+verify_jwt = false

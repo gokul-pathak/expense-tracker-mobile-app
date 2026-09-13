@@ -60,6 +60,18 @@ export type PeopleFinancialSummary = {
   people: PersonFinancialSummary[];
 };
 
+/**
+ * The same balances, grouped by the currency each person's debts are kept in,
+ * so a total never adds rupees to dollars. People with no debt history belong
+ * to no currency and are not listed.
+ */
+export type PeopleFinancialSummaryByCurrency = {
+  currency: string;
+  totalReceivableMinor: number;
+  totalLiabilityMinor: number;
+  people: PersonFinancialSummary[];
+};
+
 export type PersonTransactionItem = {
   id: number;
   type: 'lend' | 'borrow' | 'repayment_received' | 'repayment_paid';

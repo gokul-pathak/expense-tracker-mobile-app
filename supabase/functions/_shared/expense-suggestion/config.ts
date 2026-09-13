@@ -30,12 +30,19 @@ export const SUGGESTION_DEADLINE_MS = 9_000;
 
 const MODEL_ID = /^claude-[a-z0-9.-]+$/;
 
+/** One explanation attempt, and the whole explanation including a retry. */
+export const INSIGHT_ATTEMPT_TIMEOUT_MS = 8_000;
+export const INSIGHT_DEADLINE_MS = 12_000;
+
 export type ServerConfig = {
   supabaseUrl: string | null;
   supabasePublishableKey: string | null;
   provider: 'anthropic' | 'disabled';
   anthropicApiKey: string | null;
   model: string;
+  /** Spending Insights explanations: switched and modelled separately from suggestions. */
+  insightProvider: 'anthropic' | 'disabled';
+  insightModel: string;
 };
 
 export function readServerConfig(get: (name: string) => string | undefined): ServerConfig {
@@ -48,13 +55,23 @@ export function readServerConfig(get: (name: string) => string | undefined): Ser
       ? 'anthropic'
       : 'disabled';
 
+  const insightModel = nonEmpty(get('AI_INSIGHT_MODEL')) ?? DEFAULT_SUGGESTION_MODEL;
+  const insightRequested = nonEmpty(get('AI_INSIGHT_PROVIDER')) ?? 'anthropic';
+  const insightProvider =
+    insightRequested === 'anthropic' && anthropicApiKey !== null && MODEL_ID.test(insightModel)
+      ? 'anthropic'
+      : 'disabled';
+
   return {
     supabaseUrl: nonEmpty(get('SUPABASE_URL')),
     supabasePublishableKey:
       publishableKeyFrom(get('SUPABASE_PUBLISHABLE_KEYS')) ?? nonEmpty(get('SUPABASE_ANON_KEY')),
     provider,
-    anthropicApiKey: provider === 'anthropic' ? anthropicApiKey : null,
+    anthropicApiKey:
+      provider === 'anthropic' || insightProvider === 'anthropic' ? anthropicApiKey : null,
     model,
+    insightProvider,
+    insightModel,
   };
 }
 

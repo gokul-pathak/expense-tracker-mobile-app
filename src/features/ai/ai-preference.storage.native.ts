@@ -1,6 +1,7 @@
 import Storage from 'expo-sqlite/kv-store';
 
 import {
+  AI_INSIGHTS_DISCLOSURE_KEY,
   AI_SUGGESTION_PREFERENCE_KEY,
   parseAiSuggestionPreference,
   type AiSuggestionPreference,
@@ -23,6 +24,23 @@ export function loadAiSuggestionPreference(): AiSuggestionPreference {
 export function saveAiSuggestionPreference(preference: 'enabled' | 'disabled'): boolean {
   try {
     Storage.setItemSync(AI_SUGGESTION_PREFERENCE_KEY, preference);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function loadInsightsDisclosureSeen(): boolean {
+  try {
+    return Storage.getItemSync(AI_INSIGHTS_DISCLOSURE_KEY) === 'accepted';
+  } catch {
+    return false;
+  }
+}
+
+export function saveInsightsDisclosureSeen(): boolean {
+  try {
+    Storage.setItemSync(AI_INSIGHTS_DISCLOSURE_KEY, 'accepted');
     return true;
   } catch {
     return false;

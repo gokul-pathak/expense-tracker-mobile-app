@@ -56,7 +56,9 @@ describe('the AI feature in the app', () => {
       "'@/db/schema",
       '@/features/ui/data',
       'createBudget',
-      'Recurring',
+      'recurring.service',
+      'generateOccurrence',
+      'skipOccurrence',
     ];
     const offenders: string[] = [];
     for (const file of walk(aiFeature)) {
@@ -88,12 +90,15 @@ describe('the AI feature in the app', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('makes its one network call from one file, through the project’s own function', () => {
+  it('makes network calls only from its two providers, through the project’s own functions', () => {
     const callers = [...walk(aiFeature)].filter((file) => {
       const text = source(file);
       return text.includes('functions.invoke') || text.includes('@supabase/supabase-js');
     });
-    expect(callers.map(name)).toEqual(['src/features/ai/supabase-expense-suggestion.provider.ts']);
+    expect(callers.map(name).sort()).toEqual([
+      'src/features/ai/insights/supabase-financial-insight.provider.ts',
+      'src/features/ai/supabase-expense-suggestion.provider.ts',
+    ]);
     for (const file of walk(aiFeature)) expect(source(file)).not.toContain('fetch(');
   });
 
@@ -163,24 +168,38 @@ describe('secrets', () => {
 describe('the suggestion function', () => {
   it('logs from one place, and that place is handed metadata only', () => {
     const loggers = [...walk(functions)].filter((file) => /console\./.test(source(file)));
-    expect(loggers.map(name)).toEqual(['supabase/functions/suggest-expense-category/index.ts']);
+    expect(loggers.map(name).sort()).toEqual([
+      'supabase/functions/explain-financial-insight/index.ts',
+      'supabase/functions/suggest-expense-category/index.ts',
+    ]);
     const index = source(join(functions, 'suggest-expense-category/index.ts'));
     expect(index.match(/console\./g)).toHaveLength(1);
     expect(index).toContain('function log(event: SuggestionLogEvent)');
+    const insight = source(join(functions, 'explain-financial-insight/index.ts'));
+    expect(insight.match(/console\./g)).toHaveLength(1);
+    expect(insight).toContain('function log(event: InsightLogEvent)');
   });
 
   it('gives the model no tools, no database and no way to ask for more', () => {
-    const provider = source(join(functions, '_shared/expense-suggestion/anthropic-provider.ts'));
+    const providers = [
+      source(join(functions, '_shared/expense-suggestion/anthropic-provider.ts')),
+      source(join(functions, '_shared/financial-insight/anthropic-insight-provider.ts')),
+    ];
     // Request parameters, not words in comments.
-    for (const parameter of [
-      /\btools\s*:/,
-      /\btool_choice\s*:/,
-      /\bmcp_servers\s*:/,
-      /\bcontainer\s*:/,
-      /type:\s*'(image|document)'/,
-    ]) {
-      expect(provider).not.toMatch(parameter);
+    for (const provider of providers) {
+      for (const parameter of [
+        /\btools\s*:/,
+        /\btool_choice\s*:/,
+        /\bmcp_servers\s*:/,
+        /\bcontainer\s*:/,
+        /type:\s*'(image|document)'/,
+      ]) {
+        expect(provider).not.toMatch(parameter);
+      }
     }
+    // The insight function has no database access of its own at all.
+    const insight = [...walk(join(functions, '_shared/financial-insight'))].map(source).join('\n');
+    expect(insight).not.toMatch(/\.rpc\(|\.from\(|\.sql|execute\(|createClient/);
     const shared = [...walk(join(functions, '_shared/expense-suggestion'))].map(source).join('\n');
     // The only database call is the caller's own quota.
     expect(shared.match(/\.rpc\(/g)).toHaveLength(1);

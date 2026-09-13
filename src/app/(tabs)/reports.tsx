@@ -186,6 +186,22 @@ export default function ReportsScreen() {
         />
       </Card>
 
+      <Card padding="none" style={{ marginTop: space.md }}>
+        <ListRow
+          icon="sparkle"
+          label="Ask About Your Spending"
+          detail="Explanations of this period's numbers"
+          onPress={() =>
+            router.push(
+              (preset === 'custom'
+                ? `/insights?preset=custom&start=${range.start.getTime()}&end=${range.end.getTime()}`
+                : `/insights?preset=${preset}`) as never,
+            )
+          }
+          last
+        />
+      </Card>
+
       {data.budgets !== null || !empty ? (
         <View style={{ marginTop: space.xxl }}>
           <SectionHeader

@@ -161,6 +161,28 @@ records.
 - [ ] **external** consent card, suggestion card, merchant card, loading and failure states verified
       on Android and iOS, in both themes and at large text
 
+## Spending Insights (M9D)
+
+- [ ] **blocker** `features/insights`, `features/ai/insights` and the Spending Insights screen import
+      no write function, database, SQL or outbox handle (`test/insights/insight-readonly.test.ts`)
+- [ ] **blocker** a hundred questions, including change requests and injected instructions, change no
+      table, balance or outbox entry
+- [ ] **blocker** each intent's context carries only its sections, and never a transaction list,
+      notes other than largest-expense descriptions, contact details or identifiers
+- [ ] **blocker** no figure adds two currencies; a comparison with a zero previous period has no
+      percentage
+- [ ] **blocker** the server and the app each reject an explanation containing a number the context
+      does not
+- [ ] **blocker** the insight quota migration is applied and `supabase/tests/ai-insight-quota.sql`
+      passes
+- [ ] Insight cards and "From your records" figures work offline, signed out and with AI off
+- [ ] Explanations pause during a Cloud Sync account mismatch
+- [ ] **external** `explain-financial-insight` deployed per project; one synthetic question returns a
+      grounded explanation; a request without a session returns 401; the sixth in a minute returns
+      429
+- [ ] **external** Spending Insights verified on Android and iOS in both themes, at large text, on a
+      small screen and with a screen reader
+
 ## Performance
 
 - [ ] A large dataset (5,000+ transactions) uploads and restores in bounded batches

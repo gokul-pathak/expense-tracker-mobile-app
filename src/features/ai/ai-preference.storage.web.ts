@@ -1,4 +1,5 @@
 import {
+  AI_INSIGHTS_DISCLOSURE_KEY,
   AI_SUGGESTION_PREFERENCE_KEY,
   parseAiSuggestionPreference,
   type AiSuggestionPreference,
@@ -20,6 +21,23 @@ export function saveAiSuggestionPreference(preference: 'enabled' | 'disabled'): 
     return true;
   } catch {
     // Private browsing can refuse storage. The choice then lives for the session.
+    return false;
+  }
+}
+
+export function loadInsightsDisclosureSeen(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(AI_INSIGHTS_DISCLOSURE_KEY) === 'accepted';
+  } catch {
+    return false;
+  }
+}
+
+export function saveInsightsDisclosureSeen(): boolean {
+  try {
+    globalThis.localStorage?.setItem(AI_INSIGHTS_DISCLOSURE_KEY, 'accepted');
+    return true;
+  } catch {
     return false;
   }
 }

@@ -14,6 +14,7 @@ import {
 import * as repository from './reports.repository';
 import type {
   CategoryBreakdownItem,
+  LargestExpenseItem,
   MonthlyComparison,
   ReportFilters,
   ReportGranularity,
@@ -62,6 +63,28 @@ export function getReportSummary(range: ReportRange, filters?: ReportFilters): R
     expenseMinor,
     savingsMinor: assertSafeInteger(incomeMinor - expenseMinor, 'Savings'),
   };
+}
+
+/** Currencies with income or expenses in the range, so each can be summarized on its own. */
+export function listReportCurrencies(range: ReportRange): string[] {
+  return repository.getIncomeExpenseCurrencies(range);
+}
+
+export const LARGEST_EXPENSE_LIMIT = 50;
+
+/** The largest expenses in a range, largest first. Bounded: never the whole history. */
+export function getLargestExpenses(
+  range: ReportRange,
+  options: { limit?: number; filters?: ReportFilters } = {},
+): LargestExpenseItem[] {
+  const limit = options.limit ?? 5;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > LARGEST_EXPENSE_LIMIT) {
+    throw new ValidationError(`Ask for between 1 and ${LARGEST_EXPENSE_LIMIT} expenses.`);
+  }
+  return repository.getLargestExpenses(range, limit, options.filters).map((row) => ({
+    ...row,
+    amountMinor: assertSafeInteger(row.amountMinor, 'Expense amount'),
+  }));
 }
 
 export function getExpenseCategoryBreakdown(
