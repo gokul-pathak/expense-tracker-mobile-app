@@ -1,5 +1,5 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -161,6 +161,15 @@ describe('the receipt pipeline and the transaction service', () => {
     dirname(fileURLToPath(import.meta.url)),
     '../../src/features/receipts',
   );
+  const receiptScreensDirectory = join(
+    dirname(fileURLToPath(import.meta.url)),
+    '../../src/app/receipt',
+  );
+  const relative = (file: string) =>
+    file
+      .slice(receiptsDirectory.length + 1)
+      .split(sep)
+      .join('/');
 
   /**
    * A source-level check, deliberately.
@@ -170,16 +179,39 @@ describe('the receipt pipeline and the transaction service', () => {
    * is absent from the feature altogether: M9A cannot create an expense
    * because it never references anything that could.
    */
-  it('contains no call that could create a financial record', () => {
+  it('creates money from exactly one file, and only an expense', () => {
+    const creators: string[] = [];
     const offenders: string[] = [];
     for (const file of walk(receiptsDirectory)) {
       const source = readFileSync(file, 'utf8');
+      if (source.includes('createExpense') || source.includes('transaction.service')) {
+        creators.push(relative(file));
+      }
+      // Never another kind of money, and never the outbox by hand.
+      for (const forbidden of ['createIncome', 'createTransfer', 'enqueueSyncMutation']) {
+        if (source.includes(forbidden)) offenders.push(`${relative(file)}: ${forbidden}`);
+      }
+    }
+    // M9B's Save Expense is the single, deliberate exception. Capture, OCR,
+    // extraction and processing still cannot reach a transaction at all.
+    expect(creators).toEqual(['review/receipt-save.service.ts']);
+    expect(offenders).toEqual([]);
+  });
+
+  it('keeps the receipt screens off the database and the transaction service', () => {
+    const offenders: string[] = [];
+    for (const file of walk(receiptScreensDirectory)) {
+      const source = readFileSync(file, 'utf8');
+      // Screens go through the UI data boundary, and Save Expense through the
+      // one save service — never a repository, never SQL, never createExpense.
+      // Shared constants are not the database; the database itself is.
       for (const forbidden of [
+        "from '@/db'",
+        "'@/db/schema",
+        'drizzle',
         'createExpense',
-        'createIncome',
-        'createTransfer',
         'transaction.service',
-        'enqueueSyncMutation',
+        'repository',
       ]) {
         if (source.includes(forbidden)) offenders.push(`${file}: ${forbidden}`);
       }
@@ -199,19 +231,20 @@ describe('the receipt pipeline and the transaction service', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('logs nothing at all from the receipt pipeline', () => {
+  it('logs nothing at all from the receipt pipeline or its screens', () => {
     const offenders: string[] = [];
-    for (const file of walk(receiptsDirectory)) {
+    for (const file of [...walk(receiptsDirectory), ...walk(receiptScreensDirectory)]) {
       const source = readFileSync(file, 'utf8');
       if (/console\.(log|warn|error|info|debug)/.test(source)) offenders.push(file);
     }
-    // Raw OCR text, merchant names and card fragments all pass through these
-    // files. The simplest way to never log one is to never log.
+    // Raw OCR text, merchant names, card fragments and review values all pass
+    // through these files. The simplest way to never log one is to never log.
     expect(offenders).toEqual([]);
   });
 });
 
 function* walk(directory: string): Generator<string> {
+  if (!existsSync(directory)) return;
   for (const entry of readdirSync(directory)) {
     const path = join(directory, entry);
     if (statSync(path).isDirectory()) {

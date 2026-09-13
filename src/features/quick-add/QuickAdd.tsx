@@ -10,8 +10,11 @@ import {
 } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
-import { BottomSheet, Icon, Text, type IconName } from '@/components/ui';
+import { BottomSheet, Icon, Text } from '@/components/ui';
+import { isReceiptScanningAvailable } from '@/features/ui/data';
 import { useTheme, withAlpha } from '@/theme';
+
+import { getQuickAddTiles, type QuickAddTile as Tile } from './quick-add-tiles';
 
 type QuickAddApi = { open: () => void; close: () => void };
 
@@ -43,59 +46,17 @@ export function useQuickAdd(): QuickAddApi {
   return api;
 }
 
-type Tile = {
-  route: string;
-  icon: IconName;
-  title: string;
-  description: string;
-  /** Which palette colour tints the chip and the tile border. */
-  tone: 'negative' | 'positive' | 'neutral' | 'accent';
-  /** Full width, larger chip, larger title. */
-  primary?: boolean;
-  /** Chip beside the text rather than above it. */
-  horizontal?: boolean;
-};
-
-const tiles: Tile[] = [
-  {
-    route: '/transaction/expense/new',
-    icon: 'arrow-up-right',
-    title: 'Expense',
-    description: 'Money you spent',
-    tone: 'negative',
-    primary: true,
-  },
-  {
-    route: '/transaction/income/new',
-    icon: 'arrow-down-left',
-    title: 'Income',
-    description: 'Money received',
-    tone: 'positive',
-  },
-  {
-    route: '/transaction/transfer/new',
-    icon: 'arrow-left-right',
-    title: 'Transfer',
-    description: 'Between accounts',
-    tone: 'neutral',
-  },
-  {
-    route: '/transaction/people',
-    icon: 'handshake',
-    title: 'Lend / Borrow',
-    description: 'Money with people',
-    tone: 'accent',
-    horizontal: true,
-  },
-];
-
 /**
  * A 2×2 grid where Expense takes the whole top row. It is by far the most-used
  * action, and four identical buttons would make the user read all four every
- * time to find it.
+ * time to find it. Scan Receipt, when this build can read one, comes last and
+ * full width — a way of entering an expense, not a fifth kind of money.
  */
 function QuickAddSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const { space } = useTheme();
+  // Asked on every render of the sheet, which is cheap, so an engine registered
+  // after launch is offered without a restart.
+  const tiles = getQuickAddTiles({ receiptScanning: isReceiptScanningAvailable() });
 
   const choose = useCallback(
     (route: string) => {

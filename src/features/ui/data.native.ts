@@ -101,4 +101,19 @@ export {
   countOutstandingOccurrences,
 } from '@/features/recurring/recurring.service';
 
+export {
+  captureReceiptFromCamera,
+  importReceiptFromLibrary,
+} from '@/features/receipts/capture/receipt-capture.service';
+export {
+  cleanupExpiredReceiptDrafts,
+  discardReceiptDraft,
+  keepReceiptDraftAlive,
+  processReceiptDraft,
+  registerCapturedReceipt,
+} from '@/features/receipts/receipt-processing.service';
+export { getReceiptDraft } from '@/features/receipts/receipt-draft.repository';
+export { isReceiptScanningAvailable } from '@/features/receipts/ocr/receipt-ocr';
+export { saveReceiptExpense } from '@/features/receipts/review/receipt-save.service';
+
 export const isLocalFinanceDataAvailable = true;

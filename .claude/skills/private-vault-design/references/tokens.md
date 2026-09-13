@@ -213,7 +213,9 @@ number retyped per screen. Values live in `size` in `src/theme/tokens.ts`.
 
 The ones worth knowing: `touchTarget` 44 (the floor on both axes, never go under it), `listRow` 56,
 `transactionRow` 68, `control` 52, `button` 48, `buttonLarge` 54, `buttonSmall` 40, `navBar` 56,
-`tabBar` 64, `fab` 56, `chip` 32, `categoryChip` 36, `progressBar` 6.
+`tabBar` 64, `fab` 56, `chip` 32, `categoryChip` 36, `progressBar` 6. `receiptPreview` 120×160 is the
+receipt photo on Scan Receipt and Review Receipt: context for checking a total, never a full-screen
+image viewer.
 
 ## Elevation
 
@@ -330,6 +332,7 @@ listRow          56   transactionRow 68
 navBar           56   tabBar 64   fab 56
 progressBar       6
 sheetHandle      38 x 4
+receiptPreview  120 x 160  the receipt photo beside a review form
 ```
 
 These are named so a row height is one decision rather than a number retyped per screen. When a

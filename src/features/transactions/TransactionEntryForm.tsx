@@ -15,7 +15,6 @@ import {
   ErrorState,
   FormScreen,
   Icon,
-  isIconName,
   PickerSheet,
   SelectorField,
   Skeleton,
@@ -26,6 +25,12 @@ import {
 import { PAYMENT_MODES, type PaymentMode } from '@/db/constants';
 import type { Account } from '@/features/accounts/account.types';
 import type { Category } from '@/features/categories/category.types';
+import {
+  accountIcon,
+  accountTypeLabel,
+  describeDate,
+  paymentModeLabels,
+} from '@/features/transactions/transaction-entry.presentation';
 import type { Transaction, UpdateExpenseInput } from '@/features/transactions/transaction.types';
 import {
   createExpense,
@@ -38,19 +43,8 @@ import {
   updateIncome,
 } from '@/features/ui/data';
 import { getUserErrorMessage } from '@/features/ui/error-message';
-import { accountTypeIcon, useTheme } from '@/theme';
+import { useTheme } from '@/theme';
 import { parseMoneyToMinorUnits } from '@/utils/money';
-
-const paymentModeLabels: Record<PaymentMode, string> = {
-  cash: 'Cash',
-  debit_card: 'Debit Card',
-  credit_card: 'Credit Card',
-  bank_transfer: 'Bank Transfer',
-  qr: 'QR',
-  digital_wallet: 'Digital Wallet',
-  cheque: 'Cheque',
-  other: 'Other',
-};
 
 const formSchema = z.object({
   amount: z.string().superRefine((value, context) => {
@@ -470,30 +464,6 @@ function EntrySkeleton() {
       </View>
     </View>
   );
-}
-
-/** Today and yesterday are named; anything else states its date. */
-function describeDate(date: Date) {
-  const today = new Date();
-  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const startValue = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const difference = Math.round((startToday.getTime() - startValue.getTime()) / 86_400_000);
-  if (difference === 0) return 'Today';
-  if (difference === 1) return 'Yesterday';
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  }).format(date);
-}
-
-function accountIcon(accountType: string) {
-  const key = accountTypeIcon[accountType];
-  return isIconName(key) ? key : 'wallet';
-}
-
-function accountTypeLabel(accountType: string) {
-  return accountType.replace('_', ' ');
 }
 
 function formatDate(date: Date) {

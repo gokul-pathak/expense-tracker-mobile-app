@@ -9,6 +9,7 @@ import m0005 from './20260908090000_cloud_link/migration.sql';
 import m0006 from './20260909120000_budgets/migration.sql';
 import m0007 from './20260911120000_recurring_transactions/migration.sql';
 import m0008 from './20260912120000_receipt_drafts/migration.sql';
+import m0009 from './20260913120000_receipt_draft_finalization/migration.sql';
 
 export default {
   migrations: {
@@ -21,5 +22,6 @@ export default {
     '20260909120000_budgets': m0006,
     '20260911120000_recurring_transactions': m0007,
     '20260912120000_receipt_drafts': m0008,
+    '20260913120000_receipt_draft_finalization': m0009,
   },
 };

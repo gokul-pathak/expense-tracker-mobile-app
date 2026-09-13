@@ -117,6 +117,25 @@ records.
 - [ ] Templates, occurrences and generated transactions round-trip through backup, and a backup with
       a duplicate or underived identity is refused before the database is touched
 
+## Receipt scanning
+
+- [ ] **blocker** no transaction exists before Save Expense — capturing, reading and reviewing a
+      receipt change no balance, budget, report or outbox entry
+- [ ] **blocker** `features/receipts/review/receipt-save.service.ts` is the only receipt file that
+      can create money, and it creates an ordinary expense through the transaction service
+- [ ] **blocker** a receipt saves once: a double tap, a stale screen or a retry finds the draft
+      finalized
+- [ ] **blocker** receipt photos, OCR text and drafts never reach the backup, Cloud Sync or a log
+- [ ] Category and account are always chosen by the person; nothing is inferred from a merchant or
+      a card
+- [ ] A default date is never shown as detected, and uncertain fields say so in words
+- [ ] A refused save leaves the review and its draft intact
+- [ ] A build with no OCR engine does not offer Scan Receipt
+- [ ] **external** an on-device OCR engine is installed and verified on Android and iOS
+      development builds
+- [ ] Camera, photo import, review and Save Expense verified on a real Android and iOS device,
+      including large text and a small screen
+
 ## Performance
 
 - [ ] A large dataset (5,000+ transactions) uploads and restores in bounded batches

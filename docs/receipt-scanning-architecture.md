@@ -279,3 +279,110 @@ today. If an OCR engine with custom native code is added later, it will **not** 
 will require a development build (`npx expo run:android` / `run:ios`, or an EAS build) on both
 platforms. That limitation is a property of native modules and must be documented rather than
 worked around.
+
+## M9B: Review Receipt and Save Expense
+
+M9B completes the flow up to, and including, the one step that creates money:
+
+```
+Quick Add → Scan Receipt
+  ↓  Take Photo / Choose from Photos / Cancel
+  ↓  Reading receipt…          scanner state machine, stale-result guard
+  ↓  Review Receipt            every value editable; category and account always chosen by hand
+  ↓  Save Expense              the single save boundary → the ordinary transaction service
+```
+
+### Entry point
+
+Quick Add gains a fifth tile, **Scan Receipt**, last and full width — but only when
+`isReceiptScanningAvailable()` reports an OCR engine. **No engine ships yet** (the M9A blocker above),
+so on every real build today the tile is absent. That is deliberate: a menu entry that always
+answers "unavailable" is a broken promise. Opening `/receipt/scan` directly on such a build shows a
+plain unavailable state with Add Expense beside it. Web omits the tile and shows the native-data
+notice on the routes.
+
+### The scanner state machine
+
+`features/receipts/scanner/receipt-scanner.state.ts` is a pure reducer over exactly one state at a
+time: `selecting_source`, `capturing`, `processing`, `permission_denied`, `unsupported_image`,
+`unavailable`, `failed`, `ready`, `cancelled`. The screen performs capture and OCR and reports back
+with events; every transition is tested without a phone.
+
+- **Cancelling the picker is not a failure.** It returns to the source choice with no error.
+- **A refused camera** explains what it needs and offers Choose from Photos and Open Settings. It
+  never re-prompts on its own.
+- **Stale results are ignored.** Starting, retrying, choosing another photo and leaving all bump a
+  `run` counter; a result carrying an older run changes nothing. Leaving mid-read also discards the
+  unfinished draft, so a slow read can never pull someone back into a review they walked away from.
+- **Retry reuses the same draft and photo.** A photo the OS has since evicted cannot be retried; the
+  person is offered another photo instead.
+- **No engine** is reported as the build being unable to scan, never as this receipt failing.
+
+### Review Receipt
+
+`features/receipts/review/receipt-review.model.ts` holds every decision the review makes, as plain
+functions; the screen renders them.
+
+| Value        | Prefill                                                | Marked                                                                               |
+| ------------ | ------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| Amount       | the reading, if any — never 0                          | nothing if confident; **Needs review** if not; **Not detected** and empty if absent  |
+| Date         | the reading; otherwise **today**, as a default         | today is marked **Not detected** and says why, so a default never reads as a reading |
+| Merchant     | into the ordinary **Note** field, visible and editable | Needs review if uncertain                                                            |
+| Payment mode | the suggestion, if any                                 | Needs review; removable                                                              |
+| Category     | **always empty**                                       | required                                                                             |
+| Account      | **always empty**                                       | required                                                                             |
+
+- **The person wins.** An edited field stops being a receipt field: its marker goes, and nothing the
+  receipt said is ever put back — clearing a merchant leaves it cleared.
+- **Uncertainty is in words**, and screen readers hear it: "Amount, needs review", "Amount,
+  required", "Date, not detected on the receipt".
+- **Currency follows the account**, as it does for every expense. When the receipt explicitly names
+  a different currency, the review says plainly that the amount will be saved in the account's
+  currency without conversion. A currency the app only assumed says nothing.
+- **Selections that vanish** — an account archived or a category deleted on another device mid-review
+  — are cleared on refocus, without touching the amount, date or note already typed.
+- **Merchant has no column.** Transactions have `title` and `note`, and the manual form exposes
+  `note`, so a detected merchant is prefilled there, in plain sight. Nothing is added to a saved
+  expense that the person did not see.
+
+### The save boundary
+
+`features/receipts/review/receipt-save.service.ts` is the **only** file under `features/receipts`
+that references the transaction service, and `test/receipts/receipt-privacy.test.ts` fails if any
+other file does. Capture, OCR, extraction and processing still cannot reach a transaction at all.
+Receipt screens cannot reach the database or the transaction service either; they go through
+`features/ui/data`.
+
+Save Expense calls `createExpense` with exactly what the person reviewed. Every rule a typed expense
+meets applies — active account, expense category, positive safe-integer amount, account currency —
+because there is no second path for a rule to be missing from. A refusal leaves the review and its
+draft untouched, mapped to a sentence the person can act on; anything unexpected becomes "We
+couldn't save this expense. Try again." and never a stack trace.
+
+**A receipt saves once.** `receipt_drafts.finalized_transaction_id` is set in the same synchronous
+run as the expense, with no `await` between the check, the expense and the marker. On one
+JavaScript thread, a double tap, a stale screen or a retry after a failed navigation always finds
+the draft finalized and is told which expense it became. The column is deliberately not a foreign
+key: choosing the cloud's copy during reconciliation hard-deletes local transactions, and a
+constraint on a scratch table must not be able to block that.
+
+**The expense is the record.** Deleting the photo afterwards is housekeeping; if it fails, the
+expense stands and the stale-draft sweep removes the file later. On finalization the draft's
+candidates are cleared, and the row itself is swept after a day.
+
+**No provenance is stored on the transaction.** There is no generic entry-source field, and adding
+one means a schema, sync, backup and cloud migration for a flag the feature does not need. A
+scanned expense is an ordinary expense.
+
+### What changes after Save Expense — and only then
+
+Balances, Home, Reports, Budgets and the cloud outbox all update exactly as for a typed expense,
+because it is one. A receipt dated 31 August and saved on 12 September moves the balance now and
+lands in August's report and August's budget. The photo, the OCR text and the draft never reach the
+outbox, the backup or a log.
+
+### Verification limits
+
+The screens are thin arrangements of the reducer and view model, which are tested; this repository
+has no component-rendering test harness, so layout, keyboard behaviour and large text are **not**
+machine-verified. And without an OCR engine, the full flow has not run on a device.

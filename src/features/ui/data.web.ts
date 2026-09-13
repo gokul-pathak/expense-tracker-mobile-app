@@ -89,3 +89,17 @@ export const getRecurringHomeSummary = unavailable;
 export const listTemplateHistory = unavailable;
 export const getRecurringProvenance = unavailable;
 export const countOutstandingOccurrences = unavailable;
+
+// Receipt scanning needs an on-device OCR engine and local SQLite, and web has
+// neither. The menu asks `isReceiptScanningAvailable` first, so these are never
+// reached from a screen.
+export const isReceiptScanningAvailable = () => false;
+export const captureReceiptFromCamera = unavailable;
+export const importReceiptFromLibrary = unavailable;
+export const registerCapturedReceipt = unavailable;
+export const processReceiptDraft = unavailable;
+export const discardReceiptDraft = unavailable;
+export const cleanupExpiredReceiptDrafts = unavailable;
+export const keepReceiptDraftAlive = unavailable;
+export const getReceiptDraft = unavailable;
+export const saveReceiptExpense = unavailable;

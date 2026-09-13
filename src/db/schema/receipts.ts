@@ -1,7 +1,11 @@
 import { sql } from 'drizzle-orm';
 import { check, index, int, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
-import { RECEIPT_PROCESSING_STATUSES, type ReceiptProcessingStatusName } from '../constants';
+import {
+  RECEIPT_PROCESSING_STATUSES,
+  type ReceiptProcessingStatusName,
+  type PaymentMode,
+} from '../constants';
 
 const statusList = RECEIPT_PROCESSING_STATUSES.map((value) => `'${value}'`).join(', ');
 
@@ -43,6 +47,8 @@ export const receiptDrafts = sqliteTable(
     currency: text('currency'),
     /** `YYYY-MM-DD`, the same calendar text the rest of the app uses. */
     transactionDate: text('transaction_date'),
+    /** A payment-mode suggestion. Never used to choose an account. */
+    paymentMode: text('payment_mode').$type<PaymentMode>(),
 
     /** Per-field confidence and basis, as JSON. No amounts beyond the ones above, no OCR text. */
     confidence: text('confidence'),
@@ -63,6 +69,18 @@ export const receiptDrafts = sqliteTable(
     updatedAt: int('updated_at', { mode: 'timestamp_ms' }).notNull(),
     /** When the cleanup sweep may remove this draft and its image. */
     expiresAt: int('expires_at', { mode: 'timestamp_ms' }),
+
+    /**
+     * The expense this receipt became, once someone pressed Save Expense.
+     *
+     * Set once, and it is what stops a second save: a stale review screen, a
+     * back-navigation, or a double tap all find it and are told the receipt is
+     * already saved. Deliberately not a foreign key. Choosing the cloud's copy
+     * during reconciliation hard-deletes local transactions, and a constraint
+     * here would make that fail on account of a scratch table.
+     */
+    finalizedTransactionId: int('finalized_transaction_id'),
+    finalizedAt: int('finalized_at', { mode: 'timestamp_ms' }),
   },
   (t) => [
     check('valid_receipt_status', sql`\`status\` IN (${sql.raw(statusList)})`),

@@ -1,4 +1,4 @@
-import { and, asc, eq, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, lte, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
 import { receiptDrafts, type ReceiptDraftRow } from '@/db/schema/receipts';
@@ -29,6 +29,7 @@ export type ReceiptDraftConfidence = {
   currency?: { confidence: string; basis: string; source: string };
   date?: { confidence: string; basis: string };
   merchant?: { confidence: string; basis: string };
+  paymentMode?: { confidence: string; basis: string };
 };
 
 export function createReceiptDraft(imageUri: string, expiresAt: Date | null): StoredReceiptDraft {
@@ -74,7 +75,8 @@ export function beginProcessing(id: number): number | null {
       processingGeneration: sql`${receiptDrafts.processingGeneration} + 1`,
       updatedAt: new Date(),
     })
-    .where(eq(receiptDrafts.id, id))
+    // A saved receipt is finished. Nothing may restart reading it.
+    .where(and(eq(receiptDrafts.id, id), isNull(receiptDrafts.finalizedTransactionId)))
     .returning()
     .get();
   return row === undefined ? null : row.processingGeneration;
@@ -99,6 +101,7 @@ export function applyExtraction(
     },
     date: { confidence: draft.transactionDate.confidence, basis: draft.transactionDate.basis },
     merchant: { confidence: draft.merchantName.confidence, basis: draft.merchantName.basis },
+    paymentMode: { confidence: draft.paymentMode.confidence, basis: draft.paymentMode.basis },
   };
 
   const updated = db
@@ -110,6 +113,7 @@ export function applyExtraction(
       amountMinor: draft.amountMinor.value,
       currency: draft.currency.value,
       transactionDate: draft.transactionDate.value,
+      paymentMode: draft.paymentMode.value,
       confidence: JSON.stringify(confidence),
       parserVersion: draft.parserVersion,
       ocrProvider,
@@ -134,6 +138,7 @@ export function markFailed(id: number, generation: number, reason: ReceiptFailur
       amountMinor: null,
       currency: null,
       transactionDate: null,
+      paymentMode: null,
       confidence: null,
       updatedAt: new Date(),
     })
@@ -180,8 +185,50 @@ export function touchReceiptDraft(id: number, expiresAt: Date | null): void {
     .run();
 }
 
+/**
+ * Records that this receipt became an expense. Once only.
+ *
+ * Returns false when the draft was already finalized, or no longer exists —
+ * the caller then knows its expense is not the one on record. The extracted
+ * candidates are cleared at the same time: the expense is the record now, and
+ * a merchant name and an amount have no reason to linger in a scratch table.
+ */
+export function markReceiptDraftFinalized(
+  id: number,
+  transactionId: number,
+  expiresAt: Date,
+): boolean {
+  const now = new Date();
+  const updated = db
+    .update(receiptDrafts)
+    .set({
+      finalizedTransactionId: transactionId,
+      finalizedAt: now,
+      merchantName: null,
+      amountMinor: null,
+      currency: null,
+      transactionDate: null,
+      paymentMode: null,
+      confidence: null,
+      expiresAt,
+      updatedAt: now,
+    })
+    .where(and(eq(receiptDrafts.id, id), isNull(receiptDrafts.finalizedTransactionId)))
+    .returning()
+    .get();
+  return updated !== undefined;
+}
+
+/**
+ * The run that may write, and only while the draft is unsaved. A late OCR result
+ * arriving after Save Expense must not rewrite a receipt that is now an expense.
+ */
 function current(id: number, generation: number) {
-  return and(eq(receiptDrafts.id, id), eq(receiptDrafts.processingGeneration, generation));
+  return and(
+    eq(receiptDrafts.id, id),
+    eq(receiptDrafts.processingGeneration, generation),
+    isNull(receiptDrafts.finalizedTransactionId),
+  );
 }
 
 function hydrate(row: ReceiptDraftRow): StoredReceiptDraft {

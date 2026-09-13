@@ -5,8 +5,9 @@ creates no transaction, shows no screen, and sends nothing off the device.
 
 The one thing to know before changing anything here: **OCR output is untrusted, and a draft is not
 money.** A statistical model reading a crumpled photograph produces evidence, not a record. Nothing
-in this feature may reach a balance, a budget, a report or the outbox — M9B will turn a reviewed
-draft into an ordinary expense, with a person's explicit say-so.
+in this feature may reach a balance, a budget, a report or the outbox — The single
+exception is `review/receipt-save.service.ts`, which turns a reviewed draft into an ordinary
+expense only when a person presses Save Expense.
 
 The second thing: **every field can be null, and a failure is not an empty draft.** An unreadable
 receipt yields `status: 'failed'` with a reason. It must never yield an expense of 0.00, which is a
@@ -23,6 +24,9 @@ review screen.
 | `extraction/`                            | pure functions: normalise, money, amount, date, merchant, currency |
 | `receipt-draft.repository.ts`            | the local-only `receipt_drafts` table                              |
 | `receipt-processing.service.ts`          | orchestration, states, and the stale-result guard                  |
+| `scanner/receipt-scanner.state.ts`       | the pure state machine behind Scan Receipt                         |
+| `review/receipt-review.model.ts`         | what Review Receipt prefills, flags, requires and saves            |
+| `review/receipt-save.service.ts`         | **the only file here that creates money** — Save Expense           |
 
 `extraction/` takes text and context and returns a draft. No clock, no database, no settings
 lookup — which is what makes `test/receipts/receipt-parser.test.ts` a specification rather than a

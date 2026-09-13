@@ -68,6 +68,8 @@ out on one screen.
 | H3  | Terms & Conditions                      | `first-run/FirstRunGate.tsx`     | Drawn  | 7     | ☑    |
 | H4  | Forgot Password                         | `cloud-sync/forgot-password.tsx` | Drawn  | 7     | ☑    |
 | H5  | Use Face ID                             | lock screen + Settings switch    | Drawn  | 7     | ☑    |
+| I1  | Scan Receipt                            | `receipt/scan.tsx`               | Spec   | 8     | ☑    |
+| I2  | Review Receipt                          | `receipt/review/[draftId].tsx`   | Spec   | 8     | ☑    |
 | —   | Feedback states (Success, Toast, Error) | shared                           | Drawn  | 1     | ☑    |
 
 Tick the box when a screen is done in **both themes** with **all its states**.
@@ -91,6 +93,10 @@ its centre.
 Currently a full page of four identical buttons. It becomes a **bottom sheet** over the previous
 screen — 2×2 grid of tiles with icon, title, one-line description. Expense is visually primary; it
 is by far the most-used action.
+
+A fifth full-width tile, **Scan Receipt**, sits last — but only on a build that has an OCR engine.
+Without one the tile is absent rather than disabled: an entry that always answers "unavailable" is
+a broken promise, not a feature.
 
 ### A4 · Reports
 
@@ -384,3 +390,31 @@ Rows         Groceries −NPR 4,250.00 · Bhatbhateni · Card
 
 Include at least one lakh-grouped figure (`1,24,500`) somewhere visible so the locale formatting
 stays honest.
+
+### I1 · Scan Receipt
+
+Not drawn; composes from `FormScreen`, `ListRow`, `Banner` and `ErrorState`. One screen owns the
+whole acquisition, driven by the pure state machine in `features/receipts/scanner`: the source
+choice (Take Photo / Choose from Photos / Cancel), the open picker, **Reading receipt…** with an
+indeterminate indicator and never a percentage, and the failure states.
+
+Cancelling the camera returns to the choice with no error anywhere — changing your mind is not a
+failed scan. A refused camera says what it needs and offers Choose from Photos and Open Settings,
+and never re-prompts on its own. A receipt that could not be read offers Try Again, Choose Another
+Photo, Enter Expense Manually (the ordinary Add Expense form, not a second one) and Cancel.
+
+### I2 · Review Receipt
+
+Not drawn; composes from `AmountInput`, `SelectorField`, `TextField`, `PickerSheet`, `Banner` and
+`Dialog`, the same primitives as Add Expense. This screen is the accounting gate: nothing the
+receipt said is money until the person presses **Save Expense**, and the title says Review Receipt
+rather than anything that implies the reading is right.
+
+- Only uncertainty is marked. A confidently read field shows nothing; a guessed one says **Needs
+  review** and a missing one **Not detected**, in text — never colour alone.
+- Category and account start empty, always. Nothing is inferred from a merchant name or a card.
+- A date that was not on the receipt shows today, marked Not detected, so a default never reads as
+  a reading.
+- The photo sits at `size.receiptPreview` beside the form as context. There is no image viewer.
+- The button says Save Expense because that is what it does. It disables while saving, and a saved
+  receipt cannot be saved a second time from a stale screen.

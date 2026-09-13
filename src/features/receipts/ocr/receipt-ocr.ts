@@ -58,6 +58,9 @@ export type ReceiptOcrProvider = {
   recognize(image: ReceiptImageAsset): Promise<ReceiptOcrResult>;
 };
 
+/** The id every unavailable provider carries, and the one the menu checks for. */
+const UNAVAILABLE_PROVIDER_ID = 'unavailable';
+
 /**
  * The provider used when none has been registered.
  *
@@ -68,7 +71,7 @@ export type ReceiptOcrProvider = {
  */
 export function createUnavailableOcrProvider(reason: string): ReceiptOcrProvider {
   return {
-    id: 'unavailable',
+    id: UNAVAILABLE_PROVIDER_ID,
     getCapability: async () => ({ status: 'unsupported', reason }),
     recognize: async () => {
       throw new OcrUnavailableError(reason);
@@ -107,4 +110,15 @@ export function getReceiptOcrProvider(): ReceiptOcrProvider {
 /** Restores the unavailable default. Used between tests. */
 export function resetReceiptOcrProvider(): void {
   provider = createUnavailableOcrProvider(DEFAULT_REASON);
+}
+
+/**
+ * Whether this build can read a receipt at all.
+ *
+ * Synchronous, so a menu can decide whether to offer scanning without waiting.
+ * It answers only "is there an engine" — camera permission is a separate
+ * question, asked at the moment someone actually chooses to take a photo.
+ */
+export function isReceiptScanningAvailable(): boolean {
+  return provider.id !== UNAVAILABLE_PROVIDER_ID;
 }

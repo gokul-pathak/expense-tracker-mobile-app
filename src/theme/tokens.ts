@@ -174,6 +174,12 @@ export const size = {
   sheetHandle: { width: 38, height: 4 },
   /** The blinking caret beside an amount being entered. */
   caret: { width: 2, height: 40 },
+  /**
+   * The receipt photo on Scan Receipt and Review Receipt. Big enough to check a
+   * total against, small enough to leave the form beside it — it is context for
+   * a review, not an image viewer, and a full-resolution render costs memory.
+   */
+  receiptPreview: { width: 120, height: 160 },
 } as const;
 
 /** Backdrop behind a presented sheet. */
