@@ -313,6 +313,38 @@ describe('Save Expense from a scanned receipt', () => {
     expect(countRows('transactions')).toBe(before + 1);
   });
 
+  it('keeps no expense whose receipt could not be marked saved, so a retry saves once', async () => {
+    const cash = makeAccount('Cash', 'NPR', 1_000_000);
+    const food = expenseCategory('Food');
+    const draftId = await scanned();
+    const input = inputOf(reviewed(draftId, food.id, cash.id));
+    const before = snapshot(cash.id);
+
+    // The second write of the save fails: a full disk, an I/O error, or the
+    // process dying between two commits. An expense that outlived its marker
+    // would reopen as an unsaved review, and saving it again would be a duplicate.
+    rawClient().exec(`CREATE TRIGGER refuse_finalize
+      BEFORE UPDATE OF finalized_transaction_id ON receipt_drafts
+      BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END;`);
+
+    await expect(saveReceiptExpense(draftId, input)).rejects.toThrow();
+
+    // Both writes, or neither.
+    expect(snapshot(cash.id)).toEqual(before);
+    const draft = getReceiptDraft(draftId);
+    expect(draft?.finalizedTransactionId).toBeNull();
+    expect(draft?.status).toBe('ready_for_review');
+    expect(files.present.has(IMAGE)).toBe(true);
+
+    rawClient().exec('DROP TRIGGER refuse_finalize');
+    const retry = await saveReceiptExpense(draftId, input);
+
+    expect(retry.status).toBe('saved');
+    expect(countRows('transactions')).toBe(before.transactions + 1);
+    expect(countPendingSyncMutations()).toBe(before.pending + 1);
+    expect(getAccountBalance(cash.id)).toBe(898_300);
+  });
+
   it('refuses a draft that never finished reading, or no longer exists', async () => {
     const cash = makeAccount('Cash', 'NPR', 1_000_000);
     const food = expenseCategory('Food');

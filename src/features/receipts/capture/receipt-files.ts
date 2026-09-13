@@ -79,14 +79,18 @@ export async function deleteReceiptFile(uri: string): Promise<void> {
 }
 
 /**
- * Removes working files older than `maxAgeMs`.
+ * Removes working files at least `maxAgeMs` old that no draft refers to.
  *
  * Only this directory, and only images: it has no idea what a transaction is
- * and cannot reach one. Files belonging to drafts still being worked on are
- * protected by age alone here — the draft-aware sweep in
- * `receipt-cleanup.ts` is the one that knows which drafts are live.
+ * and cannot reach one. `keep` holds the images live drafts point at, which are
+ * never removed here whatever their age; the draft sweep in
+ * `receipt-processing.service.ts` is the one that knows which drafts are live.
  */
-export async function deleteStaleReceiptFiles(maxAgeMs: number, now = Date.now()): Promise<number> {
+export async function deleteStaleReceiptFiles(
+  maxAgeMs: number,
+  keep: ReadonlySet<string>,
+  now = Date.now(),
+): Promise<number> {
   const path = directory();
   const info = await FileSystem.getInfoAsync(path);
   if (!info.exists) return 0;
@@ -95,6 +99,7 @@ export async function deleteStaleReceiptFiles(maxAgeMs: number, now = Date.now()
   let removed = 0;
   for (const name of names) {
     const uri = `${path}${name}`;
+    if (keep.has(uri)) continue;
     const file = await FileSystem.getInfoAsync(uri);
     if (!file.exists) continue;
     const modified = (file.modificationTime ?? 0) * 1000;

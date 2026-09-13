@@ -315,19 +315,26 @@ describe('what Review Receipt shows beside Merchant / Note', () => {
 
 describe('whether suggestions are offered at all', () => {
   it.each([
-    [false, 'enabled', 'signed_in', 'hidden'],
-    [true, 'disabled', 'signed_in', 'hidden'],
-    [true, 'enabled', 'unconfigured', 'hidden'],
-    [true, 'enabled', 'initializing', 'hidden'],
-    [true, 'unset', 'signed_out', 'hidden'],
-    [true, 'enabled', 'signed_out', 'sign_in_required'],
-    [true, 'enabled', 'error', 'sign_in_required'],
-    [true, 'unset', 'signed_in', 'needs_consent'],
-    [true, 'enabled', 'signed_in', 'available'],
+    [false, 'enabled', 'signed_in', 'synced', 'hidden'],
+    [true, 'disabled', 'signed_in', 'synced', 'hidden'],
+    [true, 'enabled', 'unconfigured', 'local_only', 'hidden'],
+    [true, 'enabled', 'initializing', 'synced', 'hidden'],
+    [true, 'unset', 'signed_out', 'auth_required', 'hidden'],
+    [true, 'enabled', 'signed_out', 'auth_required', 'sign_in_required'],
+    [true, 'enabled', 'error', 'error', 'sign_in_required'],
+    [true, 'unset', 'signed_in', 'synced', 'needs_consent'],
+    [true, 'enabled', 'signed_in', 'synced', 'available'],
+    // This device's records belong to another account: nothing is sent under this one.
+    [true, 'enabled', 'signed_in', 'account_mismatch', 'hidden'],
+    [true, 'enabled', 'signed_in', 'reconciliation_required', 'hidden'],
+    [true, 'enabled', 'signed_in', 'linking', 'hidden'],
+    [true, 'unset', 'signed_in', 'account_mismatch', 'hidden'],
   ] as const)(
-    'configured %s, preference %s, auth %s → %s',
-    (configured, preference, authStatus, expected) => {
-      expect(suggestionAvailability({ configured, preference, authStatus })).toBe(expected);
+    'configured %s, preference %s, auth %s, sync %s → %s',
+    (configured, preference, authStatus, syncStatus, expected) => {
+      expect(suggestionAvailability({ configured, preference, authStatus, syncStatus })).toBe(
+        expected,
+      );
     },
   );
 

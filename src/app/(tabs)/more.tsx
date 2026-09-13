@@ -63,7 +63,7 @@ export default function MoreScreen() {
         recurringDue: recurring.dueCount,
       });
     } catch (error) {
-      console.error('Could not load your setup.', error);
+      if (__DEV__) console.error('Could not load your setup.', error);
       setFailed(true);
     }
   }, []);

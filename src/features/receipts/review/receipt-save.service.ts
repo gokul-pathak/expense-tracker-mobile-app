@@ -1,4 +1,7 @@
-import { createExpense } from '@/features/transactions/transaction.service';
+import { db } from '@/db';
+import { ConflictError } from '@/features/shared/errors';
+import { insertTransaction } from '@/features/transactions/transaction.repository';
+import { prepareExpense } from '@/features/transactions/transaction.service';
 import type { CreateExpenseInput } from '@/features/transactions/transaction.types';
 
 import { deleteReceiptFile } from '../capture/receipt-files';
@@ -8,18 +11,22 @@ import * as repository from '../receipt-draft.repository';
  * Save Expense. The only place in the receipt feature that creates money.
  *
  * Everything else under `features/receipts` is forbidden — by test — from
- * referencing the transaction service at all. This file is the single,
- * deliberate exception, and it does one thing: after a person has reviewed a
- * receipt and pressed Save Expense, it asks the ordinary transaction service
- * for an ordinary expense. Every rule a typed expense meets applies — an active
- * account, an expense category, a positive safe-integer amount, the account's
- * currency — because there is no second path for the rules to be missing from.
+ * referencing the transaction service or repository at all. This file is the
+ * single, deliberate exception, and it does one thing: after a person has
+ * reviewed a receipt and pressed Save Expense, it writes an ordinary expense.
+ * The expense is built by the same function `createExpense` uses, so every rule
+ * a typed expense meets applies — an active account, an expense category, a
+ * positive safe-integer amount, the account's currency — because there is no
+ * second path for the rules to be missing from.
  *
- * Saving twice is refused by the draft, not only by a disabled button. The
- * check, the expense and the finalization run back to back with no `await`
- * between them, so on a single JavaScript thread a second tap, a stale screen
- * or a back-navigation retry always finds the draft already finalized and is
- * told which expense it became.
+ * Saving twice is refused by the draft, not only by a disabled button, and the
+ * refusal survives a crash. The expense, its outbox entry and the draft's
+ * finalization are one SQLite transaction. There is no committed state in which
+ * the expense exists while the draft still reads as unsaved — which is the state
+ * that would reopen as a review after a restart, a full disk or an I/O error,
+ * and turn the next Save Expense into a duplicate. So a second tap, a stale
+ * screen, a back-navigation retry or a restart always finds the draft finalized
+ * and is told which expense it became.
  */
 
 /**
@@ -39,12 +46,13 @@ export type ReceiptSaveResult =
   | { status: 'draft_unavailable' };
 
 /**
- * Creates the reviewed expense and retires the draft.
+ * Creates the reviewed expense and retires the draft, atomically.
  *
- * Throws whatever the transaction service throws, with the draft untouched,
- * so a refused save can be corrected and tried again. Removing the photo
- * afterwards is housekeeping: if it fails the expense stands regardless, and
- * the stale-draft sweep removes the file later.
+ * Throws whatever the transaction rules or SQLite throw, with the draft
+ * untouched and no expense written, so a refused or failed save can be
+ * corrected and tried again. Removing the photo afterwards is housekeeping: if
+ * it fails the expense stands regardless, and the stale-draft sweep removes the
+ * file later.
  */
 export async function saveReceiptExpense(
   draftId: number,
@@ -58,14 +66,22 @@ export async function saveReceiptExpense(
   }
   if (draft.status !== 'ready_for_review') return { status: 'draft_unavailable' };
 
-  const transaction = createExpense(input);
-  repository.markReceiptDraftFinalized(
-    draftId,
-    transaction.id,
-    new Date(now.getTime() + FINALIZED_DRAFT_RETENTION_MS),
-  );
+  // Refused here, before anything is written, exactly as Add Expense refuses it.
+  const record = prepareExpense(input);
+  const expiresAt = new Date(now.getTime() + FINALIZED_DRAFT_RETENTION_MS);
 
-  // Everything financial is done. Nothing below can undo it.
+  const transaction = db.transaction((tx) => {
+    const created = insertTransaction(tx, record);
+    // The check that commits. Nothing can change the draft between the read
+    // above and here on one thread — but if it ever did, keeping this expense
+    // is exactly the duplicate this function exists to prevent.
+    if (!repository.markReceiptDraftFinalized(draftId, created.id, expiresAt, tx)) {
+      throw new ConflictError('This receipt changed while it was being saved. Nothing was saved.');
+    }
+    return created;
+  });
+
+  // Everything financial is committed. Nothing below can undo it.
   try {
     await deleteReceiptFile(draft.imageUri);
   } catch {

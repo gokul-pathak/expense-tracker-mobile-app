@@ -90,7 +90,7 @@ describe('a valid answer', () => {
 
   it('cleans control characters out of plain text rather than rendering them', () => {
     const result = validateSuggestionResponse(
-      body({ reason: 'Merchant appears to be a café.‮' }),
+      body({ reason: 'Merchant\u0007 appears to be a café.\u202E' }),
       prepared(),
     );
     expect(result.status === 'suggested' && result.suggestion.reason).toBe(

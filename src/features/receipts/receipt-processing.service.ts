@@ -2,7 +2,11 @@ import { DEFAULT_CURRENCY } from '@/db/constants';
 import { localDateOf } from '@/features/recurring/recurring-schedule';
 import * as settingsRepository from '@/features/settings/settings.repository';
 
-import { deleteReceiptFile, receiptFileExists } from './capture/receipt-files';
+import {
+  deleteReceiptFile,
+  deleteStaleReceiptFiles,
+  receiptFileExists,
+} from './capture/receipt-files';
 import { extractReceiptDraft } from './extraction/receipt-extraction';
 import { getReceiptOcrProvider } from './ocr/receipt-ocr';
 import * as repository from './receipt-draft.repository';
@@ -128,11 +132,18 @@ export async function discardReceiptDraft(id: number): Promise<void> {
 }
 
 /**
- * Removes drafts whose expiry has passed, and their images.
+ * Removes drafts whose expiry has passed, and their images — then any image in
+ * the working directory that no draft points at any more.
  *
  * Expiry is a stored date rather than a timer, so a draft someone is part-way
  * through reviewing is never swept out from under them: touching it pushes the
  * date out. Financial records are not reachable from here at all.
+ *
+ * The second pass is what keeps a photo temporary when housekeeping itself
+ * fails. An image whose delete failed after its draft row went, or one staged a
+ * moment before the app was killed and never registered, belongs to no draft,
+ * and nothing else would ever find it. It goes once it is as old as a draft's
+ * whole life, so a capture still being registered is never touched.
  */
 export async function cleanupExpiredReceiptDrafts(now = new Date()): Promise<number> {
   const expired = repository.listExpiredDrafts(now);
@@ -140,6 +151,8 @@ export async function cleanupExpiredReceiptDrafts(now = new Date()): Promise<num
     repository.discardReceiptDraft(draft.id);
     await deleteReceiptFile(draft.imageUri);
   }
+  const referenced = new Set(repository.listReceiptDrafts().map((draft) => draft.imageUri));
+  await deleteStaleReceiptFiles(RECEIPT_DRAFT_TTL_MS, referenced, now.getTime()).catch(() => 0);
   return expired.length;
 }
 

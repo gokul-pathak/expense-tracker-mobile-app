@@ -118,7 +118,7 @@ export default function ReportsScreen() {
       });
       setCurrency(getAppSettings().defaultCurrency);
     } catch (error) {
-      console.error('Could not load report.', error);
+      if (__DEV__) console.error('Could not load report.', error);
       setFailed(true);
     } finally {
       setLoading(false);

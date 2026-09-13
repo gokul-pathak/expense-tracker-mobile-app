@@ -484,7 +484,7 @@ export default function SettingsScreen() {
         duration: 5000,
       });
     } catch (caught) {
-      console.error('Backup restore failed', caught);
+      if (__DEV__) console.error('Backup restore failed', caught);
       setRestorePrompt(undefined);
       setError('Backup could not be restored. Your existing data was not changed.');
     } finally {

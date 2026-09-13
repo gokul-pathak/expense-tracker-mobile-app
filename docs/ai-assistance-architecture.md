@@ -75,6 +75,11 @@ a single Edge Function in that project rather than a new service.
   `sign_in_required` for someone who turned suggestions on and later signed out — shown as "AI
   category suggestions are available when signed in." Nothing about reviewing or saving a receipt
   requires signing in.
+- **Account mismatch pauses suggestions (M9E).** While Cloud Sync reports `account_mismatch`,
+  `linking` or `reconciliation_required`, this device's records belong to a different account from
+  the signed-in session, and `suggestionAvailability` is `hidden` — the same rule Spending Insights
+  explanations follow. The person chooses a category as always; nothing is sent under the other
+  account's session or spends its allowance.
 
 ## Provider abstraction
 

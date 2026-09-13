@@ -82,7 +82,7 @@ export default function TransactionDetailScreen() {
           : getRecurringProvenance(view.recurringOccurrenceId),
       );
     } catch (caught) {
-      console.error('Could not load transaction.', caught);
+      if (__DEV__) console.error('Could not load transaction.', caught);
       setFailed(true);
     } finally {
       setLoading(false);
@@ -225,7 +225,7 @@ export default function TransactionDetailScreen() {
       setConfirming(false);
       router.back();
     } catch (caught) {
-      console.error('Could not delete transaction.', caught);
+      if (__DEV__) console.error('Could not delete transaction.', caught);
       const message = getUserErrorMessage(caught);
       setConfirming(false);
       setError(

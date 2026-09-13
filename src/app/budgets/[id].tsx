@@ -58,7 +58,7 @@ export default function EditBudgetScreen() {
         setState({ kind: 'missing' });
         return;
       }
-      console.error('Could not load budget.', caught);
+      if (__DEV__) console.error('Could not load budget.', caught);
       setState({ kind: 'failed' });
     }
   }, [routeId]);

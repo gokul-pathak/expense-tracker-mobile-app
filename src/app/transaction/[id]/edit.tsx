@@ -32,7 +32,7 @@ export default function EditTransactionScreen() {
     try {
       setTransaction(getTransaction(routeId));
     } catch (error) {
-      console.error('Could not load transaction for editing.', error);
+      if (__DEV__) console.error('Could not load transaction for editing.', error);
       setFailed(true);
     }
   }, [routeId]);

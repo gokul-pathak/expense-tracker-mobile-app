@@ -106,20 +106,31 @@ export function getTransactionsByType(type: TransactionType) {
 }
 
 export function createTransaction(data: CreateTransactionRecord) {
+  return db.transaction((tx) => insertTransaction(tx, data));
+}
+
+/**
+ * Writes a new transaction and its queue entry inside the caller's SQLite
+ * transaction.
+ *
+ * `createTransaction` is this with a transaction of its own around it. A caller
+ * that must commit an expense together with its own record of it — Save Expense
+ * and the receipt draft it retires — opens the transaction itself, so there is
+ * no moment at which the expense exists and the record does not.
+ */
+export function insertTransaction(writer: SyncWriter, data: CreateTransactionRecord) {
   const syncId = createSyncId();
-  return db.transaction((tx) => {
-    const transaction = tx
-      .insert(transactions)
-      .values({ ...data, syncId })
-      .returning()
-      .get();
-    enqueueSyncMutation(tx, {
-      entityType: 'transaction',
-      entitySyncId: syncId,
-      operation: 'upsert',
-    });
-    return transaction;
+  const transaction = writer
+    .insert(transactions)
+    .values({ ...data, syncId })
+    .returning()
+    .get();
+  enqueueSyncMutation(writer, {
+    entityType: 'transaction',
+    entitySyncId: syncId,
+    operation: 'upsert',
   });
+  return transaction;
 }
 
 /**

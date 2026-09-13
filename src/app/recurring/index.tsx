@@ -51,7 +51,7 @@ export default function RecurringScreen() {
         dueHasMore: summary.hasMore,
       });
     } catch (error) {
-      console.error('Could not load recurring transactions.', error);
+      if (__DEV__) console.error('Could not load recurring transactions.', error);
       setLoaded(undefined);
       setFailed(true);
     }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useCloudAuth } from '@/features/cloud-auth/auth.provider';
+import { useCloudSync } from '@/features/sync/sync.provider';
 
 import type { AiSuggestionPreference } from './ai-preference';
 import { loadAiSuggestionPreference, saveAiSuggestionPreference } from './ai-preference.storage';
@@ -68,6 +69,7 @@ export function useExpenseSuggestion({
   provider = supabaseSuggestionProvider,
 }: UseExpenseSuggestionOptions): ExpenseSuggestionController {
   const auth = useCloudAuth();
+  const sync = useCloudSync();
   const [preference, setPreference] = useState<AiSuggestionPreference>(loadAiSuggestionPreference);
   const [state, setState] = useState<SuggestionState>(initialSuggestionState);
   const current = useRef(state);
@@ -106,6 +108,7 @@ export function useExpenseSuggestion({
     configured: provider.isAvailable(),
     preference,
     authStatus: auth.status,
+    syncStatus: sync.status,
   });
 
   const { merchantCandidate } = context;

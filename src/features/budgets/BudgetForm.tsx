@@ -103,7 +103,7 @@ export function BudgetForm({
     } catch (caught) {
       // Not being able to check is not a reason to block the form: the service
       // refuses a duplicate regardless, and its message says the same thing.
-      console.error('Could not read existing budgets for this month.', caught);
+      if (__DEV__) console.error('Could not read existing budgets for this month.', caught);
       return [];
     }
   }, [month, currency, budget?.id]);

@@ -61,7 +61,7 @@ export default function DueRecurringScreen() {
     try {
       setLoaded(listDueOccurrences({ asOfDate }));
     } catch (error) {
-      console.error('Could not load due recurring transactions.', error);
+      if (__DEV__) console.error('Could not load due recurring transactions.', error);
       setLoaded(undefined);
       setFailed(true);
     }
@@ -229,7 +229,7 @@ export default function DueRecurringScreen() {
       load();
       return;
     }
-    console.error('Could not handle recurring occurrence.', caught);
+    if (__DEV__) console.error('Could not handle recurring occurrence.', caught);
     setNotice({ tone: 'info', message: getUserErrorMessage(caught) });
   }
 }

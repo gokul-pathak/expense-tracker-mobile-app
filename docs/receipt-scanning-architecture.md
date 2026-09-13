@@ -270,6 +270,13 @@ images. Expiry is a stored date rather than a timer, so a draft being reviewed i
 from under someone: `keepReceiptDraftAlive` pushes the date out. Cleanup reaches no financial
 entity — there is no transaction to unwind, because scanning never created one.
 
+A second pass (M9E) removes images that no draft points at: a photo whose delete failed after its
+draft row went, or one staged a moment before the app was killed and never registered. Nothing else
+would ever find those files. The pass skips every image a remaining draft references, whatever its
+age, and removes an unreferenced one only once it is older than a draft's whole lifetime, so a
+capture still being registered is never touched. A directory that cannot be read does not stop the
+draft sweep (`test/receipts/receipt-image-cleanup.test.ts`).
+
 ## What M9A deliberately does not do
 
 No scanner screen, no review screen, no "Scan receipt" button — M9B owns the user-facing workflow.
@@ -353,27 +360,34 @@ functions; the screen renders them.
 ### The save boundary
 
 `features/receipts/review/receipt-save.service.ts` is the **only** file under `features/receipts`
-that references the transaction service, and `test/receipts/receipt-privacy.test.ts` fails if any
-other file does. Capture, OCR, extraction and processing still cannot reach a transaction at all.
-Receipt screens cannot reach the database or the transaction service either; they go through
-`features/ui/data`.
+that references the transaction service or repository, and `test/receipts/receipt-privacy.test.ts`
+fails if any other file does. Capture, OCR, extraction and processing still cannot reach a
+transaction at all. Receipt screens cannot reach the database or the transaction service either;
+they go through `features/ui/data`.
 
-Save Expense calls `createExpense` with exactly what the person reviewed. Every rule a typed expense
-meets applies — active account, expense category, positive safe-integer amount, account currency —
-because there is no second path for a rule to be missing from. A refusal leaves the review and its
-draft untouched, mapped to a sentence the person can act on; anything unexpected becomes "We
-couldn't save this expense. Try again." and never a stack trace.
+Save Expense builds the expense with `prepareExpense` — the function `createExpense` itself uses —
+from exactly what the person reviewed. Every rule a typed expense meets applies — active account,
+expense category, positive safe-integer amount, account currency — because there is no second path
+for a rule to be missing from. A refusal leaves the review and its draft untouched, mapped to a
+sentence the person can act on; anything unexpected becomes "We couldn't save this expense. Try
+again." and never a stack trace.
 
-**A receipt saves once.** `receipt_drafts.finalized_transaction_id` is set in the same synchronous
-run as the expense, with no `await` between the check, the expense and the marker. On one
-JavaScript thread, a double tap, a stale screen or a retry after a failed navigation always finds
-the draft finalized and is told which expense it became. The column is deliberately not a foreign
-key: choosing the cloud's copy during reconciliation hard-deletes local transactions, and a
-constraint on a scratch table must not be able to block that.
+**A receipt saves once, even across a crash.** The expense, its outbox entry and
+`receipt_drafts.finalized_transaction_id` are written in **one SQLite transaction**, and the
+finalization re-checks inside it that the draft is still `ready_for_review` and unfinalized. A
+double tap, a stale screen, a retry after a failed navigation or a restart always finds the draft
+finalized and is told which expense it became. Until M9E the expense and the marker were two commits
+with no `await` between them. That stopped a double tap on one JavaScript thread, but a process
+kill, a full disk or an I/O error between the commits left an expense whose draft still read as
+unsaved — it reopened as a review, and the next Save Expense was a duplicate
+(`test/receipts/receipt-save.test.ts`, "keeps no expense whose receipt could not be marked saved").
+The column is deliberately not a foreign key: choosing the cloud's copy during reconciliation
+hard-deletes local transactions, and a constraint on a scratch table must not be able to block that.
 
 **The expense is the record.** Deleting the photo afterwards is housekeeping; if it fails, the
-expense stands and the stale-draft sweep removes the file later. On finalization the draft's
-candidates are cleared, and the row itself is swept after a day.
+expense stands and the sweep removes the file later — even once its draft row is gone (see
+[Cleanup](#cleanup)). On finalization the draft's candidates are cleared, and the row itself is
+swept after a day.
 
 **No provenance is stored on the transaction.** There is no generic entry-source field, and adding
 one means a schema, sync, backup and cloud migration for a flag the feature does not need. A

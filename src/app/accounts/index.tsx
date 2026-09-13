@@ -52,7 +52,7 @@ export default function AccountsScreen() {
         accounts.map((account) => ({ account, balanceMinor: getAccountBalance(account.id) })),
       );
     } catch (error) {
-      console.error('Could not load accounts.', error);
+      if (__DEV__) console.error('Could not load accounts.', error);
       setFailed(true);
     } finally {
       setLoading(false);

@@ -97,7 +97,11 @@ describe('processing a captured receipt', () => {
     const created = processing.registerCapturedReceipt(IMAGE);
     await processing.processReceiptDraft(created.id);
 
-    const stored = JSON.stringify(repository.getReceiptDraft(created.id));
+    // Timestamps are left out: a row written at …:56.900Z is not a subtotal of
+    // 900, and counting it as one made this test fail about one run in three hundred.
+    const stored = JSON.stringify(repository.getReceiptDraft(created.id), (key, value: unknown) =>
+      ['createdAt', 'updatedAt', 'expiresAt', 'finalizedAt'].includes(key) ? undefined : value,
+    );
     // The candidates survive; the page they were read from does not.
     expect(stored).not.toContain('SUBTOTAL');
     expect(stored).not.toContain('VAT');

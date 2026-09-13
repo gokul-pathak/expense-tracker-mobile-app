@@ -67,7 +67,7 @@ export default function TransactionsScreen() {
     try {
       setTransactions(listTransactionViews());
     } catch (error) {
-      console.error('Could not load transactions.', error);
+      if (__DEV__) console.error('Could not load transactions.', error);
       setFailed(true);
     } finally {
       setLoading(false);

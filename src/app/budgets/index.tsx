@@ -92,7 +92,7 @@ export default function BudgetsScreen() {
     } catch (error) {
       // A budget whose spending cannot be read is never drawn as zero spent. A
       // confident wrong figure about someone's money is worse than saying so.
-      console.error('Could not load budgets.', error);
+      if (__DEV__) console.error('Could not load budgets.', error);
       if (requested.current !== month) return;
       setLoaded(undefined);
       setFailed(true);

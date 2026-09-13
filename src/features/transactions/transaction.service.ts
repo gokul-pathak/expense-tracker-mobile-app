@@ -38,6 +38,19 @@ export function createExpense(input: CreateExpenseInput) {
   return createTransaction('expense', input);
 }
 
+/**
+ * An expense, validated and built exactly as `createExpense` builds one, but not
+ * written.
+ *
+ * For the one caller that must commit an expense in the same SQLite transaction
+ * as its own record of it: Save Expense writes this with `insertTransaction`
+ * beside the receipt draft it retires. Internal: the UI data boundary does not
+ * export it.
+ */
+export function prepareExpense(input: CreateExpenseInput): CreateTransactionRecord {
+  return buildCategorizedRecord('expense', input);
+}
+
 export function createIncome(input: CreateIncomeInput) {
   return createTransaction('income', input);
 }

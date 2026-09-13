@@ -125,7 +125,11 @@ records.
       can create money, and it creates an ordinary expense through the transaction service
 - [ ] **blocker** a receipt saves once: a double tap, a stale screen or a retry finds the draft
       finalized
+- [ ] **blocker** Save Expense is one SQLite transaction: no expense exists while its draft still
+      reads as unsaved, so a crash or a failed write cannot turn the next save into a duplicate
 - [ ] **blocker** receipt photos, OCR text and drafts never reach the backup, Cloud Sync or a log
+- [ ] A photo no draft points at — a failed delete, or a capture killed before it was registered —
+      is removed by the next sweep once it is older than a draft's lifetime
 - [ ] Category and account are always chosen by the person; nothing is inferred from a merchant or
       a card
 - [ ] A default date is never shown as detected, and uncertain fields say so in words
@@ -151,6 +155,8 @@ records.
 - [ ] **blocker** the quota migration is applied and `supabase/tests/ai-suggestion-quota.sql` passes
 - [ ] Suggestions are off until the person agrees, and Local Only reviews and saves receipts with
       no Cloud Account
+- [ ] Suggestions pause quietly, as explanations do, during a Cloud Sync account mismatch, first
+      link or reconciliation
 - [ ] Function logs contain metadata only (`requestId`, status, timings, token counts)
 - [ ] **external** `ANTHROPIC_API_KEY` set with `supabase secrets set` on staging and production,
       never in `.env` or Git; `supabase functions deploy suggest-expense-category` done per project
@@ -182,6 +188,25 @@ records.
       429
 - [ ] **external** Spending Insights verified on Android and iOS in both themes, at large text, on a
       small screen and with a screen reader
+
+## Receipt and AI production hardening (M9E)
+
+See [`ai-receipt-hardening-m9e.md`](ai-receipt-hardening-m9e.md) for the audit behind these.
+
+- [ ] **blocker** no file under `src`, `supabase` or `test` contains a NUL byte, and app and function
+      code write invisible characters as escapes, so no change to a sanitiser can reach review as a
+      binary file with no diff (`test/security/source-hygiene.test.ts`)
+- [ ] **blocker** every `console` call in the app is behind `__DEV__`: SQLite driver errors quote the
+      failed statement's parameters, and a release build's console reaches the system log
+- [ ] CI runs every receipt, AI and insights suite with mock providers; no job needs an AI credential
+- [ ] **external** `react-native-worklets` is installed before any release build — Expo Doctor
+      reports it as a missing required peer of Reanimated (not introduced by M9)
+- [ ] **external** a deployment that overrides `AI_SUGGESTION_MODEL` or `AI_INSIGHT_MODEL` names a
+      model that accepts `output_config.effort`; one that does not (Claude Haiku 4.5) fails every
+      request closed as "not configured"
+- [ ] **external** on Android and iOS preview builds: camera, photo import, OCR, review, Save
+      Expense, an AI suggestion and an AI explanation, each also offline, signed out and with the app
+      killed mid-step
 
 ## Performance
 

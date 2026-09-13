@@ -85,7 +85,7 @@ export default function RecurringDetailScreen() {
       }
       setState({ kind: 'ready', view, history: listTemplateHistory(routeId) });
     } catch (caught) {
-      console.error('Could not load recurring transaction.', caught);
+      if (__DEV__) console.error('Could not load recurring transaction.', caught);
       setState({ kind: 'failed' });
     }
   }, [routeId]);

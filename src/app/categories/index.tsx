@@ -45,7 +45,7 @@ export default function CategoriesScreen() {
     try {
       setItems(scope === 'expense' ? listExpenseCategories() : listIncomeCategories());
     } catch (error) {
-      console.error('Could not load categories.', error);
+      if (__DEV__) console.error('Could not load categories.', error);
       setFailed(true);
     } finally {
       setLoading(false);

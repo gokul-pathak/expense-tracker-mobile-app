@@ -185,21 +185,27 @@ export function touchReceiptDraft(id: number, expiresAt: Date | null): void {
     .run();
 }
 
+/** The caller's open SQLite transaction, for a draft write that must commit with it. */
+type DraftWriter = Pick<Parameters<Parameters<typeof db.transaction>[0]>[0], 'update'>;
+
 /**
  * Records that this receipt became an expense. Once only.
  *
- * Returns false when the draft was already finalized, or no longer exists —
- * the caller then knows its expense is not the one on record. The extracted
- * candidates are cleared at the same time: the expense is the record now, and
- * a merchant name and an amount have no reason to linger in a scratch table.
+ * Returns false when the draft was already finalized, is not ready for review,
+ * or no longer exists — the caller then knows its expense must not be kept.
+ * Save Expense passes the SQLite transaction that wrote the expense, so the two
+ * commit or roll back together. The extracted candidates are cleared at the same
+ * time: the expense is the record now, and a merchant name and an amount have no
+ * reason to linger in a scratch table.
  */
 export function markReceiptDraftFinalized(
   id: number,
   transactionId: number,
   expiresAt: Date,
+  writer: DraftWriter = db,
 ): boolean {
   const now = new Date();
-  const updated = db
+  const updated = writer
     .update(receiptDrafts)
     .set({
       finalizedTransactionId: transactionId,
@@ -213,7 +219,13 @@ export function markReceiptDraftFinalized(
       expiresAt,
       updatedAt: now,
     })
-    .where(and(eq(receiptDrafts.id, id), isNull(receiptDrafts.finalizedTransactionId)))
+    .where(
+      and(
+        eq(receiptDrafts.id, id),
+        eq(receiptDrafts.status, 'ready_for_review'),
+        isNull(receiptDrafts.finalizedTransactionId),
+      ),
+    )
     .returning()
     .get();
   return updated !== undefined;

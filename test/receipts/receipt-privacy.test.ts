@@ -184,11 +184,23 @@ describe('the receipt pipeline and the transaction service', () => {
     const offenders: string[] = [];
     for (const file of walk(receiptsDirectory)) {
       const source = readFileSync(file, 'utf8');
-      if (source.includes('createExpense') || source.includes('transaction.service')) {
-        creators.push(relative(file));
-      }
+      // The service and the repository both: writing an expense through the
+      // repository inside a SQLite transaction is still creating money.
+      const writesMoney = [
+        'createExpense',
+        'prepareExpense',
+        'insertTransaction',
+        'transaction.service',
+        'transaction.repository',
+      ].some((word) => source.includes(word));
+      if (writesMoney) creators.push(relative(file));
       // Never another kind of money, and never the outbox by hand.
-      for (const forbidden of ['createIncome', 'createTransfer', 'enqueueSyncMutation']) {
+      for (const forbidden of [
+        'createIncome',
+        'createTransfer',
+        'enqueueSyncMutation',
+        'writeGeneratedTransaction',
+      ]) {
         if (source.includes(forbidden)) offenders.push(`${relative(file)}: ${forbidden}`);
       }
     }

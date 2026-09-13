@@ -52,7 +52,7 @@ const LABEL_CONFUSIONS: readonly (readonly [RegExp, string])[] = [
  * formatting, and the zero-width characters come from PDF-ish sources.
  */
 const ODD_SPACES = /[   -   　]/g;
-const ZERO_WIDTH = /[​-‍﻿]/g;
+const ZERO_WIDTH = /[\u200B-\u200D\uFEFF]/g;
 
 export function normalizeReceiptText(raw: string): NormalizedReceiptText {
   const unified = raw

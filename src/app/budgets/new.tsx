@@ -31,7 +31,7 @@ export default function NewBudgetScreen() {
       setCategories(listExpenseCategories());
       setCurrency(getAppSettings().defaultCurrency);
     } catch (error) {
-      console.error('Could not load budget options.', error);
+      if (__DEV__) console.error('Could not load budget options.', error);
       setFailed(true);
     }
   }, []);

@@ -129,7 +129,7 @@ export function MoneyMovementForm({
         if (personId) setPerson(getPerson(personId));
       }
     } catch (error) {
-      console.error('Could not load money movement data.', error);
+      if (__DEV__) console.error('Could not load money movement data.', error);
       setFailed(true);
     } finally {
       setLoading(false);

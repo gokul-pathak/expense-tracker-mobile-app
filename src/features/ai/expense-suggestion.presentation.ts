@@ -1,4 +1,5 @@
 import type { CloudAuthStatus } from '@/features/cloud-auth/auth.types';
+import type { CloudSyncStatus } from '@/features/sync/sync-status';
 
 import type { AiSuggestionPreference } from './ai-preference';
 import { canRetrySuggestion, type SuggestionState } from './expense-suggestion.state';
@@ -47,13 +48,24 @@ export function suggestionAvailability(input: {
   configured: boolean;
   preference: AiSuggestionPreference;
   authStatus: CloudAuthStatus;
+  syncStatus: CloudSyncStatus;
 }): SuggestionAvailability {
-  const { configured, preference, authStatus } = input;
+  const { configured, preference, authStatus, syncStatus } = input;
   if (!configured || preference === 'disabled') return 'hidden';
   if (authStatus === 'unconfigured' || authStatus === 'initializing') return 'hidden';
   if (authStatus !== 'signed_in') {
     // Someone who never asked for suggestions is not told to sign in for them.
     return preference === 'enabled' ? 'sign_in_required' : 'hidden';
+  }
+  // This device's records belong to the linked account. Asking under a different
+  // signed-in account would spend that account's allowance on another person's
+  // receipt, so suggestions wait quietly, as Spending Insights explanations do.
+  if (
+    syncStatus === 'account_mismatch' ||
+    syncStatus === 'reconciliation_required' ||
+    syncStatus === 'linking'
+  ) {
+    return 'hidden';
   }
   return preference === 'enabled' ? 'available' : 'needs_consent';
 }

@@ -175,7 +175,7 @@ export function RecurringForm({ template }: { template?: RecurringTemplate }) {
         setSelectedAccountId(nextAccounts[0].id);
       }
     } catch (error) {
-      console.error('Could not load recurring entry data.', error);
+      if (__DEV__) console.error('Could not load recurring entry data.', error);
       setFailed(true);
     } finally {
       setLoading(false);
@@ -557,7 +557,7 @@ export function RecurringForm({ template }: { template?: RecurringTemplate }) {
       }
       router.back();
     } catch (error) {
-      console.error('Could not save recurring transaction.', error);
+      if (__DEV__) console.error('Could not save recurring transaction.', error);
       setFormError(getUserErrorMessage(error));
     } finally {
       submitting.current = false;

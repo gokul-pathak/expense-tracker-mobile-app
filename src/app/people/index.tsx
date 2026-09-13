@@ -59,7 +59,7 @@ export default function PeopleScreen() {
       setLiabilityMinor(summary.totalLiabilityMinor);
       setCurrency(getAppSettings().defaultCurrency);
     } catch (error) {
-      console.error('Could not load people.', error);
+      if (__DEV__) console.error('Could not load people.', error);
       setFailed(true);
     } finally {
       setLoading(false);

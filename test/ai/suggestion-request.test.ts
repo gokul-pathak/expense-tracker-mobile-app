@@ -225,7 +225,7 @@ describe('redaction before transmission', () => {
   });
 
   it('strips control and direction-override characters, and markup', () => {
-    expect(redactSensitiveText('ABC‮ CAFE  <b>')).toBe('ABC CAFE');
+    expect(redactSensitiveText('ABC\u202E CAFE\u0000 <b>')).toBe('ABC CAFE');
   });
 
   it('bounds the merchant text a request may carry', () => {

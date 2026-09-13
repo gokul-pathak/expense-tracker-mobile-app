@@ -73,7 +73,7 @@ export default function HomeScreen() {
       setCurrency(getAppSettings().defaultCurrency);
       setAccountCount(listActiveAccounts().length);
     } catch (error) {
-      console.error('Could not load dashboard.', error);
+      if (__DEV__) console.error('Could not load dashboard.', error);
       setFailed(true);
     } finally {
       setLoading(false);

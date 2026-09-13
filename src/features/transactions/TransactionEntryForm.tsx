@@ -151,7 +151,7 @@ export function TransactionEntryForm({
         setSelectedAccountId(nextAccounts[0].id);
       }
     } catch (error) {
-      console.error('Could not load transaction entry data.', error);
+      if (__DEV__) console.error('Could not load transaction entry data.', error);
       setFailed(true);
     } finally {
       setLoading(false);
@@ -412,7 +412,7 @@ export function TransactionEntryForm({
       }
       router.back();
     } catch (error) {
-      console.error(`Could not create ${type}.`, error);
+      if (__DEV__) console.error(`Could not create ${type}.`, error);
       setFormError(mapTransactionError(error, type));
     } finally {
       submitting.current = false;
