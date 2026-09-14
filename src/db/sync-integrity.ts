@@ -7,6 +7,9 @@ import {
   accounts,
   budgets,
   categories,
+  investmentAssets,
+  investmentPrices,
+  investmentTrades,
   people,
   recurringOccurrences,
   recurringTemplates,
@@ -27,6 +30,9 @@ const syncableTables = [
   ['transactions', transactions],
   ['recurring_templates', recurringTemplates],
   ['recurring_occurrences', recurringOccurrences],
+  ['investment_assets', investmentAssets],
+  ['investment_trades', investmentTrades],
+  ['investment_prices', investmentPrices],
 ] as const;
 
 /**
@@ -41,7 +47,11 @@ const requiredSyncReads = [
   ['budgets', () => db.select().from(budgets).limit(1).all()],
   ['recurring_templates', () => db.select().from(recurringTemplates).limit(1).all()],
   ['recurring_occurrences', () => db.select().from(recurringOccurrences).limit(1).all()],
-  // Every column, so the recurring link added in M8C is proven present too.
+  ['investment_assets', () => db.select().from(investmentAssets).limit(1).all()],
+  ['investment_trades', () => db.select().from(investmentTrades).limit(1).all()],
+  ['investment_prices', () => db.select().from(investmentPrices).limit(1).all()],
+  // Every column, so the recurring link added in M8C and the investment link
+  // added in M10A are proven present too.
   ['transactions', () => db.select().from(transactions).limit(1).all()],
   ['sync_outbox', () => db.select().from(syncOutbox).limit(1).all()],
   ['sync_state', () => db.select().from(syncState).limit(1).all()],

@@ -3,6 +3,8 @@ import { z } from 'zod';
 import {
   ACCOUNT_TYPES,
   CATEGORY_TYPES,
+  INVESTMENT_ASSET_TYPES,
+  INVESTMENT_TRADE_TYPES,
   MAX_RECURRENCE_INTERVAL,
   PAYMENT_MODES,
   PERIOD_MONTH_PATTERN,
@@ -136,6 +138,8 @@ export const remoteTransactionSchema = z
     deleted_at: nullableTimestamp,
     // Null for every transaction a person entered; the occurrence for a generated one.
     recurring_occurrence_sync_id: syncId.nullable(),
+    // Null for every transaction a person entered; the trade for investment cash.
+    investment_trade_sync_id: syncId.nullable(),
   })
   .strict();
 
@@ -180,6 +184,62 @@ export const remoteRecurringOccurrenceSchema = z
   })
   .strict();
 
+/** Something owned. It carries no figure: holdings and value are derived from trades and prices. */
+export const remoteInvestmentAssetSchema = z
+  .object({
+    sync_id: syncId,
+    user_id: userId,
+    name: z.string().min(1),
+    symbol: nullableText,
+    asset_type: z.enum(INVESTMENT_ASSET_TYPES),
+    currency,
+    is_archived: z.boolean(),
+    created_at: timestamp,
+    updated_at: timestamp,
+    deleted_at: nullableTimestamp,
+  })
+  .strict();
+
+/**
+ * One event in an asset's history. Quantity is integer units of 10^-8; money is
+ * minor units. Which fields a trade type carries is checked by the cloud's
+ * constraint and by `remote-domain-validation.ts`, not here.
+ */
+export const remoteInvestmentTradeSchema = z
+  .object({
+    sync_id: syncId,
+    user_id: userId,
+    asset_sync_id: syncId,
+    account_sync_id: syncId,
+    trade_type: z.enum(INVESTMENT_TRADE_TYPES),
+    trade_date: timestamp,
+    quantity_minor: safeInteger.positive().nullable(),
+    unit_price_minor: safeInteger.positive().nullable(),
+    fee_minor: safeInteger.nonnegative(),
+    amount_minor: safeInteger.positive().nullable(),
+    currency,
+    note: nullableText,
+    created_at: timestamp,
+    updated_at: timestamp,
+    deleted_at: nullableTimestamp,
+  })
+  .strict();
+
+/** A manual price for one calendar day. */
+export const remoteInvestmentPriceSchema = z
+  .object({
+    sync_id: syncId,
+    user_id: userId,
+    asset_sync_id: syncId,
+    price_minor: safeInteger.positive(),
+    price_date: localDateSchema,
+    currency,
+    created_at: timestamp,
+    updated_at: timestamp,
+    deleted_at: nullableTimestamp,
+  })
+  .strict();
+
 export type RemoteAccountRow = z.infer<typeof remoteAccountSchema>;
 export type RemoteCategoryRow = z.infer<typeof remoteCategorySchema>;
 export type RemotePersonRow = z.infer<typeof remotePersonSchema>;
@@ -188,6 +248,9 @@ export type RemoteBudgetRow = z.infer<typeof remoteBudgetSchema>;
 export type RemoteTransactionRow = z.infer<typeof remoteTransactionSchema>;
 export type RemoteRecurringTemplateRow = z.infer<typeof remoteRecurringTemplateSchema>;
 export type RemoteRecurringOccurrenceRow = z.infer<typeof remoteRecurringOccurrenceSchema>;
+export type RemoteInvestmentAssetRow = z.infer<typeof remoteInvestmentAssetSchema>;
+export type RemoteInvestmentTradeRow = z.infer<typeof remoteInvestmentTradeSchema>;
+export type RemoteInvestmentPriceRow = z.infer<typeof remoteInvestmentPriceSchema>;
 
 export type RemoteRow =
   | RemoteAccountRow
@@ -197,7 +260,10 @@ export type RemoteRow =
   | RemoteSettingsRow
   | RemoteTransactionRow
   | RemoteRecurringTemplateRow
-  | RemoteRecurringOccurrenceRow;
+  | RemoteRecurringOccurrenceRow
+  | RemoteInvestmentAssetRow
+  | RemoteInvestmentTradeRow
+  | RemoteInvestmentPriceRow;
 
 /** Cloud table name and idempotency key for each local entity type. */
 export const REMOTE_TABLES = {
@@ -210,6 +276,9 @@ export const REMOTE_TABLES = {
   budget: { table: 'budgets', onConflict: 'sync_id' },
   recurring_template: { table: 'recurring_templates', onConflict: 'sync_id' },
   recurring_occurrence: { table: 'recurring_occurrences', onConflict: 'sync_id' },
+  investment_asset: { table: 'investment_assets', onConflict: 'sync_id' },
+  investment_trade: { table: 'investment_trades', onConflict: 'sync_id' },
+  investment_price: { table: 'investment_prices', onConflict: 'sync_id' },
 } as const satisfies Record<SyncEntityType, { table: string; onConflict: string }>;
 
 export const REMOTE_SCHEMA = 'sync' as const;
@@ -223,6 +292,9 @@ const schemasByEntity = {
   budget: remoteBudgetSchema,
   recurring_template: remoteRecurringTemplateSchema,
   recurring_occurrence: remoteRecurringOccurrenceSchema,
+  investment_asset: remoteInvestmentAssetSchema,
+  investment_trade: remoteInvestmentTradeSchema,
+  investment_price: remoteInvestmentPriceSchema,
 } as const;
 
 /** Validates one mapped row. Returns an issue path only, never the row values. */

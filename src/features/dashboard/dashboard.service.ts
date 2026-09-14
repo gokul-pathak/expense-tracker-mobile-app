@@ -72,6 +72,17 @@ export function getTotalBalance() {
     repository.getActiveAccountRepaymentPaidTotal(),
     'Active account repayments paid total',
   );
+  // Total Balance is cash in accounts. Money moved into an investment leaves it,
+  // money from a sale comes back into it, and what the investments are worth is
+  // a separate figure that is never added here.
+  const investedMinor = assertSafeInteger(
+    repository.getActiveAccountInvestmentTotal(),
+    'Active account investment total',
+  );
+  const investmentReturnsMinor = assertSafeInteger(
+    repository.getActiveAccountInvestmentReturnTotal(),
+    'Active account investment returns total',
+  );
   return subtract(
     add(
       add(
@@ -79,12 +90,16 @@ export function getTotalBalance() {
         transferReceivedMinor,
         'Total balance',
       ),
-      add(borrowedMinor, repaymentsReceivedMinor, 'Total balance'),
+      add(
+        add(borrowedMinor, repaymentsReceivedMinor, 'Total balance'),
+        investmentReturnsMinor,
+        'Total balance',
+      ),
       'Total balance',
     ),
     add(
       add(expenseMinor, transferSentMinor, 'Total balance'),
-      add(lentMinor, repaymentsPaidMinor, 'Total balance'),
+      add(add(lentMinor, repaymentsPaidMinor, 'Total balance'), investedMinor, 'Total balance'),
       'Total balance',
     ),
     'Total balance',

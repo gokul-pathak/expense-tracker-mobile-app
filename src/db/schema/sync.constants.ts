@@ -11,6 +11,9 @@ export const SYNC_ENTITY_TYPES = [
   'budget',
   'recurring_template',
   'recurring_occurrence',
+  'investment_asset',
+  'investment_price',
+  'investment_trade',
 ] as const;
 
 export type SyncEntityType = (typeof SYNC_ENTITY_TYPES)[number];

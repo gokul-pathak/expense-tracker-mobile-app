@@ -1,6 +1,7 @@
 import type { Account } from '@/db/schema/accounts';
 import type { Budget } from '@/db/schema/budgets';
 import type { Category } from '@/db/schema/categories';
+import type { InvestmentAsset, InvestmentPrice, InvestmentTrade } from '@/db/schema/investments';
 import type { Person } from '@/db/schema/people';
 import type { RecurringOccurrence, RecurringTemplate } from '@/db/schema/recurring';
 import type { Setting } from '@/db/schema/settings';
@@ -10,6 +11,9 @@ import type {
   RemoteAccountRow,
   RemoteBudgetRow,
   RemoteCategoryRow,
+  RemoteInvestmentAssetRow,
+  RemoteInvestmentPriceRow,
+  RemoteInvestmentTradeRow,
   RemotePersonRow,
   RemoteRecurringOccurrenceRow,
   RemoteRecurringTemplateRow,
@@ -42,6 +46,8 @@ export type RelationResolver = {
   person: (localId: number) => string | undefined;
   recurringTemplate: (localId: number) => string | undefined;
   recurringOccurrence: (localId: number) => string | undefined;
+  investmentAsset: (localId: number) => string | undefined;
+  investmentTrade: (localId: number) => string | undefined;
 };
 
 export class MappingError extends Error {
@@ -182,6 +188,78 @@ export function mapLocalTransactionToRemote(
       transaction.recurringOccurrenceId,
       'recurring occurrence',
     ),
+    // The trade whose cash this is, null for everything else.
+    investment_trade_sync_id: resolveRelation(
+      resolve.investmentTrade,
+      transaction.investmentTradeId,
+      'investment trade',
+    ),
+  };
+}
+
+/** An asset travels as a description. What is held and what it is worth are derived. */
+export function mapLocalInvestmentAssetToRemote(
+  asset: InvestmentAsset,
+  context: MappingContext,
+): RemoteInvestmentAssetRow {
+  return {
+    sync_id: requireSyncId(asset.syncId, 'investment asset'),
+    user_id: context.userId,
+    name: asset.name,
+    symbol: asset.symbol,
+    asset_type: asset.assetType,
+    currency: asset.currency,
+    is_archived: asset.isArchived,
+    created_at: toEpochMs(asset.createdAt, 'investmentAsset.createdAt'),
+    updated_at: toEpochMs(asset.updatedAt, 'investmentAsset.updatedAt'),
+    deleted_at: toNullableEpochMs(asset.deletedAt),
+  };
+}
+
+/**
+ * A trade travels with the three fields its place in history is decided by —
+ * `trade_date`, `created_at` and its identity — so every device replays it in
+ * the same position. Holding, cost basis and gain never travel.
+ */
+export function mapLocalInvestmentTradeToRemote(
+  trade: InvestmentTrade,
+  context: MappingContext,
+  resolve: RelationResolver,
+): RemoteInvestmentTradeRow {
+  return {
+    sync_id: requireSyncId(trade.syncId, 'investment trade'),
+    user_id: context.userId,
+    asset_sync_id: requireRelation(resolve.investmentAsset, trade.assetId, 'investment asset'),
+    account_sync_id: requireRelation(resolve.account, trade.accountId, 'account'),
+    trade_type: trade.tradeType,
+    trade_date: toEpochMs(trade.tradeDate, 'investmentTrade.tradeDate'),
+    quantity_minor: trade.quantityMinor,
+    unit_price_minor: trade.unitPriceMinor,
+    fee_minor: trade.feeMinor,
+    amount_minor: trade.amountMinor,
+    currency: trade.currency,
+    note: trade.note,
+    created_at: toEpochMs(trade.createdAt, 'investmentTrade.createdAt'),
+    updated_at: toEpochMs(trade.updatedAt, 'investmentTrade.updatedAt'),
+    deleted_at: toNullableEpochMs(trade.deletedAt),
+  };
+}
+
+export function mapLocalInvestmentPriceToRemote(
+  price: InvestmentPrice,
+  context: MappingContext,
+  resolve: RelationResolver,
+): RemoteInvestmentPriceRow {
+  return {
+    sync_id: requireSyncId(price.syncId, 'investment price'),
+    user_id: context.userId,
+    asset_sync_id: requireRelation(resolve.investmentAsset, price.assetId, 'investment asset'),
+    price_minor: price.priceMinor,
+    price_date: price.priceDate,
+    currency: price.currency,
+    created_at: toEpochMs(price.createdAt, 'investmentPrice.createdAt'),
+    updated_at: toEpochMs(price.updatedAt, 'investmentPrice.updatedAt'),
+    deleted_at: toNullableEpochMs(price.deletedAt),
   };
 }
 

@@ -54,6 +54,9 @@ const data: BackupData = {
   budgets: [],
   recurringTemplates: [],
   recurringOccurrences: [],
+  investmentAssets: [],
+  investmentTrades: [],
+  investmentPrices: [],
   appMetadata: [],
   transactions: [
     {
@@ -73,6 +76,7 @@ const data: BackupData = {
       createdAt: 0,
       updatedAt: 0,
       recurringOccurrenceId: null,
+      investmentTradeId: null,
     },
   ],
 };

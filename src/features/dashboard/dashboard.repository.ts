@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
+import type { TransactionType } from '@/db/constants';
 import { accounts } from '@/db/schema/accounts';
 import { categories } from '@/db/schema/categories';
 import { transactions } from '@/db/schema/transactions';
@@ -78,6 +79,16 @@ export function getActiveAccountRepaymentPaidTotal() {
   return getActiveAccountTransactionTotal('repayment_paid', transactions.sourceAccountId);
 }
 
+/** Cash paid into investments from active accounts. Never what the investments are worth. */
+export function getActiveAccountInvestmentTotal() {
+  return getActiveAccountTransactionTotal('investment', transactions.sourceAccountId);
+}
+
+/** Cash returned to active accounts from selling investments. */
+export function getActiveAccountInvestmentReturnTotal() {
+  return getActiveAccountTransactionTotal('investment_return', transactions.destinationAccountId);
+}
+
 export function getIncomeForRange(range: DateRange) {
   return getTransactionTotalForRange('income', range);
 }
@@ -127,8 +138,7 @@ function getAccountTotal(column: typeof accounts.openingBalanceMinor) {
 }
 
 function getActiveAccountTransactionTotal(
-  type:
-    'income' | 'expense' | 'transfer' | 'lend' | 'borrow' | 'repayment_received' | 'repayment_paid',
+  type: TransactionType,
   accountColumn: typeof transactions.sourceAccountId,
 ) {
   const result = db

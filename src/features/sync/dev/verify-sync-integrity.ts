@@ -1,7 +1,8 @@
-import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 
 import { db } from '@/db';
 import {
+  INVESTMENT_TRADE_TYPES,
   MAX_RECURRENCE_INTERVAL,
   PERIOD_MONTH_PATTERN,
   RECURRING_FREQUENCIES,
@@ -11,6 +12,9 @@ import {
   accounts,
   budgets,
   categories,
+  investmentAssets,
+  investmentPrices,
+  investmentTrades,
   isSyncEntityType,
   isSyncId,
   isSyncOperation,
@@ -29,6 +33,8 @@ import {
   deriveGeneratedTransactionSyncId,
   deriveOccurrenceSyncId,
 } from '@/features/recurring/recurring-identity';
+import { replayTrades, type ReplayTrade } from '@/features/investments/investment-replay';
+import { cashEffectOf } from '@/features/investments/investment.service';
 import { isLocalDate, isScheduledDate } from '@/features/recurring/recurring-schedule';
 
 /**
@@ -78,6 +84,13 @@ export const SYNC_INTEGRITY_CODES = [
   'recurring_generated_without_transaction',
   'recurring_skipped_with_transaction',
   'recurring_transaction_invalid_link',
+  'investment_trade_invalid',
+  'investment_trade_invalid_relation',
+  'investment_negative_holding',
+  'investment_price_invalid',
+  'investment_trade_without_cash',
+  'investment_cash_without_trade',
+  'investment_cash_mismatch',
 ] as const;
 
 export type SyncIntegrityCode = (typeof SYNC_INTEGRITY_CODES)[number];
@@ -102,6 +115,9 @@ export type SyncIntegrityReport = {
     budgets: number;
     recurringTemplates: number;
     recurringOccurrences: number;
+    investmentAssets: number;
+    investmentTrades: number;
+    investmentPrices: number;
     pendingMutations: number;
     baselines: number;
     conflicts: number;
@@ -117,6 +133,9 @@ const SYNCABLE = [
   ['transaction', transactions],
   ['recurring_template', recurringTemplates],
   ['recurring_occurrence', recurringOccurrences],
+  ['investment_asset', investmentAssets],
+  ['investment_trade', investmentTrades],
+  ['investment_price', investmentPrices],
 ] as const;
 
 export function verifySyncIntegrity(): SyncIntegrityReport {
@@ -130,6 +149,7 @@ export function verifySyncIntegrity(): SyncIntegrityReport {
   checkTransactionRelations(issues);
   checkBudgets(issues);
   checkRecurring(issues);
+  checkInvestments(issues);
 
   return { ok: issues.length === 0, issues, counts: readCounts() };
 }
@@ -313,6 +333,7 @@ function checkTombstonedParents(issues: SyncIntegrityIssue[]) {
           OR ${transactions.sourceAccountId} IN (SELECT id FROM accounts WHERE deleted_at IS NOT NULL)
           OR ${transactions.destinationAccountId} IN (SELECT id FROM accounts WHERE deleted_at IS NOT NULL)
           OR ${transactions.personId} IN (SELECT id FROM people WHERE deleted_at IS NOT NULL)
+          OR ${transactions.investmentTradeId} IN (SELECT id FROM investment_trades WHERE deleted_at IS NOT NULL)
         )`,
       )
       .get()?.total ?? 0;
@@ -334,6 +355,7 @@ function checkTransactionRelations(issues: SyncIntegrityIssue[]) {
           OR (${transactions.destinationAccountId} IS NOT NULL AND ${transactions.destinationAccountId} NOT IN (SELECT id FROM accounts))
           OR (${transactions.personId} IS NOT NULL AND ${transactions.personId} NOT IN (SELECT id FROM people))
           OR (${transactions.recurringOccurrenceId} IS NOT NULL AND ${transactions.recurringOccurrenceId} NOT IN (SELECT id FROM recurring_occurrences))
+          OR (${transactions.investmentTradeId} IS NOT NULL AND ${transactions.investmentTradeId} NOT IN (SELECT id FROM investment_trades))
         )`,
       )
       .get()?.total ?? 0;
@@ -628,6 +650,187 @@ function checkRecurring(issues: SyncIntegrityIssue[]) {
   }
 }
 
+/**
+ * Investments, checked against the rules that make a holding mean something.
+ *
+ * The one that matters most is the replay: a live history that sells more than it
+ * held at some point is a portfolio that could not have happened, and every figure
+ * derived from it is fiction. The service, pull, backup restore and the cloud's
+ * guard each refuse to create one, which is exactly why an audit looks. The cash
+ * checks are the other half: a trade and its transaction must agree, or a balance
+ * and a holding would describe different money. Like everything here, these
+ * report and never repair.
+ */
+function checkInvestments(issues: SyncIntegrityIssue[]) {
+  const assetCurrency = new Map(
+    db
+      .select({ id: investmentAssets.id, currency: investmentAssets.currency })
+      .from(investmentAssets)
+      .all()
+      .map((row) => [row.id, row.currency]),
+  );
+  const accountCurrency = new Map(
+    db
+      .select({ id: accounts.id, currency: accounts.currency })
+      .from(accounts)
+      .all()
+      .map((row) => [row.id, row.currency]),
+  );
+  const trades = db.select().from(investmentTrades).where(isNull(investmentTrades.deletedAt)).all();
+
+  const positiveSafe = (value: number | null) =>
+    value !== null && Number.isSafeInteger(value) && value > 0;
+  const wellFormed = trades.filter((trade) => {
+    if (!(INVESTMENT_TRADE_TYPES as readonly string[]).includes(trade.tradeType)) return false;
+    if (!isSyncId(trade.syncId) || !Number.isSafeInteger(trade.feeMinor) || trade.feeMinor < 0) {
+      return false;
+    }
+    return trade.tradeType === 'buy' || trade.tradeType === 'sell'
+      ? positiveSafe(trade.quantityMinor) &&
+          positiveSafe(trade.unitPriceMinor) &&
+          trade.amountMinor === null
+      : trade.quantityMinor === null &&
+          trade.unitPriceMinor === null &&
+          trade.feeMinor === 0 &&
+          positiveSafe(trade.amountMinor);
+  });
+  if (wellFormed.length < trades.length) {
+    issues.push({
+      code: 'investment_trade_invalid',
+      entityType: 'investment_trade',
+      count: trades.length - wellFormed.length,
+    });
+  }
+
+  const badRelations = trades.filter(
+    (trade) =>
+      assetCurrency.get(trade.assetId) !== trade.currency ||
+      accountCurrency.get(trade.accountId) !== trade.currency,
+  ).length;
+  if (badRelations > 0) {
+    issues.push({
+      code: 'investment_trade_invalid_relation',
+      entityType: 'investment_trade',
+      count: badRelations,
+    });
+  }
+
+  const history = new Map<number, ReplayTrade[]>();
+  for (const trade of wellFormed) {
+    const list = history.get(trade.assetId) ?? [];
+    list.push({
+      syncId: trade.syncId as string,
+      tradeType: trade.tradeType,
+      tradeDate: trade.tradeDate.getTime(),
+      createdAt: trade.createdAt.getTime(),
+      quantityMinor: trade.quantityMinor,
+      unitPriceMinor: trade.unitPriceMinor,
+      feeMinor: trade.feeMinor,
+      amountMinor: trade.amountMinor,
+    });
+    history.set(trade.assetId, list);
+  }
+  const oversold = [...history.values()].filter((list) => !replayTrades(list).ok).length;
+  if (oversold > 0) {
+    issues.push({
+      code: 'investment_negative_holding',
+      entityType: 'investment_asset',
+      count: oversold,
+    });
+  }
+
+  const badPrices = db
+    .select()
+    .from(investmentPrices)
+    .where(isNull(investmentPrices.deletedAt))
+    .all()
+    .filter(
+      (price) =>
+        !positiveSafe(price.priceMinor) ||
+        !isLocalDate(price.priceDate) ||
+        assetCurrency.get(price.assetId) !== price.currency,
+    ).length;
+  if (badPrices > 0) {
+    issues.push({
+      code: 'investment_price_invalid',
+      entityType: 'investment_price',
+      count: badPrices,
+    });
+  }
+
+  const cash = db
+    .select({
+      type: transactions.type,
+      amountMinor: transactions.amountMinor,
+      currency: transactions.currency,
+      sourceAccountId: transactions.sourceAccountId,
+      destinationAccountId: transactions.destinationAccountId,
+      transactionDate: transactions.transactionDate,
+      investmentTradeId: transactions.investmentTradeId,
+    })
+    .from(transactions)
+    .where(
+      and(
+        isNull(transactions.deletedAt),
+        or(
+          isNotNull(transactions.investmentTradeId),
+          inArray(transactions.type, ['investment', 'investment_return']),
+        ),
+      ),
+    )
+    .all();
+
+  const liveTrades = new Map(trades.map((trade) => [trade.id, trade]));
+  const cashByTrade = new Map<number, (typeof cash)[number]>();
+  let cashWithoutTrade = 0;
+  for (const row of cash) {
+    const trade =
+      row.investmentTradeId === null ? undefined : liveTrades.get(row.investmentTradeId);
+    if (trade === undefined) cashWithoutTrade += 1;
+    else cashByTrade.set(trade.id, row);
+  }
+  if (cashWithoutTrade > 0) {
+    issues.push({
+      code: 'investment_cash_without_trade',
+      entityType: 'transaction',
+      count: cashWithoutTrade,
+    });
+  }
+
+  const withoutCash = trades.filter((trade) => !cashByTrade.has(trade.id)).length;
+  if (withoutCash > 0) {
+    issues.push({
+      code: 'investment_trade_without_cash',
+      entityType: 'investment_trade',
+      count: withoutCash,
+    });
+  }
+
+  let mismatched = 0;
+  for (const trade of wellFormed) {
+    const row = cashByTrade.get(trade.id);
+    if (row === undefined) continue;
+    try {
+      const effect = cashEffectOf(trade);
+      const account = effect.direction === 'out' ? row.sourceAccountId : row.destinationAccountId;
+      if (
+        row.type !== effect.transactionType ||
+        row.amountMinor !== effect.amountMinor ||
+        account !== trade.accountId ||
+        row.currency !== trade.currency ||
+        row.transactionDate.getTime() !== trade.tradeDate.getTime()
+      ) {
+        mismatched += 1;
+      }
+    } catch {
+      mismatched += 1;
+    }
+  }
+  if (mismatched > 0) {
+    issues.push({ code: 'investment_cash_mismatch', entityType: 'transaction', count: mismatched });
+  }
+}
+
 function readCounts(): SyncIntegrityReport['counts'] {
   const count = (table: (typeof SYNCABLE)[number][1]) =>
     db
@@ -645,6 +848,9 @@ function readCounts(): SyncIntegrityReport['counts'] {
     budgets: count(budgets),
     recurringTemplates: count(recurringTemplates),
     recurringOccurrences: count(recurringOccurrences),
+    investmentAssets: count(investmentAssets),
+    investmentTrades: count(investmentTrades),
+    investmentPrices: count(investmentPrices),
     pendingMutations:
       db
         .select({ total: sql<number>`count(*)` })

@@ -1,4 +1,6 @@
+import type { InvestmentTradeType } from '@/db/constants';
 import type { SyncEntityType } from '@/db/schema';
+import { replayTrades } from '@/features/investments/investment-replay';
 import { REMOTE_TABLES, type RemoteRow } from '@/features/sync/remote/remote-rows';
 import {
   PullRemoteError,
@@ -19,6 +21,11 @@ import {
  * - rows owned by another user are rejected the way the RLS policy rejects them;
  * - `sync.record_change()` assigns a `server_revision` per row and appends to a
  *   single monotonic `sync_changes` sequence, which is the pull cursor.
+ *
+ * So is `sync.guard_investment_holdings()`: an upload statement that would leave
+ * any asset's live history selling more than it holds is refused whole, with the
+ * same SQLSTATE, and nothing in it is written. A write made with `putRow` stands
+ * for a row another device already published, and is not guarded.
  *
  * The trigger quirk documented in `docs/sync-m7d.md` is reproduced too: because
  * it is a BEFORE trigger, a conflicting upsert appends a spurious revision-1
@@ -130,6 +137,41 @@ export function createFakeCloud(): FakeCloud {
     return storedRows(entityType).find((stored) => stored.row.sync_id === syncId);
   }
 
+  /** The deferred holdings guard: the statement's rows applied, then every touched asset replayed. */
+  function wouldOversell(rows: readonly RemoteRow[]): boolean {
+    const state = new Map<string, Record<string, unknown>>();
+    for (const stored of storedRows('investment_trade')) {
+      state.set(String(stored.row.sync_id), stored.row);
+    }
+    const assetKey = (row: Record<string, unknown>) => `${row.user_id}|${row.asset_sync_id}`;
+    const touched = new Set<string>();
+    for (const row of rows) {
+      const record = row as unknown as Record<string, unknown>;
+      const previous = state.get(String(record.sync_id));
+      if (previous !== undefined) touched.add(assetKey(previous));
+      touched.add(assetKey(record));
+      state.set(String(record.sync_id), record);
+    }
+    const nullableNumber = (value: unknown) => (value === null ? null : Number(value));
+    for (const key of touched) {
+      const history = [...state.values()]
+        .filter((row) => assetKey(row) === key)
+        .filter((row) => row.deleted_at === null || row.deleted_at === undefined)
+        .map((row) => ({
+          syncId: String(row.sync_id),
+          tradeType: row.trade_type as InvestmentTradeType,
+          tradeDate: Number(row.trade_date),
+          createdAt: Number(row.created_at),
+          quantityMinor: nullableNumber(row.quantity_minor),
+          unitPriceMinor: nullableNumber(row.unit_price_minor),
+          feeMinor: Number(row.fee_minor),
+          amountMinor: nullableNumber(row.amount_minor),
+        }));
+      if (!replayTrades(history).ok) return true;
+    }
+    return false;
+  }
+
   const repository: RemoteSyncRepository = {
     async upsert(entityType, rows) {
       const call = { entityType, rows };
@@ -154,6 +196,10 @@ export function createFakeCloud(): FakeCloud {
         if (existing !== undefined && existing.row.user_id !== readField(row, 'user_id')) {
           throw new PushRemoteError('authorization', '42501');
         }
+      }
+
+      if (entityType === 'investment_trade' && wouldOversell(rows)) {
+        throw new PushRemoteError('constraint', '23514');
       }
 
       for (const row of rows) write(entityType, { ...(row as Record<string, unknown>) });

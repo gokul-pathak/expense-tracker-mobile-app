@@ -1,11 +1,14 @@
 import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 
 import { db } from '@/db';
-import type { TransactionType } from '@/db/constants';
+import type { InvestmentTradeType, TransactionType } from '@/db/constants';
 import {
   accounts,
   budgets,
   categories,
+  investmentAssets,
+  investmentPrices,
+  investmentTrades,
   people,
   recurringOccurrences,
   recurringTemplates,
@@ -13,6 +16,7 @@ import {
   transactions,
 } from '@/db/schema';
 import type { SyncEntityType } from '@/db/schema';
+import type { InvestmentAsset, InvestmentPrice, InvestmentTrade } from '@/db/schema/investments';
 import type { Account } from '@/db/schema/accounts';
 import type { Budget } from '@/db/schema/budgets';
 import type { Category } from '@/db/schema/categories';
@@ -38,10 +42,19 @@ export type LocalSyncEntity =
   | { entityType: 'settings'; row: Setting }
   | { entityType: 'transaction'; row: Transaction }
   | { entityType: 'recurring_template'; row: RecurringTemplate }
-  | { entityType: 'recurring_occurrence'; row: RecurringOccurrence };
+  | { entityType: 'recurring_occurrence'; row: RecurringOccurrence }
+  | { entityType: 'investment_asset'; row: InvestmentAsset }
+  | { entityType: 'investment_trade'; row: InvestmentTrade }
+  | { entityType: 'investment_price'; row: InvestmentPrice };
 
 export type RelationEntityType =
-  'account' | 'category' | 'person' | 'recurring_template' | 'recurring_occurrence';
+  | 'account'
+  | 'category'
+  | 'person'
+  | 'recurring_template'
+  | 'recurring_occurrence'
+  | 'investment_asset'
+  | 'investment_trade';
 
 export function readLocalEntity(
   entityType: SyncEntityType,
@@ -88,6 +101,30 @@ export function readLocalEntity(
         .get();
       return row === undefined ? null : { entityType, row };
     }
+    case 'investment_asset': {
+      const row = db
+        .select()
+        .from(investmentAssets)
+        .where(eq(investmentAssets.syncId, syncId))
+        .get();
+      return row === undefined ? null : { entityType, row };
+    }
+    case 'investment_trade': {
+      const row = db
+        .select()
+        .from(investmentTrades)
+        .where(eq(investmentTrades.syncId, syncId))
+        .get();
+      return row === undefined ? null : { entityType, row };
+    }
+    case 'investment_price': {
+      const row = db
+        .select()
+        .from(investmentPrices)
+        .where(eq(investmentPrices.syncId, syncId))
+        .get();
+      return row === undefined ? null : { entityType, row };
+    }
   }
 }
 
@@ -100,6 +137,9 @@ const TABLES = {
   transaction: transactions,
   recurring_template: recurringTemplates,
   recurring_occurrence: recurringOccurrences,
+  investment_asset: investmentAssets,
+  investment_trade: investmentTrades,
+  investment_price: investmentPrices,
 } as const;
 
 /**
@@ -242,6 +282,9 @@ export type LocalSnapshot = {
   transactions: Transaction[];
   recurringTemplates: RecurringTemplate[];
   recurringOccurrences: RecurringOccurrence[];
+  investmentAssets: InvestmentAsset[];
+  investmentTrades: InvestmentTrade[];
+  investmentPrices: InvestmentPrice[];
 };
 
 /**
@@ -261,6 +304,9 @@ export function readLocalSnapshot(): LocalSnapshot {
     transactions: tx.select().from(transactions).all(),
     recurringTemplates: tx.select().from(recurringTemplates).all(),
     recurringOccurrences: tx.select().from(recurringOccurrences).all(),
+    investmentAssets: tx.select().from(investmentAssets).all(),
+    investmentTrades: tx.select().from(investmentTrades).all(),
+    investmentPrices: tx.select().from(investmentPrices).all(),
   }));
 }
 
@@ -287,6 +333,94 @@ export function readLocalRecurringOccurrence(syncId: string): RecurringOccurrenc
     db.select().from(recurringOccurrences).where(eq(recurringOccurrences.syncId, syncId)).get() ??
     null
   );
+}
+
+/** The same, for an investment trade. */
+export function readLocalInvestmentTrade(syncId: string): InvestmentTrade | null {
+  return (
+    db.select().from(investmentTrades).where(eq(investmentTrades.syncId, syncId)).get() ?? null
+  );
+}
+
+/** The same, for an investment price. */
+export function readLocalInvestmentPrice(syncId: string): InvestmentPrice | null {
+  return (
+    db.select().from(investmentPrices).where(eq(investmentPrices.syncId, syncId)).get() ?? null
+  );
+}
+
+/** Currency of each named asset, deleted ones included, for validating a downloaded trade or price. */
+export function readInvestmentAssetCurrenciesBySyncId(
+  syncIds: readonly string[],
+): Map<string, { currency: string }> {
+  const resolved = new Map<string, { currency: string }>();
+  const unique = [...new Set(syncIds)];
+  if (unique.length === 0) return resolved;
+  const rows = db
+    .select({ syncId: investmentAssets.syncId, currency: investmentAssets.currency })
+    .from(investmentAssets)
+    .where(inArray(investmentAssets.syncId, unique))
+    .all();
+  for (const row of rows) {
+    if (row.syncId !== null) resolved.set(row.syncId, { currency: row.currency });
+  }
+  return resolved;
+}
+
+export type LocalInvestmentTradeRow = {
+  assetSyncId: string;
+  syncId: string;
+  tradeType: InvestmentTradeType;
+  tradeDate: number;
+  createdAt: number;
+  quantityMinor: number | null;
+  unitPriceMinor: number | null;
+  feeMinor: number;
+  amountMinor: number | null;
+};
+
+/**
+ * Live trade history for the assets a pull batch touches.
+ *
+ * A downloaded trade is checked against the whole history it joins, local
+ * trades not yet uploaded included: a sell another device made offline must not
+ * be accepted if, together with this device's own sells, it sells more than was
+ * ever held.
+ */
+export function readLocalInvestmentTradesForAssets(
+  assetSyncIds: readonly string[],
+): LocalInvestmentTradeRow[] {
+  const unique = [...new Set(assetSyncIds)];
+  if (unique.length === 0) return [];
+  return db
+    .select({
+      assetSyncId: investmentAssets.syncId,
+      syncId: investmentTrades.syncId,
+      tradeType: investmentTrades.tradeType,
+      tradeDate: investmentTrades.tradeDate,
+      createdAt: investmentTrades.createdAt,
+      quantityMinor: investmentTrades.quantityMinor,
+      unitPriceMinor: investmentTrades.unitPriceMinor,
+      feeMinor: investmentTrades.feeMinor,
+      amountMinor: investmentTrades.amountMinor,
+    })
+    .from(investmentTrades)
+    .innerJoin(investmentAssets, eq(investmentTrades.assetId, investmentAssets.id))
+    .where(and(isNull(investmentTrades.deletedAt), inArray(investmentAssets.syncId, unique)))
+    .all()
+    .flatMap((row) =>
+      row.assetSyncId === null || row.syncId === null
+        ? []
+        : [
+            {
+              ...row,
+              assetSyncId: row.assetSyncId,
+              syncId: row.syncId,
+              tradeDate: row.tradeDate.getTime(),
+              createdAt: row.createdAt.getTime(),
+            },
+          ],
+    );
 }
 
 /**
@@ -325,6 +459,9 @@ export function countSyncableRowsWithIdentity(): number {
     transactions,
     recurringTemplates,
     recurringOccurrences,
+    investmentAssets,
+    investmentTrades,
+    investmentPrices,
   ].reduce(
     (total, table) =>
       total + db.select({ id: table.id }).from(table).where(isNotNull(table.syncId)).all().length,

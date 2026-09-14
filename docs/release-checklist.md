@@ -208,6 +208,29 @@ See [`ai-receipt-hardening-m9e.md`](ai-receipt-hardening-m9e.md) for the audit b
       Expense, an AI suggestion and an AI explanation, each also offline, signed out and with the app
       killed mid-step
 
+## Investments (M10A)
+
+See [`investments-m10a.md`](investments-m10a.md).
+
+- [ ] **blocker** a buy moves cash out and a sale moves cash in through one linked transaction each;
+      neither changes Income, Expense, Savings or any budget, and a balance counts the cash once
+- [ ] **blocker** a trade, its cash and both queue entries are one SQLite transaction; editing or
+      deleting a trade changes its cash with it, and the ordinary transaction service refuses to
+- [ ] **blocker** no change — local, downloaded, restored or uploaded — can leave any asset selling
+      more than it held at any point in its history
+- [ ] **blocker** two devices selling the same units offline: the second upload is refused by the
+      cloud and the download is refused on the device; neither ever holds a negative position
+- [ ] **blocker** quantities are integer 10^-8 units, money is integer minor units, products are
+      BigInt, and a figure that does not fit is refused
+- [ ] **blocker** an unpriced position has an unknown value, never zero; no total adds two currencies
+- [ ] **blocker** `supabase/migrations/20260915000000_investments.sql` applied and
+      `supabase/tests/investments.sql` passing before a build containing M10A syncs
+- [ ] A dividend is Investment Return income: Bank +500, Income +500
+- [ ] Total Balance stays cash in accounts; Investment Value is a separate figure
+- [ ] Backup version 5 round-trips investments; versions 1–4 restore with none
+- [ ] `verifySyncIntegrity()` reports no investment issue on a representative dataset
+- [ ] 100 assets, 5,000 trades and 1,000 prices summarize within the performance test's budget
+
 ## Performance
 
 - [ ] A large dataset (5,000+ transactions) uploads and restores in bounded batches

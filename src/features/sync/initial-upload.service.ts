@@ -5,6 +5,9 @@ import {
   mapLocalAccountToRemote,
   mapLocalBudgetToRemote,
   mapLocalCategoryToRemote,
+  mapLocalInvestmentAssetToRemote,
+  mapLocalInvestmentPriceToRemote,
+  mapLocalInvestmentTradeToRemote,
   mapLocalPersonToRemote,
   mapLocalRecurringOccurrenceToRemote,
   mapLocalRecurringTemplateToRemote,
@@ -55,12 +58,19 @@ const UPLOAD_ORDER: readonly SyncEntityType[] = [
   'budget',
   'recurring_template',
   'recurring_occurrence',
+  // An asset before its prices and trades, and a trade before the cash naming it.
+  'investment_asset',
+  'investment_price',
+  'investment_trade',
   'transaction',
 ];
 
 /** Children before parents, so an obsolete parent is never hidden first. */
 const TOMBSTONE_ORDER: readonly SyncEntityType[] = [
   'transaction',
+  'investment_trade',
+  'investment_price',
+  'investment_asset',
   'recurring_occurrence',
   'recurring_template',
   'budget',
@@ -110,6 +120,23 @@ export async function performInitialUpload(
   const batchSize = options.batchSize ?? INITIAL_UPLOAD_BATCH_SIZE;
   const context: MappingContext = { userId: options.userId };
   const resolver = buildResolver(snapshot);
+  if (options.replaceCloudDataset === true && options.snapshots === undefined) {
+    throw new InitialUploadError('remote', 'snapshot_repository_required');
+  }
+
+  // Sales the cloud holds and this device does not are retired before anything
+  // is uploaded. Left in place, one of them could rest for a moment on units this
+  // upload is about to reduce, and the cloud's holdings guard would refuse it.
+  let tombstoned = 0;
+  if (options.replaceCloudDataset === true && options.snapshots !== undefined) {
+    tombstoned += await retireObsoleteCloudRows(
+      options.remote,
+      options.snapshots,
+      snapshot,
+      batchSize,
+      { onlySells: true },
+    );
+  }
 
   let uploaded = 0;
   for (const entityType of UPLOAD_ORDER) {
@@ -120,12 +147,8 @@ export async function performInitialUpload(
     }
   }
 
-  let tombstoned = 0;
-  if (options.replaceCloudDataset === true) {
-    if (options.snapshots === undefined) {
-      throw new InitialUploadError('remote', 'snapshot_repository_required');
-    }
-    tombstoned = await retireObsoleteCloudRows(
+  if (options.replaceCloudDataset === true && options.snapshots !== undefined) {
+    tombstoned += await retireObsoleteCloudRows(
       options.remote,
       options.snapshots,
       snapshot,
@@ -148,19 +171,26 @@ async function retireObsoleteCloudRows(
   snapshots: RemoteSnapshotRepository,
   snapshot: LocalSnapshot,
   batchSize: number,
+  scope: { onlySells?: boolean } = {},
 ): Promise<number> {
   const localIdentities = localIdentitiesOf(snapshot);
   const deletedAt = Date.now();
   let tombstoned = 0;
 
   for (const entityType of TOMBSTONE_ORDER) {
+    if (scope.onlySells === true && entityType !== 'investment_trade') continue;
     const obsolete: RemoteRow[] = [];
     for (const row of await readAllCloudRows(snapshots, entityType)) {
       const syncId = String(row.sync_id);
       if (localIdentities[entityType].has(syncId)) continue;
       if (row.deleted_at !== null && row.deleted_at !== undefined) continue;
+      if (scope.onlySells === true && row.trade_type !== 'sell') continue;
       const { server_revision: _revision, server_updated_at: _updatedAt, ...values } = row;
       obsolete.push({ ...values, deleted_at: deletedAt } as unknown as RemoteRow);
+    }
+    // A sale retires before the purchases it rested on.
+    if (entityType === 'investment_trade') {
+      obsolete.sort((left, right) => sellsFirst(left) - sellsFirst(right));
     }
     for (const batch of chunk(obsolete, batchSize)) {
       await upload(remote, entityType, batch);
@@ -206,7 +236,36 @@ function localIdentitiesOf(snapshot: LocalSnapshot): Record<SyncEntityType, Set<
     transaction: identities(snapshot.transactions),
     recurring_template: identities(snapshot.recurringTemplates),
     recurring_occurrence: identities(snapshot.recurringOccurrences),
+    investment_asset: identities(snapshot.investmentAssets),
+    investment_trade: identities(snapshot.investmentTrades),
+    investment_price: identities(snapshot.investmentPrices),
   };
+}
+
+function sellsFirst(row: RemoteRow): number {
+  return (row as { trade_type?: unknown }).trade_type === 'sell' ? 0 : 1;
+}
+
+/**
+ * The order trades upload in, so every batch leaves the cloud holding a history
+ * that could have happened, whatever it held before.
+ *
+ * Deleted sales first — removing a sale never undermines anything. Then every
+ * live purchase, then dividends and fees, then live sales, so a sale always
+ * arrives after the purchases it rests on. Deleted purchases, dividends and fees
+ * go last, once nothing that remains live can still be resting on them.
+ */
+function tradeUploadRank(trade: LocalSnapshot['investmentTrades'][number]): number {
+  if (trade.deletedAt !== null) return trade.tradeType === 'sell' ? 0 : 4;
+  switch (trade.tradeType) {
+    case 'buy':
+      return 1;
+    case 'dividend':
+    case 'fee':
+      return 2;
+    case 'sell':
+      return 3;
+  }
 }
 
 function mapEntity(
@@ -239,6 +298,20 @@ function mapEntity(
         return snapshot.recurringOccurrences.map((row) =>
           mapLocalRecurringOccurrenceToRemote(row, context, resolver),
         );
+      case 'investment_asset':
+        return snapshot.investmentAssets.map((row) =>
+          mapLocalInvestmentAssetToRemote(row, context),
+        );
+      case 'investment_price':
+        return snapshot.investmentPrices.map((row) =>
+          mapLocalInvestmentPriceToRemote(row, context, resolver),
+        );
+      case 'investment_trade':
+        return [...snapshot.investmentTrades]
+          .sort(
+            (left, right) => tradeUploadRank(left) - tradeUploadRank(right) || left.id - right.id,
+          )
+          .map((row) => mapLocalInvestmentTradeToRemote(row, context, resolver));
     }
   })();
 
@@ -265,12 +338,16 @@ function buildResolver(snapshot: LocalSnapshot): RelationResolver {
   const people = index(snapshot.people);
   const templates = index(snapshot.recurringTemplates);
   const occurrences = index(snapshot.recurringOccurrences);
+  const assets = index(snapshot.investmentAssets);
+  const trades = index(snapshot.investmentTrades);
   return {
     account: (localId) => accounts.get(localId),
     category: (localId) => categories.get(localId),
     person: (localId) => people.get(localId),
     recurringTemplate: (localId) => templates.get(localId),
     recurringOccurrence: (localId) => occurrences.get(localId),
+    investmentAsset: (localId) => assets.get(localId),
+    investmentTrade: (localId) => trades.get(localId),
   };
 }
 

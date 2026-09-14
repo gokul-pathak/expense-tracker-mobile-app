@@ -26,6 +26,9 @@ import {
   applyRemoteAccount,
   applyRemoteBudget,
   applyRemoteCategory,
+  applyRemoteInvestmentAsset,
+  applyRemoteInvestmentPrice,
+  applyRemoteInvestmentTrade,
   applyRemotePerson,
   applyRemoteRecurringOccurrence,
   applyRemoteRecurringTemplate,
@@ -440,6 +443,15 @@ function applyWrite(write: PlannedWrite, writer: SyncWriter): void {
       return;
     case 'recurring_occurrence':
       applyRemoteRecurringOccurrence(write.row, writer);
+      return;
+    case 'investment_asset':
+      applyRemoteInvestmentAsset(write.row, writer);
+      return;
+    case 'investment_price':
+      applyRemoteInvestmentPrice(write.row, writer);
+      return;
+    case 'investment_trade':
+      applyRemoteInvestmentTrade(write.row, writer);
       return;
     case 'tombstone':
       applyRemoteTombstone(

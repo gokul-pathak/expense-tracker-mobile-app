@@ -4,6 +4,9 @@ import {
   mapPulledAccountToLocal,
   mapPulledBudgetToLocal,
   mapPulledCategoryToLocal,
+  mapPulledInvestmentAssetToLocal,
+  mapPulledInvestmentPriceToLocal,
+  mapPulledInvestmentTradeToLocal,
   mapPulledPersonToLocal,
   mapPulledRecurringOccurrenceToLocal,
   mapPulledRecurringTemplateToLocal,
@@ -16,6 +19,9 @@ import {
   type PulledAccountRow,
   type PulledBudgetRow,
   type PulledCategoryRow,
+  type PulledInvestmentAssetRow,
+  type PulledInvestmentPriceRow,
+  type PulledInvestmentTradeRow,
   type PulledPersonRow,
   type PulledRecurringOccurrenceRow,
   type PulledRecurringTemplateRow,
@@ -28,6 +34,9 @@ import type {
   RemoteAccount,
   RemoteBudget,
   RemoteCategory,
+  RemoteInvestmentAsset,
+  RemoteInvestmentPrice,
+  RemoteInvestmentTrade,
   RemotePerson,
   RemoteRecurringOccurrence,
   RemoteRecurringTemplate,
@@ -36,8 +45,11 @@ import type {
 } from './remote-apply.repository';
 import {
   findDebtViolation,
+  findInvestmentHoldingViolation,
   isDebtType,
   validateRemoteBudget,
+  validateRemoteInvestmentPrice,
+  validateRemoteInvestmentTrade,
   validateRemoteRecurringOccurrence,
   validateRemoteRecurringTemplate,
   validateRemoteTransaction,
@@ -50,12 +62,15 @@ import { readPendingSyncMutations } from './sync.repository';
 import {
   readAccountCurrenciesBySyncId,
   readCategoryTypesBySyncId,
+  readInvestmentAssetCurrenciesBySyncId,
+  readLocalInvestmentTradesForAssets,
   readLocalCategoryBySystemKey,
   readLocalDebtRowsForPeople,
   readLocalEntity,
   readLocalRowsBySyncIds,
   readLocalSettingsSyncId,
   type LocalDebtRow,
+  type LocalInvestmentTradeRow,
 } from './sync-source.repository';
 
 /**
@@ -106,6 +121,9 @@ export type PlannedWrite =
   | { write: 'transaction'; row: RemoteTransaction }
   | { write: 'recurring_template'; row: RemoteRecurringTemplate }
   | { write: 'recurring_occurrence'; row: RemoteRecurringOccurrence }
+  | { write: 'investment_asset'; row: RemoteInvestmentAsset }
+  | { write: 'investment_price'; row: RemoteInvestmentPrice }
+  | { write: 'investment_trade'; row: RemoteInvestmentTrade }
   | { write: 'tombstone'; entityType: SyncEntityType; syncId: string; deletedAt: Date }
   | { write: 'rebind-category'; systemKey: string; syncId: string }
   | { write: 'rebind-settings'; syncId: string };
@@ -226,6 +244,11 @@ function planPrefix(input: PullBatchInput, horizon: number): PrefixResult {
     return { ok: false, index: invariant.index, failure: invariant.failure };
   }
 
+  const holdings = validateInvestmentInvariants(items, decoded, context);
+  if (holdings !== undefined) {
+    return { ok: false, index: holdings.index, failure: holdings.failure };
+  }
+
   return { ok: true, items: orderByDependency(items) };
 }
 
@@ -278,6 +301,8 @@ type LocalContext = {
   /** Local rows plus the batch's own parents, which land before their children. */
   relations: RemoteRelationIndex;
   localDebtRows: LocalDebtRow[];
+  /** Live local history of every asset a downloaded trade belongs to. */
+  localInvestmentTrades: LocalInvestmentTradeRow[];
 };
 
 function readLocalContext(decoded: Map<string, DecodedEntry>): LocalContext {
@@ -343,6 +368,24 @@ function readLocalContext(decoded: Map<string, DecodedEntry>): LocalContext {
     if (categorySyncId !== null) referencedCategories.push(categorySyncId);
   }
 
+  // A trade names an asset and a cash account, a price names an asset, and
+  // investment cash names its trade.
+  const referencedAssets: string[] = [];
+  const referencedTrades: string[] = [];
+  for (const entry of decoded.values()) {
+    if (entry.change.entityType === 'investment_trade') {
+      const row = entry.row as PulledInvestmentTradeRow;
+      referencedAssets.push(row.asset_sync_id);
+      referencedAccounts.push(row.account_sync_id);
+    }
+    if (entry.change.entityType === 'investment_price') {
+      referencedAssets.push((entry.row as PulledInvestmentPriceRow).asset_sync_id);
+    }
+  }
+  for (const row of transactionRows) {
+    if (row.investment_trade_sync_id !== null) referencedTrades.push(row.investment_trade_sync_id);
+  }
+
   const relations: RemoteRelationIndex = {
     accounts: new Map(),
     categoryTypes: new Map(),
@@ -353,6 +396,8 @@ function readLocalContext(decoded: Map<string, DecodedEntry>): LocalContext {
     recurringOccurrences: new Set(
       readLocalRowsBySyncIds('recurring_occurrence', referencedOccurrences).keys(),
     ),
+    investmentAssets: readInvestmentAssetCurrenciesBySyncId(referencedAssets),
+    investmentTrades: new Set(readLocalRowsBySyncIds('investment_trade', referencedTrades).keys()),
   };
 
   // Recurring parents arriving in the batch count whether or not they are
@@ -364,6 +409,14 @@ function readLocalContext(decoded: Map<string, DecodedEntry>): LocalContext {
     }
     if (entry.change.entityType === 'recurring_occurrence') {
       relations.recurringOccurrences.add(entry.row.sync_id);
+    }
+    // An asset arriving deleted is still written, for the trades that name it.
+    if (entry.change.entityType === 'investment_asset') {
+      const row = entry.row as PulledInvestmentAssetRow;
+      relations.investmentAssets.set(row.sync_id, { currency: row.currency });
+    }
+    if (entry.change.entityType === 'investment_trade') {
+      relations.investmentTrades.add(entry.row.sync_id);
     }
   }
 
@@ -411,6 +464,7 @@ function readLocalContext(decoded: Map<string, DecodedEntry>): LocalContext {
     localSettingsSyncId: readLocalSettingsSyncId(),
     relations,
     localDebtRows: readLocalDebtRowsForPeople(referencedPeople),
+    localInvestmentTrades: readLocalInvestmentTradesForAssets(referencedAssets),
   };
 }
 
@@ -456,6 +510,28 @@ function decide(entry: DecodedEntry, context: LocalContext): Decision {
   if (entityType === 'recurring_template') {
     const problem = validateRemoteRecurringTemplate(
       row as PulledRecurringTemplateRow,
+      context.relations,
+      remoteDeleted,
+    );
+    if (problem !== undefined) {
+      return { ok: false, failure: failureFor(change, problem.code, problem.detail) };
+    }
+  }
+
+  if (entityType === 'investment_trade') {
+    const problem = validateRemoteInvestmentTrade(
+      row as PulledInvestmentTradeRow,
+      context.relations,
+      remoteDeleted,
+    );
+    if (problem !== undefined) {
+      return { ok: false, failure: failureFor(change, problem.code, problem.detail) };
+    }
+  }
+
+  if (entityType === 'investment_price') {
+    const problem = validateRemoteInvestmentPrice(
+      row as PulledInvestmentPriceRow,
       context.relations,
       remoteDeleted,
     );
@@ -634,6 +710,21 @@ function domainWrite(entityType: SyncEntityType, row: PulledRow): PlannedWrite {
         write: 'recurring_occurrence',
         row: mapPulledRecurringOccurrenceToLocal(row as PulledRecurringOccurrenceRow),
       };
+    case 'investment_asset':
+      return {
+        write: 'investment_asset',
+        row: mapPulledInvestmentAssetToLocal(row as PulledInvestmentAssetRow),
+      };
+    case 'investment_price':
+      return {
+        write: 'investment_price',
+        row: mapPulledInvestmentPriceToLocal(row as PulledInvestmentPriceRow),
+      };
+    case 'investment_trade':
+      return {
+        write: 'investment_trade',
+        row: mapPulledInvestmentTradeToLocal(row as PulledInvestmentTradeRow),
+      };
   }
 }
 
@@ -641,6 +732,8 @@ function domainWrite(entityType: SyncEntityType, row: PulledRow): PlannedWrite {
 const MATERIALIZED_TOMBSTONES: ReadonlySet<SyncEntityType> = new Set([
   'recurring_template',
   'recurring_occurrence',
+  // A deleted asset's trades are still history, and still need it to exist.
+  'investment_asset',
 ]);
 
 /** A remote `generated` over a local, not yet uploaded, `skipped`. */
@@ -803,6 +896,7 @@ function remoteEqualsLocal(entityType: SyncEntityType, row: PulledRow): boolean 
         local.row.destinationAccountId === relations.destinationAccountId &&
         local.row.personId === relations.personId &&
         local.row.recurringOccurrenceId === relations.recurringOccurrenceId &&
+        local.row.investmentTradeId === relations.investmentTradeId &&
         sameInstant(local.row.transactionDate, remote.transaction_date) &&
         sameInstant(local.row.updatedAt, remote.updated_at) &&
         sameNullableInstant(local.row.deletedAt, remote.deleted_at)
@@ -838,6 +932,47 @@ function remoteEqualsLocal(entityType: SyncEntityType, row: PulledRow): boolean 
         sameNullableInstant(local.row.deletedAt, remote.deleted_at)
       );
     }
+    case 'investment_asset': {
+      const remote = row as PulledInvestmentAssetRow;
+      return (
+        local.row.name === remote.name &&
+        local.row.symbol === remote.symbol &&
+        local.row.assetType === remote.asset_type &&
+        local.row.currency === remote.currency &&
+        local.row.isArchived === remote.is_archived &&
+        sameInstant(local.row.updatedAt, remote.updated_at) &&
+        sameNullableInstant(local.row.deletedAt, remote.deleted_at)
+      );
+    }
+    case 'investment_trade': {
+      const remote = row as PulledInvestmentTradeRow;
+      return (
+        local.row.assetId === localIdOf('investment_asset', remote.asset_sync_id) &&
+        local.row.accountId === localIdOf('account', remote.account_sync_id) &&
+        local.row.tradeType === remote.trade_type &&
+        local.row.quantityMinor === remote.quantity_minor &&
+        local.row.unitPriceMinor === remote.unit_price_minor &&
+        local.row.feeMinor === remote.fee_minor &&
+        local.row.amountMinor === remote.amount_minor &&
+        local.row.currency === remote.currency &&
+        local.row.note === remote.note &&
+        sameInstant(local.row.tradeDate, remote.trade_date) &&
+        sameInstant(local.row.createdAt, remote.created_at) &&
+        sameInstant(local.row.updatedAt, remote.updated_at) &&
+        sameNullableInstant(local.row.deletedAt, remote.deleted_at)
+      );
+    }
+    case 'investment_price': {
+      const remote = row as PulledInvestmentPriceRow;
+      return (
+        local.row.assetId === localIdOf('investment_asset', remote.asset_sync_id) &&
+        local.row.priceMinor === remote.price_minor &&
+        local.row.priceDate === remote.price_date &&
+        local.row.currency === remote.currency &&
+        sameInstant(local.row.updatedAt, remote.updated_at) &&
+        sameNullableInstant(local.row.deletedAt, remote.deleted_at)
+      );
+    }
   }
 }
 
@@ -853,6 +988,7 @@ function resolveLocalRelations(row: PulledTransactionRow) {
     destinationAccountId: localIdOf('account', row.destination_account_sync_id),
     personId: localIdOf('person', row.person_sync_id),
     recurringOccurrenceId: localIdOf('recurring_occurrence', row.recurring_occurrence_sync_id),
+    investmentTradeId: localIdOf('investment_trade', row.investment_trade_sync_id),
   };
 }
 
@@ -917,6 +1053,66 @@ function validateDebtInvariants(
 }
 
 /**
+ * Holdings across local history and the whole batch together.
+ *
+ * A downloaded trade joins a history this device may already have added to while
+ * offline. Two devices can each sell 7 of the same 10 shares, each valid on its
+ * own, and together sell 14. The change that turns a valid history into one that
+ * sells more than it holds is refused: the cursor stops before it and the record
+ * waits for a person. This device's own sale is never silently dropped, and the
+ * other device's is never applied as though it were valid.
+ *
+ * Only changes that will actually be written count. A trade whose local edit
+ * wins the conflict leaves the local version in place, and that is the version
+ * replayed.
+ */
+function validateInvestmentInvariants(
+  items: readonly PlannedItem[],
+  decoded: Map<string, DecodedEntry>,
+  context: LocalContext,
+): { index: number; failure: PullFailure } | undefined {
+  const writing = new Set(
+    items
+      .filter((item) => item.entityType === 'investment_trade' && item.writes.length > 0)
+      .map((item) => item.syncId),
+  );
+  const incoming = [...decoded.values()]
+    .filter((entry) => entry.change.entityType === 'investment_trade')
+    .filter((entry) => writing.has(entry.row.sync_id))
+    .sort((left, right) => left.index - right.index)
+    .map((entry) => {
+      const row = entry.row as PulledInvestmentTradeRow;
+      return {
+        key: entry,
+        syncId: row.sync_id,
+        assetSyncId: row.asset_sync_id,
+        trade:
+          row.deleted_at !== null
+            ? null
+            : {
+                assetSyncId: row.asset_sync_id,
+                syncId: row.sync_id,
+                tradeType: row.trade_type,
+                tradeDate: row.trade_date,
+                createdAt: row.created_at,
+                quantityMinor: row.quantity_minor,
+                unitPriceMinor: row.unit_price_minor,
+                feeMinor: row.fee_minor,
+                amountMinor: row.amount_minor,
+              },
+      };
+    });
+  if (incoming.length === 0) return undefined;
+
+  const violation = findInvestmentHoldingViolation(context.localInvestmentTrades, incoming);
+  if (violation === undefined) return undefined;
+  return {
+    index: violation.key.index,
+    failure: failureFor(violation.key.change, 'domain_invariant', violation.problem),
+  };
+}
+
+/**
  * Dependency-safe order.
  *
  * Parents before children, and children's tombstones before their parents'. A
@@ -939,9 +1135,16 @@ const PHASE_ORDER: Record<string, number> = {
   'recurring_template:tombstone': 2,
   'recurring_occurrence:row': 3,
   'recurring_occurrence:tombstone': 3,
+  // An asset before its prices and trades, and a trade before its cash.
+  'investment_asset:row': 2,
+  'investment_asset:tombstone': 2,
+  'investment_price:row': 3,
+  'investment_trade:row': 3,
   'transaction:row': 4,
   'budget:tombstone': 5,
   'transaction:tombstone': 5,
+  'investment_price:tombstone': 5,
+  'investment_trade:tombstone': 5,
   'settings:tombstone': 6,
   'account:tombstone': 6,
   'category:tombstone': 6,

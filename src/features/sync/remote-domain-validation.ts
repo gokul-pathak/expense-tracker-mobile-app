@@ -4,8 +4,13 @@ import {
   deriveOccurrenceSyncId,
 } from '@/features/recurring/recurring-identity';
 
+import { valueAtPrice } from '@/features/investments/investment-math';
+import { replayTrades, type ReplayTrade } from '@/features/investments/investment-replay';
+
 import type {
   PulledBudgetRow,
+  PulledInvestmentPriceRow,
+  PulledInvestmentTradeRow,
   PulledRecurringOccurrenceRow,
   PulledRecurringTemplateRow,
   PulledTransactionRow,
@@ -24,8 +29,13 @@ import type {
  * accepted through one path that the other would reject.
  */
 
-/** Types the cloud schema permits but this app has no domain support for. */
-export const UNSUPPORTED_TRANSACTION_TYPES: readonly string[] = ['investment', 'investment_return'];
+/**
+ * Types the cloud schema permits but this app has no domain support for.
+ *
+ * Empty since M10A: `investment` and `investment_return` are the cash side of an
+ * investment trade, and are accepted only together with the trade they belong to.
+ */
+export const UNSUPPORTED_TRANSACTION_TYPES: readonly string[] = [];
 
 export const DEBT_TYPES = ['lend', 'borrow', 'repayment_received', 'repayment_paid'] as const;
 
@@ -47,6 +57,10 @@ export type RemoteRelationIndex = {
    */
   recurringTemplates: Set<string>;
   recurringOccurrences: Set<string>;
+  /** Assets known locally or arriving in the batch, deleted ones included. */
+  investmentAssets: Map<string, { currency: string }>;
+  /** Trades known locally or arriving in the batch, deleted ones included. */
+  investmentTrades: Set<string>;
 };
 
 export type RemoteRecordProblem = {
@@ -79,12 +93,33 @@ export function validateRemoteTransaction(
     }
   }
 
+  // Investment cash belongs to exactly one trade, and a trade's cash is one of
+  // three types. `investment` cash with no trade is money moving for no recorded
+  // reason, and a trade link on any other type is cash the trade cannot explain.
+  const trade = row.investment_trade_sync_id;
+  if ((row.type === 'investment' || row.type === 'investment_return') && trade === null) {
+    return { code: 'invalid_remote_data', detail: 'investment_without_trade' };
+  }
+  if (trade !== null) {
+    if (row.type !== 'investment' && row.type !== 'investment_return' && row.type !== 'income') {
+      return { code: 'invalid_remote_data', detail: 'investment_cash_type' };
+    }
+    if (occurrence !== null) return { code: 'invalid_remote_data', detail: 'investment_recurring' };
+  }
+
   // A deleted record is invisible to every domain calculation, so its shape
   // cannot corrupt anything and is not re-litigated here.
   if (remoteDeleted) return undefined;
 
   if (occurrence !== null && !index.recurringOccurrences.has(occurrence)) {
     return { code: 'unknown_parent', detail: 'recurring_occurrence' };
+  }
+  // Whether the cash still matches its trade's amount and account is not checked
+  // here: an edit of both can arrive across two pages, and refusing the first
+  // half would stall the download before the second could ever arrive.
+  // `verifySyncIntegrity` reports a lasting mismatch instead.
+  if (trade !== null && !index.investmentTrades.has(trade)) {
+    return { code: 'unknown_parent', detail: 'investment_trade' };
   }
 
   const source = row.source_account_sync_id;
@@ -155,6 +190,15 @@ function validateShape(
     case 'repayment_received':
       if (destination === null || source !== null) return invalid('debt_accounts');
       if (person === null || category !== null) return invalid('debt_relations');
+      return undefined;
+    // Cash out to an investment, and cash back from one. Never a category or a person.
+    case 'investment':
+      if (source === null || destination !== null) return invalid('investment_accounts');
+      if (category !== null || person !== null) return invalid('investment_relations');
+      return undefined;
+    case 'investment_return':
+      if (destination === null || source !== null) return invalid('investment_accounts');
+      if (category !== null || person !== null) return invalid('investment_relations');
       return undefined;
     default:
       return { code: 'unsupported_remote_data', detail: `type:${type}` };
@@ -336,4 +380,146 @@ export function findDebtViolation<TKey>(
   }
 
   return undefined;
+}
+
+/**
+ * The rules a downloaded price must satisfy: its asset exists, and a live price
+ * is in the asset's own currency. A deleted price hides nothing, so it is not
+ * checked.
+ */
+export function validateRemoteInvestmentPrice(
+  row: PulledInvestmentPriceRow,
+  index: RemoteRelationIndex,
+  remoteDeleted: boolean,
+): RemoteRecordProblem | undefined {
+  if (remoteDeleted) return undefined;
+  const asset = index.investmentAssets.get(row.asset_sync_id);
+  if (asset === undefined) return { code: 'unknown_parent', detail: 'investment_asset' };
+  if (asset.currency !== row.currency) {
+    return { code: 'invalid_remote_data', detail: 'asset_currency' };
+  }
+  return undefined;
+}
+
+/**
+ * The rules a downloaded trade must satisfy on its own.
+ *
+ * Its asset and account exist and share its currency — nothing converts — it
+ * carries exactly the figures its type needs, and the cash it implies is a
+ * positive amount that fits. Whether it fits the asset's history is a question
+ * about the whole batch, answered by `findInvestmentHoldingViolation`.
+ */
+export function validateRemoteInvestmentTrade(
+  row: PulledInvestmentTradeRow,
+  index: RemoteRelationIndex,
+  remoteDeleted: boolean,
+): RemoteRecordProblem | undefined {
+  if (remoteDeleted) return undefined;
+  const asset = index.investmentAssets.get(row.asset_sync_id);
+  if (asset === undefined) return { code: 'unknown_parent', detail: 'investment_asset' };
+  const account = index.accounts.get(row.account_sync_id);
+  if (account === undefined) return { code: 'unknown_parent', detail: 'account' };
+  if (asset.currency !== row.currency) {
+    return { code: 'invalid_remote_data', detail: 'asset_currency' };
+  }
+  if (account.currency !== row.currency) {
+    return { code: 'invalid_remote_data', detail: 'account_currency' };
+  }
+
+  const invalid = (detail: string): RemoteRecordProblem => ({
+    code: 'invalid_remote_data',
+    detail,
+  });
+  const zero = BigInt(0);
+  if (row.trade_type === 'buy' || row.trade_type === 'sell') {
+    if (row.quantity_minor === null || row.unit_price_minor === null || row.amount_minor !== null) {
+      return invalid('trade_shape');
+    }
+    const gross = valueAtPrice(BigInt(row.quantity_minor), BigInt(row.unit_price_minor));
+    const fee = BigInt(row.fee_minor);
+    const cash = row.trade_type === 'buy' ? gross + fee : gross - fee;
+    if (gross <= zero || cash <= zero || cash > BigInt(Number.MAX_SAFE_INTEGER)) {
+      return invalid('trade_cash');
+    }
+    return undefined;
+  }
+  if (
+    row.quantity_minor !== null ||
+    row.unit_price_minor !== null ||
+    row.fee_minor !== 0 ||
+    row.amount_minor === null
+  ) {
+    return invalid('trade_shape');
+  }
+  return undefined;
+}
+
+/** One trade's state, keyed to the asset whose history it belongs to. */
+export type InvestmentTradeState = ReplayTrade & { assetSyncId: string };
+
+/** One incoming change to a trade: its new state, or null when it is removed. */
+export type InvestmentTradeChange<TKey> = {
+  key: TKey;
+  syncId: string;
+  assetSyncId: string;
+  trade: InvestmentTradeState | null;
+};
+
+/**
+ * Whether applying incoming trade changes, in the order given, ever turns a
+ * history that could have happened into one that sells more than it holds.
+ *
+ * `existing` is the local live history, trades not yet uploaded included — which
+ * is exactly how two devices each selling 7 of the same 10 shares is caught. The
+ * change to blame is the first one after which a valid history becomes invalid.
+ * An asset whose history was already invalid before the batch is not blamed on
+ * it: refusing the download would not repair it.
+ */
+export function findInvestmentHoldingViolation<TKey>(
+  existing: readonly InvestmentTradeState[],
+  incoming: readonly InvestmentTradeChange<TKey>[],
+): { key: TKey; problem: string } | undefined {
+  const byAsset = new Map<string, Map<string, ReplayTrade>>();
+  for (const trade of existing) {
+    const trades = byAsset.get(trade.assetSyncId) ?? new Map<string, ReplayTrade>();
+    trades.set(trade.syncId, trade);
+    byAsset.set(trade.assetSyncId, trades);
+  }
+  const apply = (trades: Map<string, ReplayTrade>, change: InvestmentTradeChange<TKey>) => {
+    if (change.trade === null) trades.delete(change.syncId);
+    else trades.set(change.syncId, change.trade);
+  };
+  const valid = (trades: Map<string, ReplayTrade>) => replayTrades([...trades.values()]).ok;
+
+  // Everything at once first. That is almost always valid, and then it is the
+  // only replay needed.
+  const touched = [...new Set(incoming.map((change) => change.assetSyncId))];
+  const finalState = new Map(
+    touched.map((asset) => [asset, new Map(byAsset.get(asset) ?? new Map<string, ReplayTrade>())]),
+  );
+  for (const change of incoming) apply(finalState.get(change.assetSyncId)!, change);
+  const failing = new Set(
+    touched.filter(
+      (asset) =>
+        valid(byAsset.get(asset) ?? new Map<string, ReplayTrade>()) &&
+        !valid(finalState.get(asset)!),
+    ),
+  );
+  if (failing.size === 0) return undefined;
+
+  const working = new Map(
+    [...failing].map((asset) => [
+      asset,
+      new Map(byAsset.get(asset) ?? new Map<string, ReplayTrade>()),
+    ]),
+  );
+  for (const change of incoming) {
+    const trades = working.get(change.assetSyncId);
+    if (trades === undefined) continue;
+    apply(trades, change);
+    if (!valid(trades)) return { key: change.key, problem: 'investment_oversold' };
+  }
+  // Unreachable: the last change for a failing asset leaves its final state.
+  const first = incoming.find((change) => failing.has(change.assetSyncId))!;
+  return { key: first.key, problem: 'investment_oversold' };
 }

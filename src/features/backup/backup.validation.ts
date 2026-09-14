@@ -3,6 +3,8 @@ import { z } from 'zod';
 import {
   ACCOUNT_TYPES,
   CATEGORY_TYPES,
+  INVESTMENT_ASSET_TYPES,
+  INVESTMENT_TRADE_TYPES,
   MAX_RECURRENCE_INTERVAL,
   PAYMENT_MODES,
   PERIOD_MONTH_PATTERN,
@@ -11,6 +13,8 @@ import {
   RECURRING_TRANSACTION_TYPES,
 } from '@/db/constants';
 import { isSyncId } from '@/db/schema';
+import { valueAtPrice } from '@/features/investments/investment-math';
+import { replayTrades, type ReplayTrade } from '@/features/investments/investment-replay';
 import {
   deriveGeneratedTransactionSyncId,
   deriveOccurrenceSyncId,
@@ -26,11 +30,16 @@ import {
   BUDGET_BACKUP_SCHEMA_VERSION,
   LEGACY_BACKUP_FORMAT_VERSION,
   LEGACY_BACKUP_SCHEMA_VERSION,
+  RECURRING_BACKUP_FORMAT_VERSION,
+  RECURRING_BACKUP_SCHEMA_VERSION,
   SYNC_BACKUP_FORMAT_VERSION,
   SYNC_BACKUP_SCHEMA_VERSION,
   type AnyBackupEnvelope,
   type BackupBudget,
   type BackupEnvelope,
+  type BackupInvestmentAsset,
+  type BackupInvestmentPrice,
+  type BackupInvestmentTrade,
   type BackupPreview,
   type BackupRecurringOccurrence,
   type BackupRecurringTemplate,
@@ -44,6 +53,9 @@ const supportedTransactionTypes = [
   'borrow',
   'repayment_received',
   'repayment_paid',
+  // Only ever valid as a trade's cash, which only a version 5 backup can link.
+  'investment',
+  'investment_return',
 ] as const;
 const integer = z.number().int().safe();
 const id = integer.positive();
@@ -140,6 +152,44 @@ const recurringOccurrenceShape = {
   createdAt: timestamp,
   updatedAt: timestamp,
 };
+const investmentAssetShape = {
+  id,
+  syncId,
+  name: z.string().trim().min(1),
+  symbol: nullableText,
+  assetType: z.enum(INVESTMENT_ASSET_TYPES),
+  currency,
+  isArchived: z.boolean(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+};
+const investmentTradeShape = {
+  id,
+  syncId,
+  assetId: id,
+  accountId: id,
+  tradeType: z.enum(INVESTMENT_TRADE_TYPES),
+  tradeDate: timestamp,
+  // Never negative: a quantity below zero is a short, which does not exist here.
+  quantityMinor: integer.positive().nullable(),
+  unitPriceMinor: integer.positive().nullable(),
+  feeMinor: integer.nonnegative(),
+  amountMinor: integer.positive().nullable(),
+  currency,
+  note: nullableText,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+};
+const investmentPriceShape = {
+  id,
+  syncId,
+  assetId: id,
+  priceMinor: integer.positive(),
+  priceDate: localDate,
+  currency,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+};
 const legacySettingShape = {
   id: z.literal(1),
   defaultCurrency: currency,
@@ -154,12 +204,15 @@ const dataSchema = (options: {
   withSyncId: boolean;
   withBudgets: boolean;
   withRecurring: boolean;
+  withInvestments: boolean;
 }) => {
   const extend = <T extends z.ZodRawShape>(shape: T) =>
     z.object(options.withSyncId ? { ...shape, syncId } : shape).strict();
-  const transactionShape = options.withRecurring
-    ? { ...legacyTransactionShape, recurringOccurrenceId: id.nullable() }
-    : legacyTransactionShape;
+  const transactionShape = {
+    ...legacyTransactionShape,
+    ...(options.withRecurring ? { recurringOccurrenceId: id.nullable() } : {}),
+    ...(options.withInvestments ? { investmentTradeId: id.nullable() } : {}),
+  };
   return z
     .object({
       accounts: z.array(extend(legacyAccountShape)),
@@ -176,6 +229,13 @@ const dataSchema = (options: {
             recurringOccurrences: z.array(z.object(recurringOccurrenceShape).strict()),
           }
         : {}),
+      ...(options.withInvestments
+        ? {
+            investmentAssets: z.array(z.object(investmentAssetShape).strict()),
+            investmentTrades: z.array(z.object(investmentTradeShape).strict()),
+            investmentPrices: z.array(z.object(investmentPriceShape).strict()),
+          }
+        : {}),
       appMetadata: z.array(metadataSchema),
     })
     .strict();
@@ -188,7 +248,27 @@ const currentEnvelopeSchema = z
     schemaVersion: z.literal(BACKUP_SCHEMA_VERSION),
     createdAt: z.string().datetime(),
     appVersion: z.string().min(1),
-    data: dataSchema({ withSyncId: true, withBudgets: true, withRecurring: true }),
+    data: dataSchema({
+      withSyncId: true,
+      withBudgets: true,
+      withRecurring: true,
+      withInvestments: true,
+    }),
+  })
+  .strict();
+const recurringEnvelopeSchema = z
+  .object({
+    format: z.literal(BACKUP_FORMAT),
+    formatVersion: z.literal(RECURRING_BACKUP_FORMAT_VERSION),
+    schemaVersion: z.literal(RECURRING_BACKUP_SCHEMA_VERSION),
+    createdAt: z.string().datetime(),
+    appVersion: z.string().min(1),
+    data: dataSchema({
+      withSyncId: true,
+      withBudgets: true,
+      withRecurring: true,
+      withInvestments: false,
+    }),
   })
   .strict();
 const budgetEnvelopeSchema = z
@@ -198,7 +278,12 @@ const budgetEnvelopeSchema = z
     schemaVersion: z.literal(BUDGET_BACKUP_SCHEMA_VERSION),
     createdAt: z.string().datetime(),
     appVersion: z.string().min(1),
-    data: dataSchema({ withSyncId: true, withBudgets: true, withRecurring: false }),
+    data: dataSchema({
+      withSyncId: true,
+      withBudgets: true,
+      withRecurring: false,
+      withInvestments: false,
+    }),
   })
   .strict();
 const syncEnvelopeSchema = z
@@ -208,7 +293,12 @@ const syncEnvelopeSchema = z
     schemaVersion: z.literal(SYNC_BACKUP_SCHEMA_VERSION),
     createdAt: z.string().datetime(),
     appVersion: z.string().min(1),
-    data: dataSchema({ withSyncId: true, withBudgets: false, withRecurring: false }),
+    data: dataSchema({
+      withSyncId: true,
+      withBudgets: false,
+      withRecurring: false,
+      withInvestments: false,
+    }),
   })
   .strict();
 const legacyEnvelopeSchema = z
@@ -218,13 +308,19 @@ const legacyEnvelopeSchema = z
     schemaVersion: z.literal(LEGACY_BACKUP_SCHEMA_VERSION),
     createdAt: z.string().datetime(),
     appVersion: z.string().min(1),
-    data: dataSchema({ withSyncId: false, withBudgets: false, withRecurring: false }),
+    data: dataSchema({
+      withSyncId: false,
+      withBudgets: false,
+      withRecurring: false,
+      withInvestments: false,
+    }),
   })
   .strict();
 const envelopeSchema = z.discriminatedUnion('formatVersion', [
   legacyEnvelopeSchema,
   syncEnvelopeSchema,
   budgetEnvelopeSchema,
+  recurringEnvelopeSchema,
   currentEnvelopeSchema,
 ]);
 
@@ -254,6 +350,9 @@ export function validateBackup(value: unknown): AnyBackupEnvelope {
   assertUnique(budgetsOf(backup), 'budgets');
   assertUnique(recurringTemplatesOf(backup), 'recurring templates');
   assertUnique(recurringOccurrencesOf(backup), 'recurring occurrences');
+  assertUnique(investmentAssetsOf(backup), 'investment assets');
+  assertUnique(investmentTradesOf(backup), 'investment trades');
+  assertUnique(investmentPricesOf(backup), 'investment prices');
   if (backup.data.settings.length !== 1)
     throw new ValidationError('Backup must contain exactly one settings record.');
   assertUniqueBy(backup.data.appMetadata, 'app metadata', (item) => item.key);
@@ -276,13 +375,26 @@ function budgetsOf(backup: AnyBackupEnvelope): BackupBudget[] {
   return 'budgets' in backup.data ? backup.data.budgets : [];
 }
 
-/** Recurring data is the newest collection, so only the current format carries it. */
+/** Versions 4 and 5 carry recurring data. */
 function recurringTemplatesOf(backup: AnyBackupEnvelope): BackupRecurringTemplate[] {
-  return isCurrentBackup(backup) ? backup.data.recurringTemplates : [];
+  return 'recurringTemplates' in backup.data ? backup.data.recurringTemplates : [];
 }
 
 function recurringOccurrencesOf(backup: AnyBackupEnvelope): BackupRecurringOccurrence[] {
-  return isCurrentBackup(backup) ? backup.data.recurringOccurrences : [];
+  return 'recurringOccurrences' in backup.data ? backup.data.recurringOccurrences : [];
+}
+
+/** Investments are the newest collection, so only the current format carries them. */
+function investmentAssetsOf(backup: AnyBackupEnvelope): BackupInvestmentAsset[] {
+  return isCurrentBackup(backup) ? backup.data.investmentAssets : [];
+}
+
+function investmentTradesOf(backup: AnyBackupEnvelope): BackupInvestmentTrade[] {
+  return isCurrentBackup(backup) ? backup.data.investmentTrades : [];
+}
+
+function investmentPricesOf(backup: AnyBackupEnvelope): BackupInvestmentPrice[] {
+  return isCurrentBackup(backup) ? backup.data.investmentPrices : [];
 }
 
 /** Backups this app writes are always the current format. */
@@ -311,6 +423,7 @@ export function getBackupPreview(backup: AnyBackupEnvelope): BackupPreview {
     transactions: backup.data.transactions.length,
     budgets: budgetsOf(backup).length,
     recurringTemplates: recurringTemplatesOf(backup).length,
+    investmentAssets: investmentAssetsOf(backup).length,
     currency: backup.data.settings[0]!.defaultCurrency,
   };
 }
@@ -347,6 +460,9 @@ function assertUniqueSyncIds(backup: AnyBackupEnvelope) {
     ['budgets', budgetsOf(backup)],
     ['recurring templates', recurringTemplatesOf(backup)],
     ['recurring occurrences', recurringOccurrencesOf(backup)],
+    ['investment assets', investmentAssetsOf(backup)],
+    ['investment trades', investmentTradesOf(backup)],
+    ['investment prices', investmentPricesOf(backup)],
   ];
   const seen = new Set<string>();
   for (const [label, items] of sets) {
@@ -400,6 +516,18 @@ function validateRelationshipsAndDomain(backup: AnyBackupEnvelope) {
         tx.currency !== accounts.get(tx.sourceAccountId)?.currency
       )
         throw new ValidationError(`Transaction ${tx.id} has an invalid transfer relationship.`);
+    } else if (tx.type === 'investment' || tx.type === 'investment_return') {
+      // A trade's cash. Whether it matches its trade is checked in `validateInvestments`.
+      const outgoing = tx.type === 'investment';
+      const accountId = outgoing ? tx.sourceAccountId : tx.destinationAccountId;
+      if (
+        tx.categoryId !== null ||
+        tx.personId !== null ||
+        accountId === null ||
+        (outgoing ? tx.destinationAccountId !== null : tx.sourceAccountId !== null) ||
+        tx.currency !== accounts.get(accountId)?.currency
+      )
+        throw new ValidationError(`Transaction ${tx.id} has an invalid investment relationship.`);
     } else {
       const isOutgoing = tx.type === 'lend' || tx.type === 'repayment_paid';
       const accountId = isOutgoing ? tx.sourceAccountId : tx.destinationAccountId;
@@ -434,6 +562,130 @@ function validateRelationshipsAndDomain(backup: AnyBackupEnvelope) {
       throw new ValidationError('Backup contains repayments that exceed the related debt.');
   validateBudgets(backup, categories);
   validateRecurring(backup, accounts, categories);
+  validateInvestments(backup, accounts);
+}
+
+/**
+ * Investments restore with the cash they moved, so every rule that keeps the two
+ * agreeing is checked before anything is written.
+ *
+ * Every trade names an asset and an account that exist and share its currency,
+ * carries exactly the figures its type needs, and has exactly one cash
+ * transaction of the type, amount, account and date it implies. Replayed per
+ * asset, no history sells more than it holds. A backup that broke any of these
+ * would restore a portfolio the app could not have produced.
+ */
+function validateInvestments(
+  backup: AnyBackupEnvelope,
+  accounts: Map<number, { currency: string }>,
+) {
+  const assets = new Map(investmentAssetsOf(backup).map((item) => [item.id, item]));
+  const trades = investmentTradesOf(backup);
+  const tradesById = new Map(trades.map((item) => [item.id, item]));
+  const history = new Map<number, ReplayTrade[]>();
+
+  for (const trade of trades) {
+    const asset = assets.get(trade.assetId);
+    if (asset === undefined)
+      throw new ValidationError(`Investment trade ${trade.id} references a missing asset.`);
+    const account = accounts.get(trade.accountId);
+    if (account === undefined)
+      throw new ValidationError(`Investment trade ${trade.id} references a missing account.`);
+    if (trade.currency !== asset.currency || trade.currency !== account.currency)
+      throw new ValidationError(
+        `Investment trade ${trade.id} is not in the currency of its asset and account.`,
+      );
+    const moves = trade.tradeType === 'buy' || trade.tradeType === 'sell';
+    const shaped = moves
+      ? trade.quantityMinor !== null && trade.unitPriceMinor !== null && trade.amountMinor === null
+      : trade.quantityMinor === null &&
+        trade.unitPriceMinor === null &&
+        trade.feeMinor === 0 &&
+        trade.amountMinor !== null;
+    if (!shaped)
+      throw new ValidationError(
+        `Investment trade ${trade.id} does not have the fields of a ${trade.tradeType}.`,
+      );
+    const list = history.get(trade.assetId) ?? [];
+    list.push({
+      syncId: trade.syncId,
+      tradeType: trade.tradeType,
+      tradeDate: trade.tradeDate,
+      createdAt: trade.createdAt,
+      quantityMinor: trade.quantityMinor,
+      unitPriceMinor: trade.unitPriceMinor,
+      feeMinor: trade.feeMinor,
+      amountMinor: trade.amountMinor,
+    });
+    history.set(trade.assetId, list);
+  }
+
+  for (const [assetId, list] of history) {
+    if (!replayTrades(list).ok)
+      throw new ValidationError(`Investment asset ${assetId} sells more units than it holds.`);
+  }
+
+  for (const price of investmentPricesOf(backup)) {
+    const asset = assets.get(price.assetId);
+    if (asset === undefined)
+      throw new ValidationError(`Investment price ${price.id} references a missing asset.`);
+    if (price.currency !== asset.currency)
+      throw new ValidationError(`Investment price ${price.id} is not in its asset's currency.`);
+  }
+
+  const cashFor = new Set<number>();
+  for (const tx of backup.data.transactions) {
+    const tradeId = 'investmentTradeId' in tx ? tx.investmentTradeId : null;
+    if (tradeId === null) {
+      if (tx.type === 'investment' || tx.type === 'investment_return')
+        throw new ValidationError(`Transaction ${tx.id} is investment cash without a trade.`);
+      continue;
+    }
+    const trade = tradesById.get(tradeId);
+    if (trade === undefined)
+      throw new ValidationError(`Transaction ${tx.id} references a missing investment trade.`);
+    if (cashFor.has(tradeId))
+      throw new ValidationError('Backup contains more than one cash transaction for one trade.');
+    cashFor.add(tradeId);
+
+    const expected = expectedCash(trade);
+    const accountId = expected.direction === 'out' ? tx.sourceAccountId : tx.destinationAccountId;
+    if (
+      tx.type !== expected.type ||
+      tx.amountMinor !== expected.amountMinor ||
+      accountId !== trade.accountId ||
+      tx.currency !== trade.currency ||
+      tx.transactionDate !== trade.tradeDate
+    )
+      throw new ValidationError(`Transaction ${tx.id} does not match its investment trade.`);
+  }
+
+  for (const trade of trades) {
+    if (!cashFor.has(trade.id))
+      throw new ValidationError(`Investment trade ${trade.id} has no cash transaction.`);
+  }
+}
+
+/** The cash transaction a trade implies. The same rules `cashEffectOf` applies when recording one. */
+function expectedCash(trade: BackupInvestmentTrade): {
+  type: 'investment' | 'investment_return' | 'income';
+  direction: 'out' | 'in';
+  amountMinor: number;
+} {
+  if (trade.tradeType === 'dividend') {
+    return { type: 'income', direction: 'in', amountMinor: trade.amountMinor ?? 0 };
+  }
+  if (trade.tradeType === 'fee') {
+    return { type: 'investment', direction: 'out', amountMinor: trade.amountMinor ?? 0 };
+  }
+  const gross = valueAtPrice(BigInt(trade.quantityMinor ?? 0), BigInt(trade.unitPriceMinor ?? 0));
+  const fee = BigInt(trade.feeMinor);
+  const amount = trade.tradeType === 'buy' ? gross + fee : gross - fee;
+  if (gross <= BigInt(0) || amount <= BigInt(0) || amount > BigInt(Number.MAX_SAFE_INTEGER))
+    throw new ValidationError(`Investment trade ${trade.id} does not move a valid amount of cash.`);
+  return trade.tradeType === 'buy'
+    ? { type: 'investment', direction: 'out', amountMinor: Number(amount) }
+    : { type: 'investment_return', direction: 'in', amountMinor: Number(amount) };
 }
 
 /**
@@ -456,7 +708,7 @@ function validateRecurring(
   accounts: Map<number, unknown>,
   categories: Map<number, unknown>,
 ) {
-  if (!isCurrentBackup(backup)) return;
+  if (!('recurringTemplates' in backup.data) || !('recurringOccurrences' in backup.data)) return;
   const templates = new Map(backup.data.recurringTemplates.map((item) => [item.id, item]));
   for (const template of backup.data.recurringTemplates) {
     if (!accounts.has(template.accountId))

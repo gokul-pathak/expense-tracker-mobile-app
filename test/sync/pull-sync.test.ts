@@ -934,7 +934,7 @@ describe('pull sync engine', () => {
       );
     });
 
-    it('refuses a transaction type the app has no domain support for', async () => {
+    it('refuses investment cash that names no trade', async () => {
       const account = cloudAccount();
       cloud.putRow('account', account);
       cloud.putRow(
@@ -948,7 +948,12 @@ describe('pull sync engine', () => {
 
       const result = await pull();
 
-      expect(result.failures[0]?.code).toBe('unsupported_remote_data');
+      // Investment cash exists only as a trade's cash. Without one, it is money
+      // moving for no recorded reason.
+      expect(result.failures[0]).toMatchObject({
+        code: 'invalid_remote_data',
+        detail: 'investment_without_trade',
+      });
       expect(transactionService.listTransactions()).toHaveLength(0);
     });
 

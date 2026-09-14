@@ -170,6 +170,7 @@ export function updateRepaymentPaid(id: number, input: UpdateRepaymentPaidInput)
 
 export function deleteTransaction(id: number) {
   const transaction = assertSupported(repository.getTransactionById(id) ?? notFound(id));
+  assertNotInvestmentCash(transaction);
   if (isDebtTransaction(transaction.type)) {
     const personId = requirePersonId(transaction.personId);
     assertDebtInvariants(personId, transaction.type, undefined, id);
@@ -317,6 +318,8 @@ function updateTransaction(
   if (current.type !== type) {
     throw new ValidationError(`Transaction ${id} is not an ${type}.`);
   }
+  // A dividend is an ordinary income row, but its amount belongs to the trade.
+  assertNotInvestmentCash(current);
   if (Object.keys(input).length === 0) {
     throw new ValidationError('Provide at least one transaction field to update.');
   }
@@ -480,11 +483,32 @@ function assertSupported(transaction: Transaction) {
     transaction.type !== 'income' &&
     transaction.type !== 'expense' &&
     transaction.type !== 'transfer' &&
+    transaction.type !== 'investment' &&
+    transaction.type !== 'investment_return' &&
     !isDebtTransaction(transaction.type)
   ) {
     throw new ValidationError(`Transaction type "${transaction.type}" is not supported.`);
   }
   return transaction;
+}
+
+/**
+ * The cash side of an investment trade belongs to the trade.
+ *
+ * Changing it here would leave the trade's quantity, cost basis and gains
+ * describing money that no longer moved. It changes only through the investment
+ * service, which rewrites the trade and its cash transaction together.
+ */
+function assertNotInvestmentCash(transaction: Transaction) {
+  if (
+    transaction.investmentTradeId !== null ||
+    transaction.type === 'investment' ||
+    transaction.type === 'investment_return'
+  ) {
+    throw new ValidationError(
+      'This transaction belongs to an investment trade. Edit or delete the trade instead.',
+    );
+  }
 }
 
 function isDebtTransaction(type: Transaction['type']): type is DebtTransactionType {

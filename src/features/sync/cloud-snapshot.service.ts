@@ -5,6 +5,9 @@ import {
   mapPulledAccountToLocal,
   mapPulledBudgetToLocal,
   mapPulledCategoryToLocal,
+  mapPulledInvestmentAssetToLocal,
+  mapPulledInvestmentPriceToLocal,
+  mapPulledInvestmentTradeToLocal,
   mapPulledPersonToLocal,
   mapPulledRecurringOccurrenceToLocal,
   mapPulledRecurringTemplateToLocal,
@@ -17,6 +20,9 @@ import {
   type PulledAccountRow,
   type PulledBudgetRow,
   type PulledCategoryRow,
+  type PulledInvestmentAssetRow,
+  type PulledInvestmentPriceRow,
+  type PulledInvestmentTradeRow,
   type PulledPersonRow,
   type PulledRecurringOccurrenceRow,
   type PulledRecurringTemplateRow,
@@ -29,8 +35,11 @@ import {
   findDebtViolation,
   findDuplicateBudget,
   findDuplicateGeneratedTransaction,
+  findInvestmentHoldingViolation,
   isDebtType,
   validateRemoteBudget,
+  validateRemoteInvestmentPrice,
+  validateRemoteInvestmentTrade,
   validateRemoteRecurringOccurrence,
   validateRemoteRecurringTemplate,
   validateRemoteTransaction,
@@ -59,6 +68,9 @@ export type CloudSnapshot = {
   transactions: PulledTransactionRow[];
   recurringTemplates: PulledRecurringTemplateRow[];
   recurringOccurrences: PulledRecurringOccurrenceRow[];
+  investmentAssets: PulledInvestmentAssetRow[];
+  investmentPrices: PulledInvestmentPriceRow[];
+  investmentTrades: PulledInvestmentTradeRow[];
   /** Cursor position this snapshot corresponds to. */
   latestSequence: number;
 };
@@ -106,6 +118,9 @@ export async function downloadCloudSnapshot(
       'budget',
       'recurring_template',
       'recurring_occurrence',
+      'investment_asset',
+      'investment_price',
+      'investment_trade',
       'transaction',
     ] as const) {
       raw[entityType] = await readAllCloudRows(snapshots, entityType);
@@ -127,6 +142,9 @@ export async function downloadCloudSnapshot(
       raw.recurring_occurrence ?? [],
       linkedUserId,
     ),
+    investmentAssets: decodeAll('investment_asset', raw.investment_asset ?? [], linkedUserId),
+    investmentPrices: decodeAll('investment_price', raw.investment_price ?? [], linkedUserId),
+    investmentTrades: decodeAll('investment_trade', raw.investment_trade ?? [], linkedUserId),
     latestSequence,
   };
 }
@@ -171,7 +189,61 @@ export function validateCloudSnapshot(snapshot: CloudSnapshot): void {
     // so a deleted template is present for the occurrences that point at it.
     recurringTemplates: new Set(snapshot.recurringTemplates.map((row) => row.sync_id)),
     recurringOccurrences: new Set(snapshot.recurringOccurrences.map((row) => row.sync_id)),
+    investmentAssets: new Map(
+      snapshot.investmentAssets.map((row) => [row.sync_id, { currency: row.currency }]),
+    ),
+    investmentTrades: new Set(snapshot.investmentTrades.map((row) => row.sync_id)),
   };
+
+  for (const row of snapshot.investmentPrices) {
+    const problem = validateRemoteInvestmentPrice(row, relations, row.deleted_at !== null);
+    if (problem !== undefined) throw new CloudSnapshotError(problem.code, problem.detail);
+  }
+
+  for (const row of snapshot.investmentTrades) {
+    const problem = validateRemoteInvestmentTrade(row, relations, row.deleted_at !== null);
+    if (problem !== undefined) throw new CloudSnapshotError(problem.code, problem.detail);
+  }
+
+  // A whole account's history must be one that could have happened: no asset
+  // anywhere sells more than it holds. Such a dataset is refused rather than
+  // restored, and resolved on a device that already holds it.
+  const holdings = findInvestmentHoldingViolation(
+    [],
+    snapshot.investmentTrades
+      .filter((row) => row.deleted_at === null)
+      .map((row) => ({
+        key: row.sync_id,
+        syncId: row.sync_id,
+        assetSyncId: row.asset_sync_id,
+        trade: {
+          assetSyncId: row.asset_sync_id,
+          syncId: row.sync_id,
+          tradeType: row.trade_type,
+          tradeDate: row.trade_date,
+          createdAt: row.created_at,
+          quantityMinor: row.quantity_minor,
+          unitPriceMinor: row.unit_price_minor,
+          feeMinor: row.fee_minor,
+          amountMinor: row.amount_minor,
+        },
+      })),
+  );
+  if (holdings !== undefined) {
+    throw new CloudSnapshotError('domain_invariant', holdings.problem);
+  }
+
+  // One cash transaction per trade, tombstones included: the local index on the
+  // link is unique over every row.
+  const claimedTrades = new Set<string>();
+  for (const row of snapshot.transactions) {
+    const trade = row.investment_trade_sync_id;
+    if (trade === null) continue;
+    if (claimedTrades.has(trade)) {
+      throw new CloudSnapshotError('invalid_remote_data', 'duplicate_investment_cash');
+    }
+    claimedTrades.add(trade);
+  }
 
   for (const row of snapshot.transactions) {
     const problem = validateRemoteTransaction(row, relations, row.deleted_at !== null);
@@ -251,6 +323,9 @@ function assertUniqueIdentities(snapshot: CloudSnapshot) {
     ['budget', snapshot.budgets],
     ['recurring_template', snapshot.recurringTemplates],
     ['recurring_occurrence', snapshot.recurringOccurrences],
+    ['investment_asset', snapshot.investmentAssets],
+    ['investment_price', snapshot.investmentPrices],
+    ['investment_trade', snapshot.investmentTrades],
   ];
   for (const [entityType, rows] of groups) {
     const seen = new Set<string>();
@@ -279,6 +354,9 @@ export function toRemoteDataset(snapshot: CloudSnapshot): RemoteDataset {
     budgets: snapshot.budgets.map(mapPulledBudgetToLocal),
     recurringTemplates: snapshot.recurringTemplates.map(mapPulledRecurringTemplateToLocal),
     recurringOccurrences: snapshot.recurringOccurrences.map(mapPulledRecurringOccurrenceToLocal),
+    investmentAssets: snapshot.investmentAssets.map(mapPulledInvestmentAssetToLocal),
+    investmentPrices: snapshot.investmentPrices.map(mapPulledInvestmentPriceToLocal),
+    investmentTrades: snapshot.investmentTrades.map(mapPulledInvestmentTradeToLocal),
     transactions: snapshot.transactions.map(mapPulledTransactionToLocal),
   };
 }
@@ -301,6 +379,9 @@ export function snapshotBaselines(snapshot: CloudSnapshot): {
     ['budget', snapshot.budgets],
     ['recurring_template', snapshot.recurringTemplates],
     ['recurring_occurrence', snapshot.recurringOccurrences],
+    ['investment_asset', snapshot.investmentAssets],
+    ['investment_price', snapshot.investmentPrices],
+    ['investment_trade', snapshot.investmentTrades],
     ['transaction', snapshot.transactions],
   ];
   return groups.flatMap(([entityType, rows]) =>
@@ -324,6 +405,8 @@ export function cloudInventoryOf(snapshot: CloudSnapshot): DataInventory {
     customCategories: live(snapshot.categories).filter((row) => !row.is_default).length,
     budgets: live(snapshot.budgets).length,
     recurringTemplates: live(snapshot.recurringTemplates).length,
+    investmentAssets: live(snapshot.investmentAssets).length,
+    investmentTrades: live(snapshot.investmentTrades).length,
     settingsCurrency: live(snapshot.settings)[0]?.default_currency ?? null,
   });
 }

@@ -95,6 +95,9 @@ function fixture(): BackupEnvelope {
       ],
       recurringTemplates: [],
       recurringOccurrences: [],
+      investmentAssets: [],
+      investmentTrades: [],
+      investmentPrices: [],
       appMetadata: [{ key: 'seed.categories.version', value: '1' }],
       transactions: [
         {
@@ -114,6 +117,7 @@ function fixture(): BackupEnvelope {
           createdAt: 1,
           updatedAt: 1,
           recurringOccurrenceId: null,
+          investmentTradeId: null,
         },
       ],
     },
@@ -227,7 +231,7 @@ function legacyFixture(): LegacyBackupEnvelope {
       categories: strip(current.data.categories),
       people: strip(current.data.people),
       transactions: strip(current.data.transactions).map(
-        ({ recurringOccurrenceId: _link, ...rest }) => rest,
+        ({ recurringOccurrenceId: _link, investmentTradeId: _trade, ...rest }) => rest,
       ),
       settings: strip(current.data.settings),
       appMetadata: current.data.appMetadata,

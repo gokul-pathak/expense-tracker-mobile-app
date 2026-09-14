@@ -198,6 +198,9 @@ function syncEraBackup(): SyncBackupEnvelope {
     budgets: _budgets,
     recurringTemplates: _templates,
     recurringOccurrences: _occurrences,
+    investmentAssets: _assets,
+    investmentTrades: _trades,
+    investmentPrices: _prices,
     ...data
   } = current.data;
   return {
@@ -208,7 +211,9 @@ function syncEraBackup(): SyncBackupEnvelope {
     appVersion: current.appVersion,
     data: {
       ...data,
-      transactions: data.transactions.map(({ recurringOccurrenceId: _link, ...rest }) => rest),
+      transactions: data.transactions.map(
+        ({ recurringOccurrenceId: _link, investmentTradeId: _trade, ...rest }) => rest,
+      ),
     },
   };
 }

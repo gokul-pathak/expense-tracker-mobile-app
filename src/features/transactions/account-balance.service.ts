@@ -16,6 +16,10 @@ export function getAccountBalance(accountId: number) {
   const borrowedMinor = transactionRepository.getAccountBorrowTotal(accountId);
   const repaymentsReceivedMinor = transactionRepository.getAccountRepaymentReceivedTotal(accountId);
   const repaymentsPaidMinor = transactionRepository.getAccountRepaymentPaidTotal(accountId);
+  // Investment cash moves through its linked transactions only. The trades
+  // themselves are never summed here, so no purchase is counted twice.
+  const investedMinor = transactionRepository.getAccountInvestmentTotal(accountId);
+  const investmentReturnsMinor = transactionRepository.getAccountInvestmentReturnTotal(accountId);
   const balance =
     account.openingBalanceMinor +
     incomeMinor -
@@ -25,7 +29,9 @@ export function getAccountBalance(accountId: number) {
     lentMinor +
     borrowedMinor +
     repaymentsReceivedMinor -
-    repaymentsPaidMinor;
+    repaymentsPaidMinor -
+    investedMinor +
+    investmentReturnsMinor;
 
   if (!Number.isSafeInteger(balance)) {
     throw new ValidationError('Account balance exceeds supported integer minor-unit precision.');
@@ -44,7 +50,11 @@ export function getTotalBalance() {
     transactionRepository.getLendTotal() +
     transactionRepository.getBorrowTotal() +
     transactionRepository.getRepaymentReceivedTotal() -
-    transactionRepository.getRepaymentPaidTotal();
+    transactionRepository.getRepaymentPaidTotal() -
+    // Cash, not worth: money moved into an investment leaves the cash total, and
+    // what the investment is worth is a separate figure that is never added here.
+    transactionRepository.getInvestmentTotal() +
+    transactionRepository.getInvestmentReturnTotal();
   if (!Number.isSafeInteger(total)) {
     throw new ValidationError('Total balance exceeds supported integer minor-unit precision.');
   }

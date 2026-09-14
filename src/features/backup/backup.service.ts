@@ -7,6 +7,9 @@ import {
   accounts,
   budgets,
   categories,
+  investmentAssets,
+  investmentPrices,
+  investmentTrades,
   people,
   recurringOccurrences,
   recurringTemplates,
@@ -75,6 +78,32 @@ export function readBackupData(): BackupData {
       .filter((item) => liveTemplateIds.has(item.templateId));
     const exportedOccurrenceIds = new Set(exportedOccurrences.map((item) => item.id));
 
+    // Investments travel as source records: assets, the trades that moved them
+    // and the prices entered for them. Holdings, cost basis, gains and values are
+    // absent — the restored trades reproduce every one of them.
+    const liveAssets = tx
+      .select()
+      .from(investmentAssets)
+      .where(isNull(investmentAssets.deletedAt))
+      .orderBy(asc(investmentAssets.id))
+      .all();
+    const liveAssetIds = new Set(liveAssets.map((item) => item.id));
+    const exportedTrades = tx
+      .select()
+      .from(investmentTrades)
+      .where(isNull(investmentTrades.deletedAt))
+      .orderBy(asc(investmentTrades.id))
+      .all()
+      .filter((item) => liveAssetIds.has(item.assetId));
+    const exportedTradeIds = new Set(exportedTrades.map((item) => item.id));
+    const exportedPrices = tx
+      .select()
+      .from(investmentPrices)
+      .where(isNull(investmentPrices.deletedAt))
+      .orderBy(asc(investmentPrices.id))
+      .all()
+      .filter((item) => liveAssetIds.has(item.assetId));
+
     return {
       accounts: tx
         .select()
@@ -129,6 +158,10 @@ export function readBackupData(): BackupData {
             exportedOccurrenceIds.has(item.recurringOccurrenceId)
               ? item.recurringOccurrenceId
               : null,
+          investmentTradeId:
+            item.investmentTradeId !== null && exportedTradeIds.has(item.investmentTradeId)
+              ? item.investmentTradeId
+              : null,
         })),
       budgets: tx
         .select()
@@ -153,6 +186,25 @@ export function readBackupData(): BackupData {
       recurringOccurrences: exportedOccurrences.map(({ deletedAt: _deletedAt, ...item }) => ({
         ...item,
         syncId: requireSyncId(item.syncId, 'recurring occurrence'),
+        createdAt: item.createdAt.getTime(),
+        updatedAt: item.updatedAt.getTime(),
+      })),
+      investmentAssets: liveAssets.map(({ deletedAt: _deletedAt, ...item }) => ({
+        ...item,
+        syncId: requireSyncId(item.syncId, 'investment asset'),
+        createdAt: item.createdAt.getTime(),
+        updatedAt: item.updatedAt.getTime(),
+      })),
+      investmentTrades: exportedTrades.map(({ deletedAt: _deletedAt, ...item }) => ({
+        ...item,
+        syncId: requireSyncId(item.syncId, 'investment trade'),
+        tradeDate: item.tradeDate.getTime(),
+        createdAt: item.createdAt.getTime(),
+        updatedAt: item.updatedAt.getTime(),
+      })),
+      investmentPrices: exportedPrices.map(({ deletedAt: _deletedAt, ...item }) => ({
+        ...item,
+        syncId: requireSyncId(item.syncId, 'investment price'),
         createdAt: item.createdAt.getTime(),
         updatedAt: item.updatedAt.getTime(),
       })),
@@ -201,8 +253,15 @@ export function restoreBackup(backup: AnyBackupEnvelope): void {
   const restoredTemplates = 'recurringTemplates' in valid.data ? valid.data.recurringTemplates : [];
   const restoredOccurrences =
     'recurringOccurrences' in valid.data ? valid.data.recurringOccurrences : [];
+  // And investments, which only a version 5 backup carries.
+  const restoredAssets = 'investmentAssets' in valid.data ? valid.data.investmentAssets : [];
+  const restoredTrades = 'investmentTrades' in valid.data ? valid.data.investmentTrades : [];
+  const restoredPrices = 'investmentPrices' in valid.data ? valid.data.investmentPrices : [];
   db.transaction((tx) => {
     tx.delete(transactions).run();
+    tx.delete(investmentTrades).run();
+    tx.delete(investmentPrices).run();
+    tx.delete(investmentAssets).run();
     tx.delete(recurringOccurrences).run();
     tx.delete(recurringTemplates).run();
     tx.delete(budgets).run();
@@ -262,6 +321,35 @@ export function restoreBackup(backup: AnyBackupEnvelope): void {
         .values({
           ...item,
           syncId: resolveRestoredSyncId(item, true, 'recurring occurrence'),
+          createdAt: new Date(item.createdAt),
+          updatedAt: new Date(item.updatedAt),
+        })
+        .run();
+    // Assets, their prices and their trades before the cash that names the trades.
+    for (const item of restoredAssets)
+      tx.insert(investmentAssets)
+        .values({
+          ...item,
+          syncId: resolveRestoredSyncId(item, true, 'investment asset'),
+          createdAt: new Date(item.createdAt),
+          updatedAt: new Date(item.updatedAt),
+        })
+        .run();
+    for (const item of restoredPrices)
+      tx.insert(investmentPrices)
+        .values({
+          ...item,
+          syncId: resolveRestoredSyncId(item, true, 'investment price'),
+          createdAt: new Date(item.createdAt),
+          updatedAt: new Date(item.updatedAt),
+        })
+        .run();
+    for (const item of restoredTrades)
+      tx.insert(investmentTrades)
+        .values({
+          ...item,
+          syncId: resolveRestoredSyncId(item, true, 'investment trade'),
+          tradeDate: new Date(item.tradeDate),
           createdAt: new Date(item.createdAt),
           updatedAt: new Date(item.updatedAt),
         })

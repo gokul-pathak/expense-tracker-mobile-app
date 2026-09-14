@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 
 import type {
   AccountType,
+  InvestmentAssetType,
+  InvestmentTradeType,
   PaymentMode,
   RecurringFrequency,
   RecurringOccurrenceStatus,
@@ -134,6 +136,7 @@ export function cloudTransaction(
     title: string;
     note: string | null;
     recurring_occurrence_sync_id: string | null;
+    investment_trade_sync_id: string | null;
   }> &
     Timestamps = {},
 ) {
@@ -153,6 +156,89 @@ export function cloudTransaction(
     note: overrides.note ?? null,
     ...timestamps(overrides),
     recurring_occurrence_sync_id: overrides.recurring_occurrence_sync_id ?? null,
+    investment_trade_sync_id: overrides.investment_trade_sync_id ?? null,
+  };
+}
+
+export function cloudInvestmentAsset(
+  overrides: Partial<{
+    sync_id: string;
+    user_id: string;
+    name: string;
+    symbol: string | null;
+    asset_type: InvestmentAssetType;
+    currency: string;
+    is_archived: boolean;
+  }> &
+    Timestamps = {},
+) {
+  return {
+    sync_id: overrides.sync_id ?? cloudSyncId(),
+    user_id: overrides.user_id ?? TEST_USER,
+    name: overrides.name ?? 'Cloud Shares',
+    symbol: overrides.symbol ?? null,
+    asset_type: overrides.asset_type ?? 'stock',
+    currency: overrides.currency ?? 'NPR',
+    is_archived: overrides.is_archived ?? false,
+    ...timestamps(overrides),
+  };
+}
+
+/** A buy of 10 units at 1,000.00 by default; a dividend or fee carries only an amount. */
+export function cloudInvestmentTrade(
+  overrides: Partial<{
+    sync_id: string;
+    user_id: string;
+    trade_type: InvestmentTradeType;
+    trade_date: number;
+    quantity_minor: number | string | null;
+    unit_price_minor: number | string | null;
+    fee_minor: number | string;
+    amount_minor: number | string | null;
+    currency: string;
+    note: string | null;
+  }> &
+    Timestamps & { asset_sync_id: string; account_sync_id: string },
+) {
+  const tradeType = overrides.trade_type ?? 'buy';
+  const moves = tradeType === 'buy' || tradeType === 'sell';
+  return {
+    sync_id: overrides.sync_id ?? cloudSyncId(),
+    user_id: overrides.user_id ?? TEST_USER,
+    asset_sync_id: overrides.asset_sync_id,
+    account_sync_id: overrides.account_sync_id,
+    trade_type: tradeType,
+    trade_date: overrides.trade_date ?? new Date(2026, 0, 10).getTime(),
+    quantity_minor:
+      'quantity_minor' in overrides ? overrides.quantity_minor : moves ? 1_000_000_000 : null,
+    unit_price_minor:
+      'unit_price_minor' in overrides ? overrides.unit_price_minor : moves ? 100_000 : null,
+    fee_minor: overrides.fee_minor ?? 0,
+    amount_minor: 'amount_minor' in overrides ? overrides.amount_minor : moves ? null : 50_000,
+    currency: overrides.currency ?? 'NPR',
+    note: overrides.note ?? null,
+    ...timestamps(overrides),
+  };
+}
+
+export function cloudInvestmentPrice(
+  overrides: Partial<{
+    sync_id: string;
+    user_id: string;
+    price_minor: number | string;
+    price_date: string;
+    currency: string;
+  }> &
+    Timestamps & { asset_sync_id: string },
+) {
+  return {
+    sync_id: overrides.sync_id ?? cloudSyncId(),
+    user_id: overrides.user_id ?? TEST_USER,
+    asset_sync_id: overrides.asset_sync_id,
+    price_minor: overrides.price_minor ?? 120_000,
+    price_date: overrides.price_date ?? '2026-01-15',
+    currency: overrides.currency ?? 'NPR',
+    ...timestamps(overrides),
   };
 }
 

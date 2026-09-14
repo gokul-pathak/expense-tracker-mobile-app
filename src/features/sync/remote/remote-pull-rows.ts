@@ -3,6 +3,8 @@ import { z } from 'zod';
 import {
   ACCOUNT_TYPES,
   CATEGORY_TYPES,
+  INVESTMENT_ASSET_TYPES,
+  INVESTMENT_TRADE_TYPES,
   PAYMENT_MODES,
   RECURRING_FREQUENCIES,
   RECURRING_OCCURRENCE_STATUSES,
@@ -173,6 +175,8 @@ export const pulledTransactionSchema = z
     deleted_at: nullableEpochMs,
     // Absent means what null means: a transaction nobody generated.
     recurring_occurrence_sync_id: nullableSyncId.default(null),
+    // Absent means what null means: a transaction no investment trade moved.
+    investment_trade_sync_id: nullableSyncId.default(null),
     ...serverColumns,
   })
   .strict();
@@ -215,6 +219,62 @@ export const pulledRecurringOccurrenceSchema = z
   })
   .strict();
 
+const positiveBigInteger = bigIntegerSchema.refine((value) => value > 0, {
+  message: 'non_positive_amount',
+});
+
+export const pulledInvestmentAssetSchema = z
+  .object({
+    sync_id: syncIdSchema,
+    user_id: userIdSchema,
+    name: z.string().min(1),
+    symbol: nullableText,
+    asset_type: z.enum(INVESTMENT_ASSET_TYPES),
+    currency: currencySchema,
+    is_archived: z.boolean(),
+    created_at: epochMs,
+    updated_at: epochMs,
+    deleted_at: nullableEpochMs,
+    ...serverColumns,
+  })
+  .strict();
+
+export const pulledInvestmentTradeSchema = z
+  .object({
+    sync_id: syncIdSchema,
+    user_id: userIdSchema,
+    asset_sync_id: syncIdSchema,
+    account_sync_id: syncIdSchema,
+    trade_type: z.enum(INVESTMENT_TRADE_TYPES),
+    trade_date: epochMs,
+    quantity_minor: z.union([z.null(), positiveBigInteger]),
+    unit_price_minor: z.union([z.null(), positiveBigInteger]),
+    fee_minor: bigIntegerSchema.refine((value) => value >= 0, { message: 'negative_fee' }),
+    amount_minor: z.union([z.null(), positiveBigInteger]),
+    currency: currencySchema,
+    note: nullableText,
+    created_at: epochMs,
+    updated_at: epochMs,
+    deleted_at: nullableEpochMs,
+    ...serverColumns,
+  })
+  .strict();
+
+export const pulledInvestmentPriceSchema = z
+  .object({
+    sync_id: syncIdSchema,
+    user_id: userIdSchema,
+    asset_sync_id: syncIdSchema,
+    price_minor: positiveBigInteger,
+    price_date: localDateSchema,
+    currency: currencySchema,
+    created_at: epochMs,
+    updated_at: epochMs,
+    deleted_at: nullableEpochMs,
+    ...serverColumns,
+  })
+  .strict();
+
 export type PulledAccountRow = z.infer<typeof pulledAccountSchema>;
 export type PulledCategoryRow = z.infer<typeof pulledCategorySchema>;
 export type PulledPersonRow = z.infer<typeof pulledPersonSchema>;
@@ -223,6 +283,9 @@ export type PulledBudgetRow = z.infer<typeof pulledBudgetSchema>;
 export type PulledTransactionRow = z.infer<typeof pulledTransactionSchema>;
 export type PulledRecurringTemplateRow = z.infer<typeof pulledRecurringTemplateSchema>;
 export type PulledRecurringOccurrenceRow = z.infer<typeof pulledRecurringOccurrenceSchema>;
+export type PulledInvestmentAssetRow = z.infer<typeof pulledInvestmentAssetSchema>;
+export type PulledInvestmentTradeRow = z.infer<typeof pulledInvestmentTradeSchema>;
+export type PulledInvestmentPriceRow = z.infer<typeof pulledInvestmentPriceSchema>;
 
 export type PulledRow =
   | PulledAccountRow
@@ -232,7 +295,10 @@ export type PulledRow =
   | PulledSettingsRow
   | PulledTransactionRow
   | PulledRecurringTemplateRow
-  | PulledRecurringOccurrenceRow;
+  | PulledRecurringOccurrenceRow
+  | PulledInvestmentAssetRow
+  | PulledInvestmentTradeRow
+  | PulledInvestmentPriceRow;
 
 const pullSchemasByEntity = {
   account: pulledAccountSchema,
@@ -243,6 +309,9 @@ const pullSchemasByEntity = {
   budget: pulledBudgetSchema,
   recurring_template: pulledRecurringTemplateSchema,
   recurring_occurrence: pulledRecurringOccurrenceSchema,
+  investment_asset: pulledInvestmentAssetSchema,
+  investment_trade: pulledInvestmentTradeSchema,
+  investment_price: pulledInvestmentPriceSchema,
 } as const;
 
 /** Decodes one downloaded row. Returns an issue path only, never row values. */
@@ -266,6 +335,9 @@ export const PULLED_COLUMNS = {
   budget: Object.keys(pulledBudgetSchema.shape).join(','),
   recurring_template: Object.keys(pulledRecurringTemplateSchema.shape).join(','),
   recurring_occurrence: Object.keys(pulledRecurringOccurrenceSchema.shape).join(','),
+  investment_asset: Object.keys(pulledInvestmentAssetSchema.shape).join(','),
+  investment_trade: Object.keys(pulledInvestmentTradeSchema.shape).join(','),
+  investment_price: Object.keys(pulledInvestmentPriceSchema.shape).join(','),
 } as const satisfies Record<SyncEntityType, string>;
 
 /**

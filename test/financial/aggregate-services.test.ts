@@ -5,6 +5,8 @@ const transactionRepository = vi.hoisted(() => ({
   getAccountBorrowTotal: vi.fn(),
   getAccountExpenseTotal: vi.fn(),
   getAccountIncomeTotal: vi.fn(),
+  getAccountInvestmentReturnTotal: vi.fn(),
+  getAccountInvestmentTotal: vi.fn(),
   getAccountLendTotal: vi.fn(),
   getAccountRepaymentPaidTotal: vi.fn(),
   getAccountRepaymentReceivedTotal: vi.fn(),
@@ -13,6 +15,8 @@ const transactionRepository = vi.hoisted(() => ({
   getBorrowTotal: vi.fn(),
   getExpenseTotal: vi.fn(),
   getIncomeTotal: vi.fn(),
+  getInvestmentReturnTotal: vi.fn(),
+  getInvestmentTotal: vi.fn(),
   getLendTotal: vi.fn(),
   getRepaymentPaidTotal: vi.fn(),
   getRepaymentReceivedTotal: vi.fn(),
@@ -21,6 +25,8 @@ const dashboardRepository = vi.hoisted(() => ({
   getActiveAccountBorrowTotal: vi.fn(),
   getActiveAccountExpenseTotal: vi.fn(),
   getActiveAccountIncomeTotal: vi.fn(),
+  getActiveAccountInvestmentReturnTotal: vi.fn(),
+  getActiveAccountInvestmentTotal: vi.fn(),
   getActiveAccountLendTotal: vi.fn(),
   getActiveAccountOpeningBalanceTotal: vi.fn(),
   getActiveAccountRepaymentPaidTotal: vi.fn(),
@@ -43,7 +49,10 @@ vi.mock('@/features/transactions/transaction.repository', () => transactionRepos
 vi.mock('@/features/dashboard/dashboard.repository', () => dashboardRepository);
 vi.mock('@/features/reports/reports.repository', () => reportsRepository);
 
-import { getAccountBalance, getTotalBalance } from '@/features/transactions/account-balance.service';
+import {
+  getAccountBalance,
+  getTotalBalance,
+} from '@/features/transactions/account-balance.service';
 import { getDashboardSummary } from '@/features/dashboard/dashboard.service';
 import {
   getExpenseCategoryBreakdown,
@@ -84,6 +93,16 @@ describe('derived financial aggregates', () => {
     expect(getTotalBalance()).toBe(12000);
   });
 
+  it('takes purchases out of the balance and puts sale proceeds back, never as expense or income', () => {
+    transactionRepository.getAccountInvestmentTotal.mockReturnValue(4000);
+    transactionRepository.getAccountInvestmentReturnTotal.mockReturnValue(500);
+    expect(getAccountBalance(1)).toBe(6500);
+
+    transactionRepository.getInvestmentTotal.mockReturnValue(4000);
+    transactionRepository.getInvestmentReturnTotal.mockReturnValue(500);
+    expect(getTotalBalance()).toBe(6500);
+  });
+
   it('excludes opening balance from dashboard income and savings', () => {
     dashboardRepository.getActiveAccountOpeningBalanceTotal.mockReturnValue(10000);
     dashboardRepository.getActiveAccountIncomeTotal.mockReturnValue(5000);
@@ -114,9 +133,19 @@ describe('derived financial aggregates', () => {
       { type: 'income', amountMinor: 5000, transactionDate: new Date(2024, 8, 1) },
     ]);
 
-    expect(getReportSummary(range)).toEqual({ incomeMinor: 5000, expenseMinor: 3000, savingsMinor: 2000 });
+    expect(getReportSummary(range)).toEqual({
+      incomeMinor: 5000,
+      expenseMinor: 3000,
+      savingsMinor: 2000,
+    });
     expect(getExpenseCategoryBreakdown(range)).toEqual([
-      { categoryId: 1, categoryName: 'Food', categoryIcon: 'food', amountMinor: 3000, percentage: 100 },
+      {
+        categoryId: 1,
+        categoryName: 'Food',
+        categoryIcon: 'food',
+        amountMinor: 3000,
+        percentage: 100,
+      },
     ]);
     expect(getIncomeExpenseTrend(range, 'day', { now: new Date(2024, 8, 30) })[0]).toMatchObject({
       incomeMinor: 5000,

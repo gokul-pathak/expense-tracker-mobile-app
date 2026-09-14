@@ -5,6 +5,7 @@ import { TRANSACTION_TYPES, type TransactionType, type PaymentMode } from '../co
 
 import { categories } from './categories';
 import { accounts } from './accounts';
+import { investmentTrades } from './investments';
 import { people } from './people';
 import { recurringOccurrences } from './recurring';
 
@@ -40,6 +41,16 @@ export const transactions = sqliteTable(
      * exist first.
      */
     recurringOccurrenceId: int('recurring_occurrence_id').references(() => recurringOccurrences.id),
+    /**
+     * The investment trade whose cash effect this transaction is, or null.
+     *
+     * A buy or standalone fee is an `investment` (cash out), a sell an
+     * `investment_return` (net proceeds in), and a dividend an ordinary `income`
+     * in the Investment Return category. The trade holds quantity, cost basis
+     * and gains; this row holds only the cash, so an account balance counts the
+     * money exactly once. The two are written, changed and deleted together.
+     */
+    investmentTradeId: int('investment_trade_id').references(() => investmentTrades.id),
   },
   (t) => [
     check('valid_transaction_type', sql`\`type\` IN (${sql.raw(txTypeList)})`),
@@ -57,6 +68,8 @@ export const transactions = sqliteTable(
     // One transaction per occurrence. SQLite lets any number of rows share a
     // null here, which is every manually entered transaction.
     uniqueIndex('uq_tx_recurring_occurrence').on(t.recurringOccurrenceId),
+    // One cash transaction per trade.
+    uniqueIndex('uq_tx_investment_trade').on(t.investmentTradeId),
   ],
 );
 

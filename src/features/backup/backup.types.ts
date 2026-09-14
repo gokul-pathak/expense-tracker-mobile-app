@@ -1,6 +1,8 @@
 import type {
   AccountType,
   CategoryType,
+  InvestmentAssetType,
+  InvestmentTradeType,
   PaymentMode,
   RecurringFrequency,
   RecurringOccurrenceStatus,
@@ -10,7 +12,8 @@ import type {
 
 export const BACKUP_FORMAT = 'personal-expense-tracker-backup' as const;
 /**
- * Version 4 carries recurring templates, the record of which scheduled dates
+ * Version 5 carries investment assets, trades and manual prices, and each
+ * investment cash transaction's link to its trade. Version 4 carries recurring templates, the record of which scheduled dates
  * were generated or skipped, and each generated transaction's link to its
  * occurrence. Version 3 carries budgets. Version 2 carries the stable global
  * `syncId` of every domain row so a restored database keeps its cloud identity
@@ -20,12 +23,14 @@ export const BACKUP_FORMAT = 'personal-expense-tracker-backup' as const;
  * has none of its records, which restores as a database without them — the
  * truth about that backup, not a reason to reject it.
  */
-export const BACKUP_FORMAT_VERSION = 4 as const;
+export const BACKUP_FORMAT_VERSION = 5 as const;
+export const RECURRING_BACKUP_FORMAT_VERSION = 4 as const;
 export const BUDGET_BACKUP_FORMAT_VERSION = 3 as const;
 export const SYNC_BACKUP_FORMAT_VERSION = 2 as const;
 export const LEGACY_BACKUP_FORMAT_VERSION = 1 as const;
 // This identifies the newest migration understood by this logical backup format.
-export const BACKUP_SCHEMA_VERSION = '20260911120000_recurring_transactions' as const;
+export const BACKUP_SCHEMA_VERSION = '20260915120000_investments' as const;
+export const RECURRING_BACKUP_SCHEMA_VERSION = '20260911120000_recurring_transactions' as const;
 export const BUDGET_BACKUP_SCHEMA_VERSION = '20260909120000_budgets' as const;
 export const SYNC_BACKUP_SCHEMA_VERSION = '20260907120000_sync_foundation' as const;
 export const LEGACY_BACKUP_SCHEMA_VERSION = '20260904151616_damp_raider' as const;
@@ -80,6 +85,8 @@ export type BackupTransaction = {
   updatedAt: number;
   /** The occurrence a generated transaction came from; null for every other. */
   recurringOccurrenceId: number | null;
+  /** The investment trade whose cash this is; null for every other. */
+  investmentTradeId: number | null;
 };
 /**
  * A plan, never a figure. What was spent is derived from the restored
@@ -128,6 +135,46 @@ export type BackupRecurringOccurrence = {
   createdAt: number;
   updatedAt: number;
 };
+/** Something owned. Holdings and value are absent: they are derived from trades and prices. */
+export type BackupInvestmentAsset = {
+  id: number;
+  syncId: string;
+  name: string;
+  symbol: string | null;
+  assetType: InvestmentAssetType;
+  currency: string;
+  isArchived: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
+/** One event in an asset's history. Its replay position is its date, entry time and identity. */
+export type BackupInvestmentTrade = {
+  id: number;
+  syncId: string;
+  assetId: number;
+  accountId: number;
+  tradeType: InvestmentTradeType;
+  tradeDate: number;
+  quantityMinor: number | null;
+  unitPriceMinor: number | null;
+  feeMinor: number;
+  amountMinor: number | null;
+  currency: string;
+  note: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+/** A manual price for one calendar day. */
+export type BackupInvestmentPrice = {
+  id: number;
+  syncId: string;
+  assetId: number;
+  priceMinor: number;
+  priceDate: string;
+  currency: string;
+  createdAt: number;
+  updatedAt: number;
+};
 export type BackupSetting = {
   id: number;
   syncId: string;
@@ -145,15 +192,24 @@ export type BackupData = {
   budgets: BackupBudget[];
   recurringTemplates: BackupRecurringTemplate[];
   recurringOccurrences: BackupRecurringOccurrence[];
+  investmentAssets: BackupInvestmentAsset[];
+  investmentTrades: BackupInvestmentTrade[];
+  investmentPrices: BackupInvestmentPrice[];
   settings: BackupSetting[];
   appMetadata: BackupMetadata[];
 };
 
+/** Pre-M10A shape: recurring data, but no investments and no investment links. */
+export type RecurringBackupData = Omit<
+  BackupData,
+  'transactions' | 'investmentAssets' | 'investmentTrades' | 'investmentPrices'
+> & { transactions: Omit<BackupTransaction, 'investmentTradeId'>[] };
+
 /** Pre-M8C shape: budgets, but no recurring data and no transaction links. */
 export type BudgetBackupData = Omit<
-  BackupData,
+  RecurringBackupData,
   'transactions' | 'recurringTemplates' | 'recurringOccurrences'
-> & { transactions: Omit<BackupTransaction, 'recurringOccurrenceId'>[] };
+> & { transactions: Omit<BackupTransaction, 'recurringOccurrenceId' | 'investmentTradeId'>[] };
 
 /** Pre-M8A shape: identical domain data, without budgets. */
 export type SyncBackupData = Omit<BudgetBackupData, 'budgets'>;
@@ -163,7 +219,7 @@ export type LegacyBackupData = {
   accounts: Omit<BackupAccount, 'syncId'>[];
   categories: Omit<BackupCategory, 'syncId'>[];
   people: Omit<BackupPerson, 'syncId'>[];
-  transactions: Omit<BackupTransaction, 'syncId' | 'recurringOccurrenceId'>[];
+  transactions: Omit<BackupTransaction, 'syncId' | 'recurringOccurrenceId' | 'investmentTradeId'>[];
   settings: Omit<BackupSetting, 'syncId'>[];
   appMetadata: BackupMetadata[];
 };
@@ -175,6 +231,15 @@ export type BackupEnvelope = {
   createdAt: string;
   appVersion: string;
   data: BackupData;
+};
+
+export type RecurringBackupEnvelope = {
+  format: typeof BACKUP_FORMAT;
+  formatVersion: typeof RECURRING_BACKUP_FORMAT_VERSION;
+  schemaVersion: typeof RECURRING_BACKUP_SCHEMA_VERSION;
+  createdAt: string;
+  appVersion: string;
+  data: RecurringBackupData;
 };
 
 export type BudgetBackupEnvelope = {
@@ -205,7 +270,11 @@ export type LegacyBackupEnvelope = {
 };
 
 export type AnyBackupEnvelope =
-  BackupEnvelope | BudgetBackupEnvelope | SyncBackupEnvelope | LegacyBackupEnvelope;
+  | BackupEnvelope
+  | RecurringBackupEnvelope
+  | BudgetBackupEnvelope
+  | SyncBackupEnvelope
+  | LegacyBackupEnvelope;
 
 export type BackupPreview = {
   createdAt: string;
@@ -215,5 +284,6 @@ export type BackupPreview = {
   transactions: number;
   budgets: number;
   recurringTemplates: number;
+  investmentAssets: number;
   currency: string;
 };

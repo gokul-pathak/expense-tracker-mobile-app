@@ -6,6 +6,9 @@ import {
   accounts,
   budgets,
   categories,
+  investmentAssets,
+  investmentPrices,
+  investmentTrades,
   people,
   recurringOccurrences,
   recurringTemplates,
@@ -47,6 +50,12 @@ export type DataInventory = {
    * one — so a device holding one has data a person would not want replaced.
    */
   recurringTemplates: number;
+  /**
+   * Investment assets and trades. Nothing seeds either, so a device that holds
+   * one holds something a person entered and would not want replaced.
+   */
+  investmentAssets: number;
+  investmentTrades: number;
   settingsChanged: boolean;
   hasMeaningfulData: boolean;
 };
@@ -59,6 +68,8 @@ export function emptyInventory(): DataInventory {
     customCategories: 0,
     budgets: 0,
     recurringTemplates: 0,
+    investmentAssets: 0,
+    investmentTrades: 0,
     settingsChanged: false,
     hasMeaningfulData: false,
   };
@@ -72,7 +83,9 @@ export function readLocalDataInventory(): DataInventory {
       | typeof transactions
       | typeof people
       | typeof budgets
-      | typeof recurringTemplates,
+      | typeof recurringTemplates
+      | typeof investmentAssets
+      | typeof investmentTrades,
   ) =>
     db
       .select({ total: sql<number>`count(*)` })
@@ -101,6 +114,8 @@ export function readLocalDataInventory(): DataInventory {
     customCategories,
     budgets: count(budgets),
     recurringTemplates: count(recurringTemplates),
+    investmentAssets: count(investmentAssets),
+    investmentTrades: count(investmentTrades),
     settingsChanged,
   });
 }
@@ -116,6 +131,9 @@ export function countLocalSyncableRows(): number {
     transactions,
     recurringTemplates,
     recurringOccurrences,
+    investmentAssets,
+    investmentTrades,
+    investmentPrices,
   ] as const;
   return tables.reduce(
     (total, table) =>
@@ -136,6 +154,9 @@ export type CloudInventoryCounts = {
   customCategories: number;
   budgets: number;
   recurringTemplates: number;
+  /** Absent for a dataset counted before investments existed, which then has none. */
+  investmentAssets?: number;
+  investmentTrades?: number;
   settingsCurrency: string | null;
 };
 
@@ -154,6 +175,8 @@ export function summarizeCloudInventory(counts: CloudInventoryCounts): DataInven
     customCategories: counts.customCategories,
     budgets: counts.budgets,
     recurringTemplates: counts.recurringTemplates,
+    investmentAssets: counts.investmentAssets ?? 0,
+    investmentTrades: counts.investmentTrades ?? 0,
     settingsChanged:
       counts.settingsCurrency !== null && counts.settingsCurrency !== DEFAULT_CURRENCY,
   });
@@ -169,6 +192,8 @@ function summarize(counts: Omit<DataInventory, 'hasMeaningfulData'>): DataInvent
       counts.customCategories > 0 ||
       counts.budgets > 0 ||
       counts.recurringTemplates > 0 ||
+      counts.investmentAssets > 0 ||
+      counts.investmentTrades > 0 ||
       counts.settingsChanged,
   };
 }

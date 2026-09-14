@@ -227,6 +227,9 @@ describe('M7C boundaries', () => {
       'budget',
       'recurring_template',
       'recurring_occurrence',
+      'investment_asset',
+      'investment_price',
+      'investment_trade',
     ]);
     expect(SYNC_OPERATIONS).toEqual(['upsert', 'delete']);
   });

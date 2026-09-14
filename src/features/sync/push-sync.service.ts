@@ -6,6 +6,9 @@ import {
   mapLocalAccountToRemote,
   mapLocalBudgetToRemote,
   mapLocalCategoryToRemote,
+  mapLocalInvestmentAssetToRemote,
+  mapLocalInvestmentPriceToRemote,
+  mapLocalInvestmentTradeToRemote,
   mapLocalPersonToRemote,
   mapLocalRecurringOccurrenceToRemote,
   mapLocalRecurringTemplateToRemote,
@@ -40,6 +43,8 @@ import {
 import {
   readLocalBudget,
   readLocalEntity,
+  readLocalInvestmentPrice,
+  readLocalInvestmentTrade,
   readLocalRecurringOccurrence,
   readLocalRecurringTemplate,
   readLocalTransaction,
@@ -85,14 +90,21 @@ export const PUSH_MAX_OPERATIONS_PER_RUN = 500;
  * upload that will ever tell the cloud the template existed — which its
  * occurrences' foreign keys need before they can be accepted. Holding it back
  * would fail the occurrence phase on every run.
+ *
+ * Investments form another chain: an asset, then its prices and trades, then the
+ * cash transactions that name those trades. Trades go up in the order they were
+ * queued, which is the order this device validated them in, so each batch leaves
+ * the cloud's holdings guard looking at a history that could have happened.
  */
 const PUSH_PHASES: readonly {
   entityTypes: readonly SyncEntityType[];
   operations: readonly SyncOperation[];
 }[] = [
   { entityTypes: ['settings', 'account', 'category', 'person'], operations: ['upsert'] },
+  { entityTypes: ['investment_asset'], operations: ['upsert', 'delete'] },
   { entityTypes: ['recurring_template'], operations: ['upsert', 'delete'] },
   { entityTypes: ['recurring_occurrence'], operations: ['upsert', 'delete'] },
+  { entityTypes: ['investment_price', 'investment_trade'], operations: ['upsert', 'delete'] },
   { entityTypes: ['budget', 'transaction'], operations: ['upsert', 'delete'] },
   { entityTypes: ['settings', 'account', 'category', 'person'], operations: ['delete'] },
 ];
@@ -339,6 +351,15 @@ function prepareRow(
       case 'recurring_occurrence':
         mapped = mapLocalRecurringOccurrenceToRemote(local.row, context, resolver);
         break;
+      case 'investment_asset':
+        mapped = mapLocalInvestmentAssetToRemote(local.row, context);
+        break;
+      case 'investment_trade':
+        mapped = mapLocalInvestmentTradeToRemote(local.row, context, resolver);
+        break;
+      case 'investment_price':
+        mapped = mapLocalInvestmentPriceToRemote(local.row, context, resolver);
+        break;
     }
   } catch (error) {
     return { ok: false, detail: error instanceof MappingError ? 'unresolved_relation' : 'mapping' };
@@ -357,6 +378,8 @@ function buildRelationResolver(
   if (entityType === 'budget') return budgetResolver(entries);
   if (entityType === 'recurring_template') return recurringTemplateResolver(entries);
   if (entityType === 'recurring_occurrence') return recurringOccurrenceResolver(entries);
+  if (entityType === 'investment_trade') return investmentTradeResolver(entries);
+  if (entityType === 'investment_price') return investmentPriceResolver(entries);
   return emptyResolver();
 }
 
@@ -381,6 +404,10 @@ function transactionResolver(entries: SyncOutboxEntry[]): RelationResolver {
     'recurring_occurrence',
     rows.map((row) => row.recurringOccurrenceId).filter((id) => id !== null),
   );
+  const trades = readSyncIdsByLocalId(
+    'investment_trade',
+    rows.map((row) => row.investmentTradeId).filter((id) => id !== null),
+  );
 
   return {
     ...emptyResolver(),
@@ -388,7 +415,40 @@ function transactionResolver(entries: SyncOutboxEntry[]): RelationResolver {
     category: (localId) => categories.get(localId),
     person: (localId) => people.get(localId),
     recurringOccurrence: (localId) => occurrences.get(localId),
+    investmentTrade: (localId) => trades.get(localId),
   };
+}
+
+/** A trade names its asset and its cash account. */
+function investmentTradeResolver(entries: SyncOutboxEntry[]): RelationResolver {
+  const rows = entries
+    .map((entry) => readLocalInvestmentTrade(entry.entitySyncId))
+    .filter((row) => row !== null);
+  const assets = readSyncIdsByLocalId(
+    'investment_asset',
+    rows.map((row) => row.assetId),
+  );
+  const accounts = readSyncIdsByLocalId(
+    'account',
+    rows.map((row) => row.accountId),
+  );
+  return {
+    ...emptyResolver(),
+    investmentAsset: (localId) => assets.get(localId),
+    account: (localId) => accounts.get(localId),
+  };
+}
+
+/** A price names only its asset. */
+function investmentPriceResolver(entries: SyncOutboxEntry[]): RelationResolver {
+  const rows = entries
+    .map((entry) => readLocalInvestmentPrice(entry.entitySyncId))
+    .filter((row) => row !== null);
+  const assets = readSyncIdsByLocalId(
+    'investment_asset',
+    rows.map((row) => row.assetId),
+  );
+  return { ...emptyResolver(), investmentAsset: (localId) => assets.get(localId) };
 }
 
 /** A template names its account and category. */
@@ -449,6 +509,8 @@ function emptyResolver(): RelationResolver {
     person: none,
     recurringTemplate: none,
     recurringOccurrence: none,
+    investmentAsset: none,
+    investmentTrade: none,
   };
 }
 

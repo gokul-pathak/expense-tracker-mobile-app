@@ -56,6 +56,7 @@ schema in the dashboard, or the next `db reset` silently diverges from productio
 | `supabase/tests/reconciliation.sql` | first-link contract: retryable upload, retirement, account isolation                            |
 | `supabase/tests/budgets.sql`        | budget isolation, ownership-safe category reference, and one live plan per month                |
 | `supabase/tests/recurring.sql`      | recurring isolation, the template → occurrence → transaction chain, and generated-wins          |
+| `supabase/tests/investments.sql`    | investment isolation, trade and cash ownership, trade shape, and the holdings guard             |
 
 A failure in `rls.sql`, `rls-matrix.sql` or `integrity.sql` is a release blocker. Do not mark those
 optional in CI on an environment that can run them.
@@ -94,6 +95,11 @@ budget_duplicate_period                 two live plans for one month, currency a
 recurring_template_invalid              a live template with an impossible amount, date, interval or frequency
 recurring_occurrence_invalid_identity   an occurrence whose identity is not derived from its template and date
 recurring_transaction_invalid_link      a generated transaction whose identity or type does not fit its occurrence
+investment_negative_holding             an asset whose live trades sell more than it held at some point
+investment_trade_invalid_relation       a trade whose asset or account is missing or in another currency
+investment_trade_without_cash           a live trade with no live cash transaction
+investment_cash_without_trade           investment cash, or a dividend's income, whose trade is missing
+investment_cash_mismatch                cash whose type, amount, account or date disagrees with its trade
 ```
 
 ### Deploying M8C
@@ -105,6 +111,20 @@ contains recurring transactions. Every build from M8C on uploads and downloads
 An M8B build pulling from a cloud where an M8C device has created a template stops at the first
 `recurring_templates` change, because it has no decoder for that table — the same thing a pre-M8A
 build does at the first budget. Update every device before recurring transactions are used.
+
+### Deploying M10A
+
+Apply `supabase/migrations/20260915000000_investments.sql` **before** releasing a build that contains
+investments. Every build from M10A on requests `transactions.investment_trade_sync_id` and the three
+investment tables, and a cloud without them refuses both upload and download.
+
+An older build stops at the first `investment_assets` change, and refuses investment cash it has no
+trade for. Update every device before investments are used.
+
+When sync is stuck at `attention_required` with `domain_invariant:investment_oversold`, two devices
+sold the same units while offline. The device showing it still holds its own sale, which the cloud
+refused; deleting or correcting one of the two sales on that device lets both converge. Nothing
+needs repairing in the cloud, whose holdings guard never accepted the second sale.
 
 `verifySyncFoundation()` (`sync.verification.ts`) is the lighter development view: queue size by
 entity type, binding, cursor, progress markers and whether an engine is running.

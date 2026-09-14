@@ -4,6 +4,8 @@ import { db } from '@/db';
 import type {
   AccountType,
   CategoryType,
+  InvestmentAssetType,
+  InvestmentTradeType,
   PaymentMode,
   RecurringFrequency,
   RecurringOccurrenceStatus,
@@ -14,6 +16,9 @@ import {
   accounts,
   budgets,
   categories,
+  investmentAssets,
+  investmentPrices,
+  investmentTrades,
   people,
   recurringOccurrences,
   recurringTemplates,
@@ -114,6 +119,8 @@ export type RemoteTransaction = {
   deletedAt?: Date | null;
   /** The occurrence a generated transaction came from. Absent or null for every other. */
   recurringOccurrenceSyncId?: string | null;
+  /** The trade whose cash this is. Absent or null for every other transaction. */
+  investmentTradeSyncId?: string | null;
 };
 
 /** A template references its account and category by global sync ID. */
@@ -147,6 +154,47 @@ export type RemoteRecurringOccurrence = {
   deletedAt?: Date | null;
 };
 
+export type RemoteInvestmentAsset = {
+  syncId: string;
+  name: string;
+  symbol: string | null;
+  assetType: InvestmentAssetType;
+  currency: string;
+  isArchived: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt?: Date | null;
+};
+
+/** A trade references its asset and cash account by global sync ID. */
+export type RemoteInvestmentTrade = {
+  syncId: string;
+  assetSyncId: string;
+  accountSyncId: string;
+  tradeType: InvestmentTradeType;
+  tradeDate: Date;
+  quantityMinor: number | null;
+  unitPriceMinor: number | null;
+  feeMinor: number;
+  amountMinor: number | null;
+  currency: string;
+  note: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt?: Date | null;
+};
+
+export type RemoteInvestmentPrice = {
+  syncId: string;
+  assetSyncId: string;
+  priceMinor: number;
+  priceDate: string;
+  currency: string;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt?: Date | null;
+};
+
 export type RemoteTombstone = {
   entityType: SyncEntityType;
   syncId: string;
@@ -161,6 +209,9 @@ export type RemoteChangeBatch = {
   budgets?: RemoteBudget[];
   recurringTemplates?: RemoteRecurringTemplate[];
   recurringOccurrences?: RemoteRecurringOccurrence[];
+  investmentAssets?: RemoteInvestmentAsset[];
+  investmentPrices?: RemoteInvestmentPrice[];
+  investmentTrades?: RemoteInvestmentTrade[];
   transactions?: RemoteTransaction[];
   tombstones?: RemoteTombstone[];
 };
@@ -174,6 +225,10 @@ export type RemoteDataset = {
   /** Absent in a dataset that predates recurring transactions, which then has none. */
   recurringTemplates?: RemoteRecurringTemplate[];
   recurringOccurrences?: RemoteRecurringOccurrence[];
+  /** Absent in a dataset that predates investments, which then has none. */
+  investmentAssets?: RemoteInvestmentAsset[];
+  investmentPrices?: RemoteInvestmentPrice[];
+  investmentTrades?: RemoteInvestmentTrade[];
   transactions: RemoteTransaction[];
 };
 
@@ -197,6 +252,9 @@ export function replaceLocalDataFromRemote(
     // Children first: foreign keys are enforced, so a parent cannot go before
     // the rows that reference it.
     tx.delete(transactions).run();
+    tx.delete(investmentTrades).run();
+    tx.delete(investmentPrices).run();
+    tx.delete(investmentAssets).run();
     tx.delete(recurringOccurrences).run();
     tx.delete(recurringTemplates).run();
     tx.delete(budgets).run();
@@ -212,6 +270,9 @@ export function replaceLocalDataFromRemote(
     for (const row of dataset.budgets) applyRemoteBudget(row, tx);
     for (const row of dataset.recurringTemplates ?? []) applyRemoteRecurringTemplate(row, tx);
     for (const row of dataset.recurringOccurrences ?? []) applyRemoteRecurringOccurrence(row, tx);
+    for (const row of dataset.investmentAssets ?? []) applyRemoteInvestmentAsset(row, tx);
+    for (const row of dataset.investmentPrices ?? []) applyRemoteInvestmentPrice(row, tx);
+    for (const row of dataset.investmentTrades ?? []) applyRemoteInvestmentTrade(row, tx);
     for (const row of dataset.transactions) applyRemoteTransaction(row, tx);
 
     finalize?.(tx);
@@ -228,6 +289,9 @@ export function applyRemoteChanges(batch: RemoteChangeBatch) {
     for (const row of batch.budgets ?? []) applyRemoteBudget(row, tx);
     for (const row of batch.recurringTemplates ?? []) applyRemoteRecurringTemplate(row, tx);
     for (const row of batch.recurringOccurrences ?? []) applyRemoteRecurringOccurrence(row, tx);
+    for (const row of batch.investmentAssets ?? []) applyRemoteInvestmentAsset(row, tx);
+    for (const row of batch.investmentPrices ?? []) applyRemoteInvestmentPrice(row, tx);
+    for (const row of batch.investmentTrades ?? []) applyRemoteInvestmentTrade(row, tx);
     for (const row of batch.transactions ?? []) applyRemoteTransaction(row, tx);
     for (const row of batch.tombstones ?? []) applyRemoteTombstone(row, tx);
   });
@@ -399,6 +463,11 @@ export function applyRemoteTransaction(row: RemoteTransaction, writer: SyncWrite
       'recurring_occurrence',
       row.recurringOccurrenceSyncId ?? null,
     ),
+    investmentTradeId: resolveLocalId(
+      writer,
+      'investment_trade',
+      row.investmentTradeSyncId ?? null,
+    ),
   };
   writer
     .insert(transactions)
@@ -481,6 +550,72 @@ export function applyRemoteRecurringOccurrence(
     .run();
 }
 
+/** A downloaded asset. What it holds is this device's replay of the trades it has. */
+export function applyRemoteInvestmentAsset(row: RemoteInvestmentAsset, writer: SyncWriter = db) {
+  const syncId = requireSyncId(row.syncId, 'remote investment asset');
+  const values = {
+    name: row.name,
+    symbol: row.symbol,
+    assetType: row.assetType,
+    currency: row.currency,
+    isArchived: row.isArchived,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    deletedAt: row.deletedAt ?? null,
+  };
+  writer
+    .insert(investmentAssets)
+    .values({ ...values, syncId })
+    .onConflictDoUpdate({ target: investmentAssets.syncId, set: values })
+    .run();
+}
+
+/**
+ * A downloaded trade, written with the replay position it was recorded with.
+ * Pull has already replayed the asset's history with it in place.
+ */
+export function applyRemoteInvestmentTrade(row: RemoteInvestmentTrade, writer: SyncWriter = db) {
+  const syncId = requireSyncId(row.syncId, 'remote investment trade');
+  const values = {
+    assetId: requireLocalId(writer, 'investment_asset', row.assetSyncId),
+    accountId: requireLocalId(writer, 'account', row.accountSyncId),
+    tradeType: row.tradeType,
+    tradeDate: row.tradeDate,
+    quantityMinor: row.quantityMinor,
+    unitPriceMinor: row.unitPriceMinor,
+    feeMinor: row.feeMinor,
+    amountMinor: row.amountMinor,
+    currency: row.currency,
+    note: row.note,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    deletedAt: row.deletedAt ?? null,
+  };
+  writer
+    .insert(investmentTrades)
+    .values({ ...values, syncId })
+    .onConflictDoUpdate({ target: investmentTrades.syncId, set: values })
+    .run();
+}
+
+export function applyRemoteInvestmentPrice(row: RemoteInvestmentPrice, writer: SyncWriter = db) {
+  const syncId = requireSyncId(row.syncId, 'remote investment price');
+  const values = {
+    assetId: requireLocalId(writer, 'investment_asset', row.assetSyncId),
+    priceMinor: row.priceMinor,
+    priceDate: row.priceDate,
+    currency: row.currency,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    deletedAt: row.deletedAt ?? null,
+  };
+  writer
+    .insert(investmentPrices)
+    .values({ ...values, syncId })
+    .onConflictDoUpdate({ target: investmentPrices.syncId, set: values })
+    .run();
+}
+
 /** Hides a row deleted on another device. Domain queries stop returning it at once. */
 export function applyRemoteTombstone(tombstone: RemoteTombstone, writer: SyncWriter = db) {
   const syncId = requireSyncId(tombstone.syncId, `remote ${tombstone.entityType}`);
@@ -518,11 +653,38 @@ export function applyRemoteTombstone(tombstone: RemoteTombstone, writer: SyncWri
         .where(eq(recurringOccurrences.syncId, syncId))
         .run();
       return;
+    case 'investment_asset':
+      writer
+        .update(investmentAssets)
+        .set({ deletedAt })
+        .where(eq(investmentAssets.syncId, syncId))
+        .run();
+      return;
+    case 'investment_trade':
+      writer
+        .update(investmentTrades)
+        .set({ deletedAt })
+        .where(eq(investmentTrades.syncId, syncId))
+        .run();
+      return;
+    case 'investment_price':
+      writer
+        .update(investmentPrices)
+        .set({ deletedAt })
+        .where(eq(investmentPrices.syncId, syncId))
+        .run();
+      return;
   }
 }
 
 type RelationTable =
-  'account' | 'category' | 'person' | 'recurring_template' | 'recurring_occurrence';
+  | 'account'
+  | 'category'
+  | 'person'
+  | 'recurring_template'
+  | 'recurring_occurrence'
+  | 'investment_asset'
+  | 'investment_trade';
 
 const RELATION_TABLES = {
   account: accounts,
@@ -530,6 +692,8 @@ const RELATION_TABLES = {
   person: people,
   recurring_template: recurringTemplates,
   recurring_occurrence: recurringOccurrences,
+  investment_asset: investmentAssets,
+  investment_trade: investmentTrades,
 } as const;
 
 /** A relation the row cannot exist without; `resolveLocalId` throws when it is unknown. */

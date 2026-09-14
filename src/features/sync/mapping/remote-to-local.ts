@@ -2,6 +2,9 @@ import type {
   PulledAccountRow,
   PulledBudgetRow,
   PulledCategoryRow,
+  PulledInvestmentAssetRow,
+  PulledInvestmentPriceRow,
+  PulledInvestmentTradeRow,
   PulledPersonRow,
   PulledRecurringOccurrenceRow,
   PulledRecurringTemplateRow,
@@ -12,6 +15,9 @@ import type {
   RemoteAccount,
   RemoteBudget,
   RemoteCategory,
+  RemoteInvestmentAsset,
+  RemoteInvestmentPrice,
+  RemoteInvestmentTrade,
   RemotePerson,
   RemoteRecurringOccurrence,
   RemoteRecurringTemplate,
@@ -123,6 +129,60 @@ export function mapPulledTransactionToLocal(row: PulledTransactionRow): RemoteTr
     updatedAt: new Date(row.updated_at),
     deletedAt: toNullableDate(row.deleted_at),
     recurringOccurrenceSyncId: row.recurring_occurrence_sync_id,
+    investmentTradeSyncId: row.investment_trade_sync_id,
+  };
+}
+
+export function mapPulledInvestmentAssetToLocal(
+  row: PulledInvestmentAssetRow,
+): RemoteInvestmentAsset {
+  return {
+    syncId: row.sync_id,
+    name: row.name,
+    symbol: row.symbol,
+    assetType: row.asset_type,
+    currency: row.currency,
+    isArchived: row.is_archived,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+    deletedAt: toNullableDate(row.deleted_at),
+  };
+}
+
+/** Its replay position — trade date, entry time and identity — arrives exactly as recorded. */
+export function mapPulledInvestmentTradeToLocal(
+  row: PulledInvestmentTradeRow,
+): RemoteInvestmentTrade {
+  return {
+    syncId: row.sync_id,
+    assetSyncId: row.asset_sync_id,
+    accountSyncId: row.account_sync_id,
+    tradeType: row.trade_type,
+    tradeDate: new Date(row.trade_date),
+    quantityMinor: row.quantity_minor,
+    unitPriceMinor: row.unit_price_minor,
+    feeMinor: row.fee_minor,
+    amountMinor: row.amount_minor,
+    currency: row.currency,
+    note: row.note,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+    deletedAt: toNullableDate(row.deleted_at),
+  };
+}
+
+export function mapPulledInvestmentPriceToLocal(
+  row: PulledInvestmentPriceRow,
+): RemoteInvestmentPrice {
+  return {
+    syncId: row.sync_id,
+    assetSyncId: row.asset_sync_id,
+    priceMinor: row.price_minor,
+    priceDate: row.price_date,
+    currency: row.currency,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+    deletedAt: toNullableDate(row.deleted_at),
   };
 }
 

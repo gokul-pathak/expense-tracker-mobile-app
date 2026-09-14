@@ -171,6 +171,9 @@ describe('recurring data in a backup', () => {
     const {
       recurringTemplates: _templates,
       recurringOccurrences: _occurrences,
+      investmentAssets: _assets,
+      investmentTrades: _trades,
+      investmentPrices: _prices,
       ...rest
     } = current.data;
     const older = {
@@ -180,7 +183,8 @@ describe('recurring data in a backup', () => {
       data: {
         ...rest,
         transactions: rest.transactions.map(
-          ({ recurringOccurrenceId: _link, ...transaction }) => transaction,
+          ({ recurringOccurrenceId: _link, investmentTradeId: _trade, ...transaction }) =>
+            transaction,
         ),
       },
     };

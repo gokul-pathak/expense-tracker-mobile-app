@@ -102,3 +102,39 @@ export const RECEIPT_PROCESSING_STATUSES = [
 ] as const;
 
 export type ReceiptProcessingStatusName = (typeof RECEIPT_PROCESSING_STATUSES)[number];
+
+/**
+ * What an investment asset is. Deliberately modest, and descriptive only: no
+ * calculation branches on it. There are no options, futures or other
+ * derivatives, and no type that could be shorted.
+ */
+export const INVESTMENT_ASSET_TYPES = [
+  'stock',
+  'mutual_fund',
+  'etf',
+  'bond',
+  'crypto',
+  'fixed_deposit',
+  'other',
+] as const;
+
+export type InvestmentAssetType = (typeof INVESTMENT_ASSET_TYPES)[number];
+
+/**
+ * What happened to an asset. A buy and a sell move quantity and cash; a dividend
+ * moves cash in; a standalone fee moves cash out. Every one of them writes one
+ * linked cash transaction — see `docs/investments-m10a.md`.
+ */
+export const INVESTMENT_TRADE_TYPES = ['buy', 'sell', 'dividend', 'fee'] as const;
+
+export type InvestmentTradeType = (typeof INVESTMENT_TRADE_TYPES)[number];
+
+/**
+ * Decimal places of one unit that a quantity is stored to.
+ *
+ * Quantities are integers of 10^-8 of a unit — 1.23456789 shares is 123,456,789
+ * — never `REAL`. Eight places covers fractional shares, mutual fund units and
+ * the smallest unit of the common cryptocurrencies. It is part of the stored data
+ * format, like a column name: changing it means rewriting every quantity.
+ */
+export const INVESTMENT_QUANTITY_SCALE = 8;

@@ -118,7 +118,10 @@ export function createTransaction(data: CreateTransactionRecord) {
  * and the receipt draft it retires — opens the transaction itself, so there is
  * no moment at which the expense exists and the record does not.
  */
-export function insertTransaction(writer: SyncWriter, data: CreateTransactionRecord) {
+export function insertTransaction(
+  writer: SyncWriter,
+  data: CreateTransactionRecord & { investmentTradeId?: number | null },
+) {
   const syncId = createSyncId();
   const transaction = writer
     .insert(transactions)
@@ -191,22 +194,29 @@ export function writeGeneratedTransaction(
 }
 
 export function updateTransaction(id: number, data: UpdateTransactionRecord) {
-  return db.transaction((tx) => {
-    const transaction =
-      tx
-        .update(transactions)
-        .set(data)
-        .where(and(notDeleted, eq(transactions.id, id)))
-        .returning()
-        .get() ?? null;
-    if (transaction === null) return null;
-    enqueueSyncMutation(tx, {
-      entityType: 'transaction',
-      entitySyncId: requireSyncId(transaction.syncId, 'transaction'),
-      operation: 'upsert',
-    });
-    return transaction;
+  return db.transaction((tx) => updateTransactionWithin(tx, id, data));
+}
+
+/** `updateTransaction` inside the caller's SQLite transaction, for a change that commits with another. */
+export function updateTransactionWithin(
+  writer: SyncWriter,
+  id: number,
+  data: UpdateTransactionRecord,
+) {
+  const transaction =
+    writer
+      .update(transactions)
+      .set(data)
+      .where(and(notDeleted, eq(transactions.id, id)))
+      .returning()
+      .get() ?? null;
+  if (transaction === null) return null;
+  enqueueSyncMutation(writer, {
+    entityType: 'transaction',
+    entitySyncId: requireSyncId(transaction.syncId, 'transaction'),
+    operation: 'upsert',
   });
+  return transaction;
 }
 
 /**
@@ -214,22 +224,25 @@ export function updateTransaction(id: number, data: UpdateTransactionRecord) {
  * can reach other devices later, and every domain query hides it immediately.
  */
 export function deleteTransaction(id: number, deletedAt = new Date()) {
-  return db.transaction((tx) => {
-    const transaction =
-      tx
-        .update(transactions)
-        .set({ deletedAt })
-        .where(and(notDeleted, eq(transactions.id, id)))
-        .returning()
-        .get() ?? null;
-    if (transaction === null) return null;
-    enqueueSyncMutation(tx, {
-      entityType: 'transaction',
-      entitySyncId: requireSyncId(transaction.syncId, 'transaction'),
-      operation: 'delete',
-    });
-    return transaction;
+  return db.transaction((tx) => deleteTransactionWithin(tx, id, deletedAt));
+}
+
+/** `deleteTransaction` inside the caller's SQLite transaction. */
+export function deleteTransactionWithin(writer: SyncWriter, id: number, deletedAt: Date) {
+  const transaction =
+    writer
+      .update(transactions)
+      .set({ deletedAt })
+      .where(and(notDeleted, eq(transactions.id, id)))
+      .returning()
+      .get() ?? null;
+  if (transaction === null) return null;
+  enqueueSyncMutation(writer, {
+    entityType: 'transaction',
+    entitySyncId: requireSyncId(transaction.syncId, 'transaction'),
+    operation: 'delete',
   });
+  return transaction;
 }
 
 export function getAccountIncomeTotal(accountId: number) {
@@ -272,6 +285,16 @@ export function getAccountRepaymentPaidTotal(accountId: number) {
   return getAccountTotal('repayment_paid', transactions.sourceAccountId, accountId);
 }
 
+/** Cash paid from an account into investments: purchases with their fees, and standalone fees. */
+export function getAccountInvestmentTotal(accountId: number) {
+  return getAccountTotal('investment', transactions.sourceAccountId, accountId);
+}
+
+/** Cash an account received back from investments: sale proceeds net of the sell fee. */
+export function getAccountInvestmentReturnTotal(accountId: number) {
+  return getAccountTotal('investment_return', transactions.destinationAccountId, accountId);
+}
+
 export function getLendTotal() {
   return getTransactionTotal('lend');
 }
@@ -286,6 +309,14 @@ export function getRepaymentReceivedTotal() {
 
 export function getRepaymentPaidTotal() {
   return getTransactionTotal('repayment_paid');
+}
+
+export function getInvestmentTotal() {
+  return getTransactionTotal('investment');
+}
+
+export function getInvestmentReturnTotal() {
+  return getTransactionTotal('investment_return');
 }
 
 export function getPersonDebtTotals(personId: number, excludeTransactionId?: number) {
