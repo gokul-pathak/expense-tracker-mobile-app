@@ -1,7 +1,10 @@
+import { INVESTMENT_CASH_TITLES } from '@/features/investments/investment-cash-titles';
+
 import type { TransactionView } from './transaction.types';
 
 export function getTransactionLabel(transaction: TransactionView) {
   if (transaction.type === 'expense' || transaction.type === 'income') {
+    // A dividend is income filed under Investment Return, so it is named by it.
     return transaction.categoryName ?? 'Uncategorized';
   }
   if (transaction.type === 'transfer') return 'Transfer';
@@ -9,6 +12,12 @@ export function getTransactionLabel(transaction: TransactionView) {
   if (transaction.type === 'borrow') return 'Money Taken';
   if (transaction.type === 'repayment_received') return 'Payment Received';
   if (transaction.type === 'repayment_paid') return 'Repayment';
+  // Investment cash is never called an expense or income: a purchase and a sale
+  // move the person's own capital between an account and an investment.
+  if (transaction.type === 'investment') {
+    return transaction.title === INVESTMENT_CASH_TITLES.fee ? 'Investment Fee' : 'Investment Buy';
+  }
+  if (transaction.type === 'investment_return') return 'Investment Sell';
   return transaction.title;
 }
 

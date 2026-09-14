@@ -207,4 +207,27 @@ export type PortfolioSummary = {
   invalidAssetIds: number[];
 };
 
+/** A trade as an asset's history shows it: the trade, its cash, and the account it moved. */
+export type TradeHistoryEntry = InvestmentTrade & {
+  cashEffect: TradeCashEffect;
+  /** Null only if the account row is missing, which the integrity verifier reports. */
+  accountName: string | null;
+};
+
+/** Everything the asset screen shows, read in one pass. */
+export type AssetDetail = {
+  holding: AssetPerformance;
+  /**
+   * Newest first: replay order reversed, so trades on the same day keep the order
+   * they were entered in rather than one invented for display.
+   */
+  history: TradeHistoryEntry[];
+  /** The few most recent manual prices, newest first. */
+  recentPrices: InvestmentPrice[];
+  priceCount: number;
+};
+
+/** Every holding and the per-currency summary, from one replay of the portfolio. */
+export type PortfolioOverview = { holdings: AssetHolding[]; summary: PortfolioSummary };
+
 export type { InvestmentAssetType, InvestmentTradeType };

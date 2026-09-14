@@ -123,7 +123,7 @@ export type InvestmentAssetType = (typeof INVESTMENT_ASSET_TYPES)[number];
 /**
  * What happened to an asset. A buy and a sell move quantity and cash; a dividend
  * moves cash in; a standalone fee moves cash out. Every one of them writes one
- * linked cash transaction — see `docs/investments-m10a.md`.
+ * linked cash transaction — see `docs/investments.md`.
  */
 export const INVESTMENT_TRADE_TYPES = ['buy', 'sell', 'dividend', 'fee'] as const;
 

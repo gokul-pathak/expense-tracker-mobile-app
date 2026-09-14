@@ -6,6 +6,8 @@ import type {
   UpdateTransactionRecord,
 } from '@/features/transactions/transaction.types';
 
+import { INVESTMENT_CASH_TITLES } from './investment-cash-titles';
+import { InvestmentHistoryError, InvestmentValidationError } from './investment.errors';
 import * as repository from './investment.repository';
 import { formatQuantity, toSafeInteger, valueAtPrice } from './investment-math';
 import { replayTrades, type HoldingPosition, type ReplayTrade } from './investment-replay';
@@ -70,12 +72,7 @@ import {
 export const INVESTMENT_RETURN_CATEGORY_KEY = 'income_investment_return';
 
 /** Deliberately generic: renaming an asset must not leave stale titles on its cash. */
-const CASH_TITLES = {
-  buy: 'Investment Purchase',
-  sell: 'Investment Sale',
-  dividend: 'Dividend',
-  fee: 'Investment Fee',
-} as const;
+const CASH_TITLES = INVESTMENT_CASH_TITLES;
 
 const OVERSELL_MESSAGE =
   'This would sell more units than are held at that point in the asset’s history.';
@@ -480,8 +477,10 @@ function assertValidHistory(
 
   const result = replayTrades(trades);
   if (!result.ok) {
-    throw new ValidationError(
+    throw new InvestmentHistoryError(
       `${OVERSELL_MESSAGE} Held ${formatQuantity(result.violation.heldQuantityMinor)}, selling ${formatQuantity(result.violation.soldQuantityMinor)}.`,
+      result.violation.heldQuantityMinor,
+      result.violation.soldQuantityMinor,
     );
   }
   const { position } = result;
@@ -513,7 +512,9 @@ function requireAmount(amountMinor: number | null): number {
 
 function requireActiveAsset(id: number): InvestmentAsset {
   const asset = getAsset(id);
-  if (asset.isArchived) throw new ValidationError('Choose an active asset.');
+  if (asset.isArchived) {
+    throw new InvestmentValidationError('asset_archived', 'Choose an active asset.');
+  }
   return asset;
 }
 
@@ -521,9 +522,12 @@ function requireActiveAsset(id: number): InvestmentAsset {
 function requireTradeAccount(asset: InvestmentAsset, accountId: number) {
   const account = getAccountById(accountId);
   if (account === null) throw new NotFoundError(`Account ${accountId} was not found.`);
-  if (account.isArchived) throw new ValidationError('Choose an active account.');
+  if (account.isArchived) {
+    throw new InvestmentValidationError('account_archived', 'Choose an active account.');
+  }
   if (account.currency !== asset.currency) {
-    throw new ValidationError(
+    throw new InvestmentValidationError(
+      'currency_mismatch',
       `Choose an account in ${asset.currency}. Investments are not converted between currencies.`,
     );
   }

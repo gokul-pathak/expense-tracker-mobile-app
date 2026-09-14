@@ -449,3 +449,38 @@ one-row card under the summary; never a tab, and Home is unchanged.
   disclaimer. **Clear** is a text button.
 - A statement, not a chat: no bubbles, no avatars, no judgement words, and no number the app did not
   calculate shown outside the explanation.
+
+### J · Investments (M10B)
+
+Not drawn; composes from `NavBar`, `Card`, `Money`, `SegmentedControl`, `ListRow`, `SelectorField`,
+`TextField`, `AmountInput`, `PickerSheet`, `Banner`, `Dialog`, `EmptyState`, `ErrorState` and
+`Skeleton`. The feature adds no primitive: `GainLine`, `FigureRow`, `HoldingRow`, `TradeHistoryRow`,
+`PortfolioSummaryCard` and `CardListItem` live in `features/investments` and are compositions of those.
+Investments joined the scope in M10 as **manual records only** — no market prices, charts, brokers or
+advice.
+
+- **J1 · Investments** (`investments/index.tsx`), reached from More → Your Money, never a tab. One
+  `PortfolioSummaryCard` per currency — the value at hero size only when there is one currency,
+  `stat` otherwise; never a total across currencies. Cost basis, unrealized and realized gain/loss
+  and dividends as hairline rows. A caption says Investment value is kept apart from Total Balance.
+  Holdings / Closed / Archived as a segmented control over a virtualized list of `HoldingRow`s
+  (name, symbol, quantity · Avg · Price on one caption line; value and `GainLine` on the right), in
+  current value order, unpriced ones after by name.
+- **J2 · Investment** (`investments/[id].tsx`): the one large figure is Current Value, or the words
+  "Current value unavailable" with **Add Price** — never zero. Quantity Held, Average Cost, Cost Basis,
+  Current Price with "Price updated Sep 13", Unrealized and Realized Gain/Loss. Buy / Sell / Record
+  Dividend / Update Price as a two-column button grid. Up to five recent prices as `ListRow`s, then the
+  history as card-sliced rows, newest first in replay order.
+- **J3 · Buy / Sell** (`[id]/buy.tsx`, `[id]/sell.tsx`): Account (same currency, active only),
+  Quantity, Unit Price, Fee, Date, Note, then **Before you record** — figures from the preview
+  service, never computed in the form. Sell shows "Available: 6 shares" and refuses more inline.
+  Primary **Record Buy** / **Record Sell**.
+- **J4 · Record Dividend** (`[id]/dividend.tsx`): `AmountInput`, Account, Date, Note, and an info
+  `Banner`: "This will add cash to Bank. This will also appear as Investment Return income."
+- **J5 · Update Price** (`[id]/price.tsx`): `AmountInput` in the asset's currency, Price Date, and a
+  caption saying no cash moves. Editing a price adds **Delete Price** behind a `Dialog`.
+- **J6 · Trade** (`investments/trade/[id].tsx`): the cash at feature size, a details card, **Edit**,
+  and **Delete** behind a `Dialog` that warns later holdings and gains may change. No swipe-to-delete.
+
+Gains are always a word and a signed figure — "Gain +1,140.00", "Loss −200.00" — read aloud as
+"Unrealized gain, 1,140 rupees". Green and red only agree with the word.

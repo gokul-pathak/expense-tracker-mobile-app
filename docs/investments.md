@@ -1,8 +1,9 @@
-# Investments (M10A)
+# Investments
 
-M10A adds the investment domain: assets, the trades that move them, manual prices, and the
-valuation derived from all three. There is no UI yet — M10B owns it — and no market feed,
-brokerage link, crypto wallet, tax report, lot selection, derivative, short sale, margin or advice.
+M10A added the investment domain: assets, the trades that move them, manual prices, and the
+valuation derived from all three. M10B added the screens for it — see [The screens](#the-screens).
+There is no market feed, brokerage link, crypto wallet, tax report, lot selection, derivative, short
+sale, margin, chart or advice.
 
 Everything here runs offline and with no Cloud Account.
 
@@ -45,8 +46,8 @@ SQLite transaction. The ordinary transaction service refuses to edit or delete a
 including a dividend's income row — and says to change the trade instead.
 
 **Total Balance stays cash in accounts.** Buying shares lowers it; what the shares are worth is a
-separate figure, `marketValueMinor` on the portfolio summary (the Investment Value M10B will show),
-and is never added to it. There is no Net Worth.
+separate figure, `marketValueMinor` on the portfolio summary — the Investment Value the portfolio
+screen shows — and is never added to it. There is no Net Worth.
 
 ## Quantity and money
 
@@ -176,6 +177,94 @@ account or date (`test/backup/investment-backup.test.ts`).
 `investment_trade_without_cash`, `investment_cash_without_trade` and `investment_cash_mismatch`,
 alongside the existing missing, invalid and duplicate identity checks, which now cover the three new
 tables. It never repairs.
+
+## The screens
+
+M10B. Every screen reads a service and formats what comes back; none adds, multiplies or rounds an
+amount. The words, signs and orderings live in `investment-presentation.ts`, and the figures a form
+shows before it records come from `trade-preview.service.ts`, which uses the arithmetic and the
+replay recording uses.
+
+| Screen          | Route                                     | Read model                                         |
+| --------------- | ----------------------------------------- | -------------------------------------------------- |
+| Investments     | `investments/index.tsx`                   | `getPortfolioOverview` — one replay, 3 queries     |
+| Add Investment  | `investments/new.tsx`                     | none; `createAsset`                                |
+| Investment      | `investments/[id].tsx`                    | `getAssetDetail`                                   |
+| Buy, Sell       | `investments/[id]/buy.tsx`, `sell.tsx`    | `previewBuy`, `previewSell`, `getSellableQuantity` |
+| Record Dividend | `investments/[id]/dividend.tsx`           | none; `recordDividend`                             |
+| Update Price    | `investments/[id]/price.tsx`              | none; `addPrice`, `updatePrice`, `deletePrice`     |
+| Trade           | `investments/trade/[id].tsx`, `/edit.tsx` | `getAssetDetail`; `updateTrade`, `deleteTrade`     |
+
+### Where it lives
+
+More → Your Money → **Investments**. There is no fifth tab and Quick Add is unchanged. Home gains a
+compact **Investments** card — one row per currency with its value and unrealized gain, and View
+Portfolio — shown only once an investment exists, and read from one `getPortfolioSummary` call.
+
+### Total Balance and Investment Value
+
+Total Balance stays the cash in accounts, on Home and everywhere else. Buying lowers it and selling
+raises it, because cash moved. What the investments are worth is the portfolio card's figure alone,
+and a caption under it says so. Nothing adds the two, and there is no Net Worth.
+
+### Flows
+
+- **Add Investment** — name, optional symbol, one of the seven stored asset types, and a currency
+  (the default currency and those of active accounts). It moves no money, creates no transaction and
+  holds nothing.
+- **Buy** — account, quantity, unit price, optional fee, date and note. Before recording: Quantity ×
+  Unit Price, Purchase Value, Fee, Total Cash Outflow. **Record Buy** takes the cash from the account;
+  Expense, Savings and Budgets do not move.
+- **Sell** — the same fields, with "Available: 6 shares". The available quantity is the smallest
+  holding from the sale's date to the end of the history, so a backdated sale is held to what it held
+  then and what later sales still need; the form refuses more before the service is asked, and the
+  service still decides. Before recording: Gross Proceeds, Fee, Net Cash Received, Estimated Realized
+  Gain/Loss and Remaining Quantity. **Record Sell** puts the cash in the account; Income does not move.
+  Selling everything leaves the asset under Closed with its realized gain and history — never
+  archived automatically.
+- **Record Dividend** — amount, account, date and note, with "This will add cash to Bank. This will
+  also appear as Investment Return income." That is exactly what is recorded.
+- **Update Price** — a price per unit in the asset's currency and a price date. No cash moves; only
+  the current value and unrealized gain change. Tapping a recent price edits or deletes it.
+- **Edit and delete a trade** — from the trade's own screen, behind a confirmation that warns later
+  holdings and gains may change. A change that would leave any sale selling more than was held is
+  refused with "This change would make later investment history invalid." There is no
+  swipe-to-delete. A standalone fee has no Add screen; one that arrives by sync or backup can be
+  edited and deleted.
+
+### Showing figures
+
+- **Unknown is not zero.** A holding with no price reads "Current value unavailable" and offers Add
+  Price; its cost basis is still shown. A currency with any unpriced holding has no total value, and
+  says how much of it is priced.
+- **Realized and unrealized are never combined**, and neither is called profit. Each is a word and a
+  signed figure — "Gain +1,140.00", "Loss −200.00" — so colour only agrees with it.
+- **Quantities** come straight from the stored integer: `10`, `1.25`, `0.123456`, grouped like the
+  asset's money, with shares for stocks and ETFs and units for everything else.
+- **Multi-currency**: one portfolio card per currency, and one Home row per currency. No total adds
+  NPR to USD.
+- **Order**: current value, largest first; unpriced holdings after, by name. History is newest first
+  in reverse replay order, so trades on one day stay in the order they were entered.
+- **States**: skeletons while loading — never a portfolio value of zero — "No investments yet." with
+  Add Investment, and "We couldn't load your investments." with Retry.
+
+### Offline, sync and restore
+
+Every action writes SQLite first, with the atomic outbox, and works with no network and no Cloud
+Account. The pending count on Cloud Sync includes investment changes; there is no separate
+investment sync indicator. The investment screens reload on focus and whenever a sync applies
+changes, so another device's trade appears without a restart. While sync needs attention — the state
+two devices selling the same units produce — the portfolio and asset screens say "Sync needs
+attention. These figures may not include changes from your other devices until it is resolved."
+Nothing can show a negative holding, because a download that would have made one is refused before
+it reaches SQLite. A restored backup is shown by the same read models, so there is nothing to rebuild.
+
+### Transactions
+
+Buy and sell cash stays out of the ordinary transaction list. A dividend appears there as income,
+named by its Investment Return category, and its detail screen offers **View Trade** instead of Edit
+and Delete. Anywhere investment cash is named, a purchase is "Investment Buy" and a sale "Investment
+Sell" — never an expense or income.
 
 ## Known limits
 

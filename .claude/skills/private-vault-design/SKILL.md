@@ -206,9 +206,10 @@ thing a reasonable person would otherwise do.
 - Centre-align body text or long labels.
 - Render an amount in a font without tabular figures.
 - Add a chart because a space looks empty. Every chart answers a question the user actually has.
-- Invent features. No crypto, no stocks, no AI chat, no shared households, no
-  achievement badges. The scope is what's in `references/screens.md`. Receipt scanning joined that scope in
-  Milestone 9 — and only as a draft a person reviews before Save Expense creates anything.
+- Invent features. No AI chat, no shared households, no achievement badges. The scope is what's in
+  `references/screens.md`. Receipt scanning joined that scope in Milestone 9 — and only as a draft a
+  person reviews before Save Expense creates anything. Investments joined in Milestone 10 as manual
+  records only: no live prices, no charts, no brokers, no crypto wallets and no investment advice.
 
 **Do:**
 

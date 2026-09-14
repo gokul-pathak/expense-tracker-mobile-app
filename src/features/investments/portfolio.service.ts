@@ -1,18 +1,22 @@
+import { getAccountById } from '@/features/accounts/account.repository';
 import { localDateOf } from '@/features/recurring/recurring-schedule';
 import { NotFoundError } from '@/features/shared/errors';
 
 import * as repository from './investment.repository';
 import { averageUnitCost, toSafeInteger, valueAtPrice } from './investment-math';
-import { replayTrades, type HoldingPosition } from './investment-replay';
-import { toReplayTrade } from './investment.service';
+import { compareTrades, replayTrades, type HoldingPosition } from './investment-replay';
+import { cashEffectOf, toReplayTrade } from './investment.service';
 import type {
+  AssetDetail,
   AssetHolding,
   AssetPerformance,
   CurrencyPortfolioSummary,
   InvestmentAsset,
   InvestmentPrice,
   InvestmentTrade,
+  PortfolioOverview,
   PortfolioSummary,
+  TradeHistoryEntry,
 } from './investment.types';
 
 /**
@@ -38,6 +42,9 @@ export type ValuationOptions = {
   asOf?: Date;
 };
 
+/** How many manual prices the asset screen lists. The latest is the one that values it. */
+const RECENT_PRICE_LIMIT = 5;
+
 export function getHolding(assetId: number, options: ValuationOptions = {}): AssetHolding {
   return getAssetPerformance(assetId, options);
 }
@@ -46,11 +53,50 @@ export function getAssetPerformance(
   assetId: number,
   options: ValuationOptions = {},
 ): AssetPerformance {
-  const asset = repository.getAssetById(assetId);
-  if (asset === null) throw new NotFoundError(`Investment asset ${assetId} was not found.`);
+  const asset = requireAsset(assetId);
   const trades = repository.listTradesForAsset(assetId);
   const price = repository.getLatestPrice(assetId, localDateOf(options.asOf ?? new Date()));
   return evaluate(asset, trades, price);
+}
+
+/**
+ * The asset screen's read: the holding, the history and the recent prices.
+ *
+ * The trades are read once and serve both the replay and the history, so opening
+ * an asset never replays it twice. Each history entry carries the cash effect its
+ * linked transaction has — from `cashEffectOf`, the same function that wrote it —
+ * so the screen shows the cash rather than working it out.
+ */
+export function getAssetDetail(assetId: number, options: ValuationOptions = {}): AssetDetail {
+  const asset = requireAsset(assetId);
+  const trades = repository.listTradesForAsset(assetId);
+  const prices = repository.listPricesForAsset(assetId);
+  const price = repository.getLatestPrice(assetId, localDateOf(options.asOf ?? new Date()));
+
+  // Distinct accounts, not one read per trade: an asset's trades almost always
+  // move through one or two accounts, however long its history is.
+  const accountNames = new Map<number, string | null>();
+  for (const trade of trades) {
+    if (!accountNames.has(trade.accountId)) {
+      accountNames.set(trade.accountId, getAccountById(trade.accountId)?.name ?? null);
+    }
+  }
+
+  const history: TradeHistoryEntry[] = trades
+    .map((trade) => ({ trade, key: toReplayTrade(trade) }))
+    .sort((left, right) => compareTrades(right.key, left.key))
+    .map(({ trade }) => ({
+      ...trade,
+      cashEffect: cashEffectOf(trade),
+      accountName: accountNames.get(trade.accountId) ?? null,
+    }));
+
+  return {
+    holding: evaluate(asset, trades, price),
+    history,
+    recentPrices: prices.slice(0, RECENT_PRICE_LIMIT),
+    priceCount: prices.length,
+  };
 }
 
 /** Every live asset, archived and closed ones included, in name order. */
@@ -69,6 +115,21 @@ export function listHoldings(options: ValuationOptions = {}): AssetHolding[] {
 }
 
 export function getPortfolioSummary(options: ValuationOptions = {}): PortfolioSummary {
+  return summarizeHoldings(listHoldings(options));
+}
+
+/**
+ * Holdings and their summary together, for a screen that shows both.
+ *
+ * One replay of the portfolio feeds both halves. Asking for the holdings and the
+ * summary separately would replay every trade twice.
+ */
+export function getPortfolioOverview(options: ValuationOptions = {}): PortfolioOverview {
+  const holdings = listHoldings(options);
+  return { holdings, summary: summarizeHoldings(holdings) };
+}
+
+function summarizeHoldings(holdings: readonly AssetHolding[]): PortfolioSummary {
   type Bucket = {
     assetCount: number;
     openPositionCount: number;
@@ -86,7 +147,7 @@ export function getPortfolioSummary(options: ValuationOptions = {}): PortfolioSu
   const invalidAssetIds: number[] = [];
   const zero = BigInt(0);
 
-  for (const holding of listHoldings(options)) {
+  for (const holding of holdings) {
     if (holding.status === 'invalid') {
       invalidAssetIds.push(holding.assetId);
       continue;
@@ -154,6 +215,12 @@ export function getPortfolioSummary(options: ValuationOptions = {}): PortfolioSu
     });
 
   return { currencies, invalidAssetIds };
+}
+
+function requireAsset(assetId: number): InvestmentAsset {
+  const asset = repository.getAssetById(assetId);
+  if (asset === null) throw new NotFoundError(`Investment asset ${assetId} was not found.`);
+  return asset;
 }
 
 function evaluate(

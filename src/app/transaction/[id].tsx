@@ -123,7 +123,11 @@ export default function TransactionDetailScreen() {
   const transactionId = transaction.id;
   const label = getTransactionLabel(transaction);
   const direction = getTransactionDirection(transaction);
-  const editable = transaction.type === 'expense' || transaction.type === 'income';
+  // A trade's cash — a dividend's income row included — changes only with its
+  // trade, so it is never edited or deleted as an ordinary transaction.
+  const investmentTradeId = transaction.investmentTradeId;
+  const editable =
+    investmentTradeId === null && (transaction.type === 'expense' || transaction.type === 'income');
 
   return (
     <FormScreen
@@ -192,14 +196,28 @@ export default function TransactionDetailScreen() {
         </View>
       ) : null}
 
-      <View style={[styles.destructive, { marginTop: space.xl4 }]}>
-        <Button
-          label="Delete Transaction"
-          variant="destructive"
-          loading={deleting}
-          onPress={() => setConfirming(true)}
-        />
-      </View>
+      {investmentTradeId === null ? (
+        <View style={[styles.destructive, { marginTop: space.xl4 }]}>
+          <Button
+            label="Delete Transaction"
+            variant="destructive"
+            loading={deleting}
+            onPress={() => setConfirming(true)}
+          />
+        </View>
+      ) : (
+        <View style={{ marginTop: space.xxl }}>
+          <Banner
+            tone="info"
+            icon="trending-up"
+            message="This cash belongs to an investment trade. To change or delete it, open the trade."
+            action={{
+              label: 'View Trade',
+              onPress: () => router.push(('/investments/trade/' + investmentTradeId) as never),
+            }}
+          />
+        </View>
+      )}
 
       <Dialog
         visible={confirming}
@@ -264,6 +282,12 @@ function rowsFor(transaction: TransactionView): { label: string; value: string }
     rows.push({ label: 'From', value: transaction.sourceAccountName ?? unknown });
   }
   if (transaction.type === 'borrow' || transaction.type === 'repayment_received') {
+    rows.push({ label: 'To', value: transaction.destinationAccountName ?? unknown });
+  }
+  if (transaction.type === 'investment') {
+    rows.push({ label: 'From', value: transaction.sourceAccountName ?? unknown });
+  }
+  if (transaction.type === 'investment_return') {
     rows.push({ label: 'To', value: transaction.destinationAccountName ?? unknown });
   }
   if (transaction.personName) rows.push({ label: 'Person', value: transaction.personName });

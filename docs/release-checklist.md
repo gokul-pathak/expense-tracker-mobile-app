@@ -210,7 +210,7 @@ See [`ai-receipt-hardening-m9e.md`](ai-receipt-hardening-m9e.md) for the audit b
 
 ## Investments (M10A)
 
-See [`investments-m10a.md`](investments-m10a.md).
+See [`investments.md`](investments.md).
 
 - [ ] **blocker** a buy moves cash out and a sale moves cash in through one linked transaction each;
       neither changes Income, Expense, Savings or any budget, and a balance counts the cash once
@@ -230,6 +230,30 @@ See [`investments-m10a.md`](investments-m10a.md).
 - [ ] Backup version 5 round-trips investments; versions 1–4 restore with none
 - [ ] `verifySyncIntegrity()` reports no investment issue on a representative dataset
 - [ ] 100 assets, 5,000 trades and 1,000 prices summarize within the performance test's budget
+
+## Investment UI (M10B)
+
+See [`investments.md`](investments.md#the-screens).
+
+- [ ] **blocker** Home's Total Balance moves only by the cash a trade moved; what investments are
+      worth appears only on the Investments card and the portfolio screen
+- [ ] **blocker** no holding without a price, and no portfolio still loading, is ever shown as zero
+- [ ] **blocker** no figure adds two currencies: one portfolio card and one Home row per currency
+- [ ] **blocker** Record Sell refuses more than "Available", and when another device got there first
+      the service's refusal still reads as a sentence
+- [ ] Buy and Sell previews match the recorded trade: 10 × 1,000 + 100 is 10,100 out; 4 × 1,200 − 50
+      is 4,750 in with a realized gain of 710
+- [ ] Record Dividend says it adds cash and appears as Investment Return income, and does both
+- [ ] Update Price moves no cash and changes only the current value and unrealized gain
+- [ ] Editing or deleting a trade a later sale depends on says "This change would make later
+      investment history invalid." and changes nothing
+- [ ] Investments is under More, not a tab, and Quick Add is unchanged
+- [ ] While sync needs attention the investment screens say so, and no holding is ever negative
+- [ ] **external** on Android and iOS: the portfolio, an asset, Buy, Sell, Record Dividend and Update
+      Price in both themes, at the largest text size, on a small phone, with the keyboard open,
+      offline and signed out
+- [ ] **external** TalkBack and VoiceOver read a holding as "ABC Shares, 6 shares held, current value
+      7,200 rupees, unrealized gain 1,140 rupees."
 
 ## Performance
 

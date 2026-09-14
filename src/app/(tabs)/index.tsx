@@ -38,11 +38,18 @@ import {
   recurringTypeDirection,
 } from '@/features/recurring/recurring-presentation';
 import type { RecurringHomeSummary } from '@/features/recurring/recurring.types';
+import { GainLine } from '@/features/investments/GainLine';
+import {
+  hasInvestmentData,
+  portfolioAccessibilityLabel,
+} from '@/features/investments/investment-presentation';
+import type { PortfolioSummary } from '@/features/investments/investment.types';
 import { useRefreshOnSyncedData } from '@/features/sync/use-synced-data';
 import {
   getAppSettings,
   getDashboardSummary,
   getHomeBudgetSummary,
+  getPortfolioSummary,
   getRecurringHomeSummary,
   isLocalFinanceDataAvailable,
   listActiveAccounts,
@@ -54,6 +61,8 @@ export default function HomeScreen() {
   const [summary, setSummary] = useState<DashboardSummary>();
   const [budget, setBudget] = useState<HomeBudgetSummary>();
   const [recurring, setRecurring] = useState<RecurringHomeSummary>();
+  const [portfolio, setPortfolio] = useState<PortfolioSummary>();
+  const [portfolioFailed, setPortfolioFailed] = useState(false);
   const [currency, setCurrency] = useState('NPR');
   const [accountCount, setAccountCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -77,6 +86,17 @@ export default function HomeScreen() {
       setFailed(true);
     } finally {
       setLoading(false);
+    }
+    // One bounded portfolio summary, apart from the cash figures above. What the
+    // investments are worth is never part of Total Balance, and a portfolio that
+    // cannot be read must not take the rest of Home down with it.
+    try {
+      setPortfolio(getPortfolioSummary());
+      setPortfolioFailed(false);
+    } catch (error) {
+      if (__DEV__) console.error('Could not load investments.', error);
+      setPortfolio(undefined);
+      setPortfolioFailed(true);
     }
   }, []);
   useFocusEffect(load);
@@ -136,6 +156,22 @@ export default function HomeScreen() {
       {budget ? <BudgetSection budget={budget} /> : null}
 
       {recurring && recurring.dueCount > 0 ? <RecurringSection recurring={recurring} /> : null}
+
+      {portfolio && hasInvestmentData(portfolio) ? (
+        <InvestmentSection portfolio={portfolio} />
+      ) : portfolioFailed ? (
+        <View style={styles.section}>
+          <Card padding="none">
+            <ListRow
+              icon="trending-up"
+              label="Investments"
+              detail="We couldn't load your investments."
+              onPress={() => router.push('/investments' as never)}
+              last
+            />
+          </Card>
+        </View>
+      ) : null}
 
       <View style={styles.section}>
         <SectionHeader
@@ -420,6 +456,89 @@ function RecurringSection({ recurring }: { recurring: RecurringHomeSummary }) {
     </View>
   );
 }
+
+/**
+ * What the investments are worth, kept apart from the cash above.
+ *
+ * Absent until an investment exists. One row per currency, because a total across
+ * currencies would need a rate the app does not have. Each value is the portfolio
+ * summary's own, and reads "unavailable" rather than zero while a holding has no
+ * price. None of it is ever added to Total Balance.
+ */
+function InvestmentSection({ portfolio }: { portfolio: PortfolioSummary }) {
+  const { palette, space } = useTheme();
+  const invalid = portfolio.invalidAssetIds.length;
+  return (
+    <View style={styles.section}>
+      <SectionHeader
+        title="Investments"
+        action={{
+          label: 'View Portfolio',
+          onPress: () => router.push('/investments' as never),
+          accessibilityLabel: 'View portfolio',
+        }}
+      />
+      <Card padding="none">
+        {portfolio.currencies.map((summary, index) => (
+          <View
+            key={summary.currency}
+            accessible
+            accessibilityLabel={portfolioAccessibilityLabel(summary)}
+            style={[
+              investmentStyles.row,
+              { paddingHorizontal: space.lg, paddingVertical: space.md, gap: space.md },
+              (index < portfolio.currencies.length - 1 || invalid > 0) && {
+                borderBottomWidth: StyleSheet.hairlineWidth,
+                borderBottomColor: palette.divider,
+              },
+            ]}
+          >
+            <Text variant="body" tone="secondary">
+              {summary.currency}
+            </Text>
+            <View style={investmentStyles.figures}>
+              {summary.marketValueMinor === null ? (
+                <Text variant="caption" tone="tertiary" align="right">
+                  Current value unavailable
+                </Text>
+              ) : (
+                <Money
+                  minorUnits={summary.marketValueMinor}
+                  currency={summary.currency}
+                  size="row"
+                  showCode={false}
+                  align="right"
+                />
+              )}
+              {summary.unrealizedGainMinor !== null && summary.openPositionCount > 0 ? (
+                <GainLine
+                  minorUnits={summary.unrealizedGainMinor}
+                  currency={summary.currency}
+                  kind="unrealized"
+                  align="right"
+                />
+              ) : null}
+            </View>
+          </View>
+        ))}
+        {invalid > 0 ? (
+          <View style={{ paddingHorizontal: space.lg, paddingVertical: space.md }}>
+            <Text variant="caption" tone="negative">
+              {invalid === 1
+                ? '1 investment needs attention.'
+                : invalid + ' investments need attention.'}
+            </Text>
+          </View>
+        ) : null}
+      </Card>
+    </View>
+  );
+}
+
+const investmentStyles = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  figures: { flexShrink: 1, minWidth: 0, alignItems: 'flex-end', gap: 2 },
+});
 
 /** The month's category split: a donut with the total in its centre and a legend. */
 function SpendingCard({ summary, currency }: { summary: DashboardSummary; currency: string }) {

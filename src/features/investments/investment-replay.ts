@@ -101,6 +101,38 @@ export function replayTrades(trades: readonly ReplayTrade[]): ReplayResult {
   return { ok: true, position };
 }
 
+/** The holding just after one trade of a replay. */
+export type ReplayStep = {
+  syncId: string;
+  quantityMinor: bigint;
+  realizedGainMinor: bigint;
+};
+
+/**
+ * Replays exactly as `replayTrades` does, recording the holding after every trade.
+ *
+ * For questions about a point inside a history rather than its end: how many units
+ * a sale on a given day may take without a later sale overselling, and what that
+ * one sale realized. `steps` stops at a violation, like the replay itself.
+ */
+export function replayTradeSteps(trades: readonly ReplayTrade[]): {
+  result: ReplayResult;
+  steps: ReplayStep[];
+} {
+  const position = emptyPosition();
+  const steps: ReplayStep[] = [];
+  for (const trade of [...trades].sort(compareTrades)) {
+    const violation = applyTrade(position, trade);
+    if (violation !== undefined) return { result: { ok: false, violation, position }, steps };
+    steps.push({
+      syncId: trade.syncId,
+      quantityMinor: position.quantityMinor,
+      realizedGainMinor: position.realizedGainMinor,
+    });
+  }
+  return { result: { ok: true, position }, steps };
+}
+
 function applyTrade(position: HoldingPosition, trade: ReplayTrade): ReplayViolation | undefined {
   switch (trade.tradeType) {
     case 'buy': {

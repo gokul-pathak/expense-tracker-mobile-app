@@ -110,3 +110,26 @@ export const buildLocalInsights = unavailable;
 export const resolveInsightPeriod = unavailable;
 export const contextPlanFor = unavailable;
 export const routeInsightQuestion = unavailable;
+
+// Investments are derived from local SQLite, which web does not open.
+export const addInvestmentPrice = unavailable;
+export const archiveInvestmentAsset = unavailable;
+export const buyInvestment = unavailable;
+export const createInvestmentAsset = unavailable;
+export const deleteInvestmentPrice = unavailable;
+export const deleteInvestmentTrade = unavailable;
+export const getInvestmentAsset = unavailable;
+export const getInvestmentPrice = unavailable;
+export const getInvestmentTrade = unavailable;
+export const listInvestmentAssets = unavailable;
+export const recordInvestmentDividend = unavailable;
+export const sellInvestment = unavailable;
+export const unarchiveInvestmentAsset = unavailable;
+export const updateInvestmentPrice = unavailable;
+export const updateInvestmentTrade = unavailable;
+export const getInvestmentAssetDetail = unavailable;
+export const getPortfolioOverview = unavailable;
+export const getPortfolioSummary = unavailable;
+export const getSellableQuantity = unavailable;
+export const previewInvestmentBuy = unavailable;
+export const previewInvestmentSell = unavailable;

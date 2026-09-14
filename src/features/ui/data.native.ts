@@ -122,4 +122,34 @@ export { buildLocalInsights } from '@/features/insights/local-insights';
 export { resolvePresetPeriod as resolveInsightPeriod } from '@/features/insights/insight-period';
 export { contextPlanFor, routeInsightQuestion } from '@/features/insights/insight-router';
 
+// Investments. Every figure is derived by these services from assets, trades and
+// manual prices; a screen formats what they return and computes nothing itself.
+export {
+  addPrice as addInvestmentPrice,
+  archiveAsset as archiveInvestmentAsset,
+  buyAsset as buyInvestment,
+  createAsset as createInvestmentAsset,
+  deletePrice as deleteInvestmentPrice,
+  deleteTrade as deleteInvestmentTrade,
+  getAsset as getInvestmentAsset,
+  getPrice as getInvestmentPrice,
+  getTrade as getInvestmentTrade,
+  listAssets as listInvestmentAssets,
+  recordDividend as recordInvestmentDividend,
+  sellAsset as sellInvestment,
+  unarchiveAsset as unarchiveInvestmentAsset,
+  updatePrice as updateInvestmentPrice,
+  updateTrade as updateInvestmentTrade,
+} from '@/features/investments/investment.service';
+export {
+  getAssetDetail as getInvestmentAssetDetail,
+  getPortfolioOverview,
+  getPortfolioSummary,
+} from '@/features/investments/portfolio.service';
+export {
+  getSellableQuantity,
+  previewBuy as previewInvestmentBuy,
+  previewSell as previewInvestmentSell,
+} from '@/features/investments/trade-preview.service';
+
 export const isLocalFinanceDataAvailable = true;

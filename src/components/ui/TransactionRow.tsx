@@ -91,6 +91,9 @@ function chipFor(
     case 'repayment_received':
     case 'repayment_paid':
       return { icon: 'hand-coins', color: accent };
+    case 'investment':
+    case 'investment_return':
+      return { icon: 'trending-up', color: accent };
     default:
       return {};
   }

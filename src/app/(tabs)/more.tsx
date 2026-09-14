@@ -28,6 +28,7 @@ import {
   listActivePeople,
   listBudgetsForMonth,
   listCategories,
+  listInvestmentAssets,
   listRecurringTemplates,
 } from '@/features/ui/data';
 import { useTheme } from '@/theme';
@@ -40,6 +41,7 @@ type Counts = {
   categories: number;
   recurring: number;
   recurringDue: number;
+  investments: number;
 };
 
 export default function MoreScreen() {
@@ -61,6 +63,8 @@ export default function MoreScreen() {
         categories: listCategories().length,
         recurring: listRecurringTemplates().length,
         recurringDue: recurring.dueCount,
+        // A count of what exists, not a valuation: More never replays a trade.
+        investments: listInvestmentAssets().filter((asset) => !asset.isArchived).length,
       });
     } catch (error) {
       if (__DEV__) console.error('Could not load your setup.', error);
@@ -106,6 +110,21 @@ export default function MoreScreen() {
             value={counts ? countLabel(counts.accounts, 'active') : undefined}
             trailing={counts ? undefined : <ValueSkeleton />}
             onPress={() => router.push('/accounts' as never)}
+          />
+          <ListRow
+            icon="trending-up"
+            label="Investments"
+            value={
+              counts
+                ? counts.investments === 0
+                  ? 'None'
+                  : counts.investments === 1
+                    ? '1 asset'
+                    : counts.investments + ' assets'
+                : undefined
+            }
+            trailing={counts ? undefined : <ValueSkeleton />}
+            onPress={() => router.push('/investments' as never)}
           />
           <ListRow
             icon="users"
