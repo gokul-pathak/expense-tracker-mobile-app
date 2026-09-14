@@ -10,13 +10,26 @@ export type CategorySpending = {
   percentage: number;
 };
 
+/** Cash in the active accounts of one currency. Never added to another currency's. */
+export type CurrencyBalance = {
+  currency: string;
+  accountCount: number;
+  totalBalanceMinor: number;
+};
+
 export type DashboardSummary = {
+  /** Every figure below except `otherCurrencies` is in this currency. Nothing is converted. */
+  currency: string;
+  /** Active accounts in `currency`. */
+  accountCount: number;
   totalBalanceMinor: number;
   monthlyIncomeMinor: number;
   monthlyExpenseMinor: number;
   monthlySavingsMinor: number;
   categorySpending: CategorySpending[];
   recentTransactions: TransactionView[];
+  /** The balance of active accounts in each other currency, one entry per currency. */
+  otherCurrencies: CurrencyBalance[];
 };
 
 /**

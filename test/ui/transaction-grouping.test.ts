@@ -92,4 +92,11 @@ describe('grouping transactions by day', () => {
   it('returns nothing for an empty list', () => {
     expect(groupTransactionsByDay([])).toEqual([]);
   });
+
+  it('marks a day holding two currencies, which has no total', () => {
+    const dollars = { ...view(2, 'income', 200_00, day1), currency: 'USD' } as TransactionView;
+    const groups = groupTransactionsByDay([view(1, 'expense', 4250_00, day1), dollars]);
+    expect(groups[0]?.mixedCurrencies).toBe(true);
+    expect(groupTransactionsByDay([view(3, 'expense', 100, day2)])[0]?.mixedCurrencies).toBe(false);
+  });
 });

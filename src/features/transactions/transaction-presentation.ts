@@ -123,6 +123,11 @@ export type TransactionDayGroup = {
    * otherwise would be wrong rather than merely noisy.
    */
   netMinor: number;
+  /**
+   * True when the day holds more than one currency. Its `netMinor` then means
+   * nothing — rupees and dollars do not add — and no day total is shown.
+   */
+  mixedCurrencies: boolean;
   transactions: TransactionView[];
 };
 
@@ -144,11 +149,13 @@ export function groupTransactionsByDay(transactions: TransactionView[]): Transac
         label: formatTransactionDateSection(transaction.transactionDate),
         currency: transaction.currency,
         netMinor: 0,
+        mixedCurrencies: false,
         transactions: [],
       };
       byKey.set(key, group);
       groups.push(group);
     }
+    if (transaction.currency !== group.currency) group.mixedCurrencies = true;
     const direction = getTransactionDirection(transaction);
     if (direction === 'expense') group.netMinor -= transaction.amountMinor;
     else if (direction === 'income') group.netMinor += transaction.amountMinor;

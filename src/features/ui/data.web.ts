@@ -133,3 +133,5 @@ export const getPortfolioSummary = unavailable;
 export const getSellableQuantity = unavailable;
 export const previewInvestmentBuy = unavailable;
 export const previewInvestmentSell = unavailable;
+export const getPeopleFinancialSummaryByCurrency = unavailable;
+export const listReportCurrencies = unavailable;

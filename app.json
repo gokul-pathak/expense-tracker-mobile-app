@@ -25,7 +25,8 @@
           "photosPermission": "Allow Expense Tracker to access your photos so you can import a receipt you already took.",
           "microphonePermission": false
         }
-      ]
+      ],
+      "expo-sqlite"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -35,7 +36,11 @@
       "supportsTablet": true
     },
     "android": {
-      "predictiveBackGestureEnabled": true
+      "predictiveBackGestureEnabled": true,
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ]
     }
   }
 }

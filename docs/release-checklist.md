@@ -255,6 +255,28 @@ See [`investments.md`](investments.md#the-screens).
 - [ ] **external** TalkBack and VoiceOver read a holding as "ABC Shares, 6 shares held, current value
       7,200 rupees, unrealized gain 1,140 rupees."
 
+## Final hardening (M10C)
+
+See [`production-readiness.md`](production-readiness.md).
+
+- [ ] **blocker** no screen adds two currencies: Home's Total Balance and month card, Reports,
+      People and the transaction list's day totals are one currency each, with the others named
+      and shown on their own (`test/release/full-accounting-audit.test.ts`)
+- [ ] **blocker** the canonical fixture derives Cash 20,000, Bank 158,150, Income 65,500, Expense
+      5,000, Ram owes 5,000, owed to Sita 8,000, 6 ABC at cost 6,060 with 710 realized
+- [ ] **blocker** every syncable write — budgets, recurring schedules, investments — rolls back with
+      its queue entry when the queue cannot be written
+- [ ] **blocker** two and three devices converge across every domain with no duplicate, no
+      resurrected delete and no negative holding, and further syncs change nothing
+- [ ] **blocker** a damaged backup changes nothing; a full backup restores every derived figure
+- [ ] `npx expo-doctor` passes every check, and CI runs it
+- [ ] The Android build asks for no microphone or overlay permission
+- [ ] Settings → About shows version, schema, platform and sync state and nothing financial
+- [ ] **external** on Android: open the receipt camera and the photo library, then return — the
+      review screen is still there, the app switcher shows the shield, and nothing is lost
+- [ ] **external** an owner has set the app name, bundle and package identifiers, icon, splash and
+      build numbers, and a production environment file points at the production project
+
 ## Performance
 
 - [ ] A large dataset (5,000+ transactions) uploads and restores in bounded batches

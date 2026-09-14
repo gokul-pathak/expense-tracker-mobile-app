@@ -52,7 +52,7 @@ let fixture: RecurringFixture;
 /** Every figure a recurring plan must never move on its own. */
 function accounting() {
   return {
-    total: getTotalBalance(),
+    total: getTotalBalance('NPR'),
     bank: getAccountBalance(fixture.bank.id),
     cash: getAccountBalance(fixture.cash.id),
     september: getReportSummary(getMonthRange(2026, 8)),

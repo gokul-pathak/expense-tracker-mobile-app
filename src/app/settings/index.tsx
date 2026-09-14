@@ -41,6 +41,7 @@ import {
   type AutoLockTimeout,
   type LockConfig,
 } from '@/features/security/app-lock.types';
+import { SupportDiagnostics } from '@/features/settings/SupportDiagnostics';
 import { useCloudSync } from '@/features/sync/sync.provider';
 import { isCloudLinked } from '@/features/sync/sync-status';
 import {
@@ -312,6 +313,11 @@ export default function SettingsScreen() {
             last
           />
         </Card>
+      </View>
+
+      <View style={{ marginTop: space.xxl }}>
+        <SectionHeader title="About" />
+        <SupportDiagnostics />
       </View>
 
       <PickerSheet

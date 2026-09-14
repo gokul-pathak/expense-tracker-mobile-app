@@ -206,14 +206,17 @@ export default function TransactionsScreen() {
               tone="secondary"
               style={{ marginBottom: space.xs + 2 }}
               trailing={
-                <Money
-                  minorUnits={Math.abs(group.netMinor)}
-                  currency={group.currency}
-                  size="row"
-                  direction={group.netMinor < 0 ? 'expense' : 'income'}
-                  muted
-                  style={styles.dayTotal}
-                />
+                // A day holding two currencies has no total: they do not add.
+                group.mixedCurrencies ? undefined : (
+                  <Money
+                    minorUnits={Math.abs(group.netMinor)}
+                    currency={group.currency}
+                    size="row"
+                    direction={group.netMinor < 0 ? 'expense' : 'income'}
+                    muted
+                    style={styles.dayTotal}
+                  />
+                )
               }
             />
             <Card padding="none">

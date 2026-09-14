@@ -25,6 +25,9 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
+      # Native modules the SDK expects must be installed at the versions it expects;
+      # a mismatch here is how a build that works in Expo Go crashes on a device.
+      - run: npx expo-doctor
       # Covers the M0-M6 financial regressions, backup, security, and the whole
       # sync engine including the crash, stress, multi-device and audit suites.
       - run: npm test

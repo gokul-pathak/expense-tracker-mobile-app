@@ -49,10 +49,34 @@ export function AppLockGate({ children }: PropsWithChildren) {
     return () => subscription.remove();
   }, [config]);
 
+  // Until the lock configuration is known, and whenever the app is locked, nothing
+  // financial is mounted at all — let alone drawn.
   if (!config) return <Shield />;
-  if (shielded) return <Shield />;
-  if (!config.enabled || !locked) return children;
-  return <LockScreen config={config} onUnlock={() => setLocked(false)} />;
+  if (config.enabled && locked) {
+    return shielded ? <Shield /> : <LockScreen config={config} onUnlock={() => setLocked(false)} />;
+  }
+
+  // Unlocked. The shield covers the app while it is in the background, so the app
+  // switcher's snapshot shows no figures, but the app stays mounted underneath.
+  // Opening the camera, the photo library or a document picker sends the app to
+  // the background on Android; replacing the tree here would unmount the screen
+  // that asked for the photo and throw away where the person was.
+  return (
+    <View style={styles.fill}>
+      <View
+        style={styles.fill}
+        accessibilityElementsHidden={shielded}
+        importantForAccessibility={shielded ? 'no-hide-descendants' : 'auto'}
+      >
+        {children}
+      </View>
+      {shielded ? (
+        <View style={StyleSheet.absoluteFill}>
+          <Shield />
+        </View>
+      ) : null}
+    </View>
+  );
 }
 
 /**

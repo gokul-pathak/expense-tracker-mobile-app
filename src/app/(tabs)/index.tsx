@@ -146,12 +146,52 @@ export default function HomeScreen() {
       <View style={styles.hero}>
         <BalanceCard
           minorUnits={summary.totalBalanceMinor}
-          currency={currency}
-          caption={accountCount === 1 ? 'Across 1 account' : 'Across ' + accountCount + ' accounts'}
+          currency={summary.currency}
+          caption={
+            summary.accountCount === 1
+              ? 'Across 1 account'
+              : 'Across ' + summary.accountCount + ' accounts'
+          }
         />
       </View>
 
-      <MonthCard summary={summary} currency={currency} />
+      {summary.otherCurrencies.length > 0 ? (
+        <>
+          {/* Cash in other currencies, each on its own. Nothing is converted or added above. */}
+          <Card padding="none" style={styles.month}>
+            {summary.otherCurrencies.map((other, index) => (
+              <ListRow
+                key={other.currency}
+                label={other.currency + ' balance'}
+                detail={other.accountCount === 1 ? '1 account' : other.accountCount + ' accounts'}
+                trailing={
+                  <Money
+                    minorUnits={other.totalBalanceMinor}
+                    currency={other.currency}
+                    size="row"
+                    showCode
+                    align="right"
+                  />
+                }
+                chevron={false}
+                accessibilityLabel={
+                  other.currency +
+                  ' balance, ' +
+                  formatMinorUnits(other.totalBalanceMinor, other.currency)
+                }
+                last={index === summary.otherCurrencies.length - 1}
+              />
+            ))}
+          </Card>
+          <Text variant="caption" tone="tertiary" style={{ marginTop: 8 }}>
+            {'Totals and this month’s figures are in ' +
+              summary.currency +
+              '. Other currencies are shown on their own and never converted.'}
+          </Text>
+        </>
+      ) : null}
+
+      <MonthCard summary={summary} currency={summary.currency} />
 
       {budget ? <BudgetSection budget={budget} /> : null}
 

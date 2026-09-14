@@ -19,10 +19,13 @@ import {
 } from '@/components/ui';
 import type { Person } from '@/features/people/person.types';
 import { useRefreshOnSyncedData } from '@/features/sync/use-synced-data';
-import type { PersonFinancialSummary } from '@/features/transactions/transaction.types';
+import type {
+  PeopleFinancialSummaryByCurrency,
+  PersonFinancialSummary,
+} from '@/features/transactions/transaction.types';
 import {
   getAppSettings,
-  getPeopleFinancialSummary,
+  getPeopleFinancialSummaryByCurrency,
   isLocalFinanceDataAvailable,
   listActivePeople,
   listArchivedPeople,
@@ -40,9 +43,11 @@ export default function PeopleScreen() {
   const { palette, space, radius, size } = useTheme();
   const [scope, setScope] = useState<Scope>('active');
   const [people, setPeople] = useState<Person[]>([]);
-  const [summaries, setSummaries] = useState<PersonFinancialSummary[]>([]);
-  const [receivableMinor, setReceivableMinor] = useState(0);
-  const [liabilityMinor, setLiabilityMinor] = useState(0);
+  /**
+   * What is owed, one entry per currency. Different people can be owed in
+   * different currencies, and a single total would add rupees to dollars.
+   */
+  const [totals, setTotals] = useState<PeopleFinancialSummaryByCurrency[]>([]);
   const [currency, setCurrency] = useState('NPR');
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -53,10 +58,7 @@ export default function PeopleScreen() {
     setFailed(false);
     try {
       setPeople(scope === 'active' ? listActivePeople() : listArchivedPeople());
-      const summary = getPeopleFinancialSummary();
-      setSummaries(summary.people);
-      setReceivableMinor(summary.totalReceivableMinor);
-      setLiabilityMinor(summary.totalLiabilityMinor);
+      setTotals(getPeopleFinancialSummaryByCurrency());
       setCurrency(getAppSettings().defaultCurrency);
     } catch (error) {
       if (__DEV__) console.error('Could not load people.', error);
@@ -77,7 +79,21 @@ export default function PeopleScreen() {
     );
   }
 
-  const settled = receivableMinor === 0 && liabilityMinor === 0;
+  const settled = totals.every(
+    (group) => group.totalReceivableMinor === 0 && group.totalLiabilityMinor === 0,
+  );
+  // Nobody has any debt history yet: one card of zeros in the default currency.
+  const shownTotals: PeopleFinancialSummaryByCurrency[] =
+    totals.length > 0
+      ? totals
+      : [{ currency, totalReceivableMinor: 0, totalLiabilityMinor: 0, people: [] }];
+  const multipleCurrencies = shownTotals.length > 1;
+  const summaryOf = new Map<number, { summary: PersonFinancialSummary; currency: string }>();
+  for (const group of totals) {
+    for (const summary of group.people) {
+      summaryOf.set(summary.personId, { summary, currency: group.currency });
+    }
+  }
 
   return (
     <FormScreen
@@ -119,25 +135,39 @@ export default function PeopleScreen() {
         />
       ) : (
         <>
-          {scope === 'active' ? (
-            <Card style={[styles.totals, { marginTop: space.lg }]}>
-              <StatTile
-                label="You will receive"
-                minorUnits={receivableMinor}
-                currency={currency}
-                direction={receivableMinor > 0 ? 'income' : undefined}
-                size="row"
-              />
-              <View style={[styles.divider, { backgroundColor: palette.divider }]} />
-              <StatTile
-                label="You need to pay"
-                minorUnits={liabilityMinor}
-                currency={currency}
-                direction={liabilityMinor > 0 ? 'expense' : undefined}
-                size="row"
-                align="right"
-              />
-            </Card>
+          {scope === 'active'
+            ? shownTotals.map((group) => (
+                <Card key={group.currency} style={[styles.totals, { marginTop: space.lg }]}>
+                  <StatTile
+                    label={
+                      multipleCurrencies
+                        ? 'You will receive · ' + group.currency
+                        : 'You will receive'
+                    }
+                    minorUnits={group.totalReceivableMinor}
+                    currency={group.currency}
+                    direction={group.totalReceivableMinor > 0 ? 'income' : undefined}
+                    size="row"
+                  />
+                  <View style={[styles.divider, { backgroundColor: palette.divider }]} />
+                  <StatTile
+                    label={
+                      multipleCurrencies ? 'You need to pay · ' + group.currency : 'You need to pay'
+                    }
+                    minorUnits={group.totalLiabilityMinor}
+                    currency={group.currency}
+                    direction={group.totalLiabilityMinor > 0 ? 'expense' : undefined}
+                    size="row"
+                    align="right"
+                  />
+                </Card>
+              ))
+            : null}
+
+          {scope === 'active' && multipleCurrencies ? (
+            <Text variant="caption" tone="tertiary" style={{ marginTop: space.md }}>
+              Each currency is totalled on its own. Nothing is converted.
+            </Text>
           ) : null}
 
           {scope === 'active' && settled && people.length > 0 ? (
@@ -163,15 +193,18 @@ export default function PeopleScreen() {
             />
           ) : (
             <Card padding="none" style={{ marginTop: space.lg }}>
-              {people.map((person, index) => (
-                <PersonRow
-                  key={person.id}
-                  person={person}
-                  summary={summaries.find((item) => item.personId === person.id)}
-                  currency={currency}
-                  last={index === people.length - 1}
-                />
-              ))}
+              {people.map((person, index) => {
+                const entry = summaryOf.get(person.id);
+                return (
+                  <PersonRow
+                    key={person.id}
+                    person={person}
+                    summary={entry?.summary}
+                    currency={entry?.currency ?? currency}
+                    last={index === people.length - 1}
+                  />
+                );
+              })}
             </Card>
           )}
         </>
@@ -183,6 +216,7 @@ export default function PeopleScreen() {
 /**
  * The right-hand figure says who owes whom, not just how much. A bare number
  * beside a name is ambiguous in exactly the situation this screen exists for.
+ * It is in the currency that person's debts are kept in.
  */
 function PersonRow({
   person,

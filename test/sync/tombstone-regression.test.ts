@@ -100,7 +100,7 @@ describe('tombstoned records behave exactly like deleted records', () => {
     expect(after.totalBalanceMinor).toBe(100000 + 60000);
     expect(after.categorySpending).toEqual([]);
     expect(after.recentTransactions.map((item) => item.id)).not.toContain(expense.id);
-    expect(dashboardService.getExpenseByCategory(range)).toEqual([]);
+    expect(dashboardService.getExpenseByCategory(range, 'NPR')).toEqual([]);
   });
 
   it('removes a deleted transaction from every report aggregate', () => {

@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { View } from 'react-native';
 
 import { Banner, FormScreen, NativeDataNotice, Screen } from '@/components/ui';
@@ -13,6 +13,12 @@ export default function NewAccountScreen() {
   const { space } = useTheme();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  /**
+   * Set on the first tap and cleared only if saving fails. A second tap queued
+   * before the screen closes would otherwise create a second account with the same
+   * opening balance, and every total would count it twice.
+   */
+  const submitting = useRef(false);
 
   if (!isLocalFinanceDataAvailable) {
     return (
@@ -35,13 +41,15 @@ export default function NewAccountScreen() {
 
   function save(values: AccountFormValues) {
     const openingBalanceMinor = parseMoneyToMinorUnits(values.openingBalance);
-    if (openingBalanceMinor === null || saving) return;
+    if (openingBalanceMinor === null || submitting.current) return;
+    submitting.current = true;
     setSaving(true);
     setError('');
     try {
       createAccount({ ...values, openingBalanceMinor, icon: values.icon || undefined });
       router.back();
     } catch (caught) {
+      submitting.current = false;
       setError(getUserErrorMessage(caught));
     } finally {
       setSaving(false);

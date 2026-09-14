@@ -55,6 +55,7 @@ import {
   getReportSummary,
   getSimpleInsights,
   isLocalFinanceDataAvailable,
+  listReportCurrencies,
 } from '@/features/ui/data';
 import { getCategoryIdentity, useTheme } from '@/theme';
 import { formatMinorUnits, splitMinorUnits } from '@/utils/money';
@@ -70,6 +71,11 @@ type ReportData = {
    * defined reading against half a month and is never divided into one.
    */
   budgets: MonthlyBudgetComparison[] | null;
+  /**
+   * Currencies other than the one shown that had income or expenses in the
+   * period. Their figures are left out of this report rather than added to it.
+   */
+  otherCurrencies: string[];
 };
 
 type PresetOption = { value: Exclude<ReportPreset, 'last_1_month'>; label: string };
@@ -106,17 +112,22 @@ export default function ReportsScreen() {
     setLoading(true);
     setFailed(false);
     try {
+      const defaultCurrency = getAppSettings().defaultCurrency;
+      // Every figure on this screen is in one currency. Income and expenses in
+      // another are left out and named below, never added: nothing converts.
+      const filters = { currency: defaultCurrency };
       const months = periodMonthsInRange(range);
       setData({
-        summary: getReportSummary(range),
-        categories: getExpenseCategoryBreakdown(range),
-        trend: getIncomeExpenseTrend(range, getRecommendedGranularity(preset)),
-        insights: getSimpleInsights(range),
+        summary: getReportSummary(range, filters),
+        categories: getExpenseCategoryBreakdown(range, filters),
+        trend: getIncomeExpenseTrend(range, getRecommendedGranularity(preset), { filters }),
+        insights: getSimpleInsights(range, { filters }),
         // Two queries for the whole span, however many months it holds — never
         // one per month, and never one per budget.
         budgets: months === null ? null : getBudgetComparisonForMonths(months),
+        otherCurrencies: listReportCurrencies(range).filter((code) => code !== defaultCurrency),
       });
-      setCurrency(getAppSettings().defaultCurrency);
+      setCurrency(defaultCurrency);
     } catch (error) {
       if (__DEV__) console.error('Could not load report.', error);
       setFailed(true);
@@ -185,6 +196,15 @@ export default function ReportsScreen() {
           align="right"
         />
       </Card>
+      {data.otherCurrencies.length > 0 ? (
+        <Text variant="caption" tone="tertiary" style={{ marginTop: space.sm }}>
+          {'Figures are in ' +
+            currency +
+            '. Income and expenses in ' +
+            data.otherCurrencies.join(' and ') +
+            ' are not included, because currencies are never converted.'}
+        </Text>
+      ) : null}
 
       <Card padding="none" style={{ marginTop: space.md }}>
         <ListRow

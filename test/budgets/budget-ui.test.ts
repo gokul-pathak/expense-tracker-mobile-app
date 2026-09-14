@@ -200,7 +200,7 @@ describe('budget writes leave the accounting alone', () => {
   /** Every figure a budget must never move. */
   function accounting() {
     return {
-      totalBalance: getTotalBalance(),
+      totalBalance: getTotalBalance('NPR'),
       cash: getAccountBalance(fixture.cash.id),
       bank: getAccountBalance(fixture.bank.id),
       month: getReportSummary(getMonthRange(2026, 8)),

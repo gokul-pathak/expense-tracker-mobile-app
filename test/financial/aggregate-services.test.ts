@@ -37,6 +37,10 @@ const dashboardRepository = vi.hoisted(() => ({
   getExpenseForRange: vi.fn(),
   getIncomeForRange: vi.fn(),
   getRecentTransactions: vi.fn(),
+  listActiveAccountCurrencies: vi.fn(),
+}));
+vi.mock('@/features/settings/settings.service', () => ({
+  getAppSettings: () => ({ defaultCurrency: 'NPR' }),
 }));
 const reportsRepository = vi.hoisted(() => ({
   getCategoryTotals: vi.fn(),
@@ -66,6 +70,9 @@ describe('derived financial aggregates', () => {
     vi.clearAllMocks();
     for (const fn of Object.values(transactionRepository)) fn.mockReturnValue(0);
     for (const fn of Object.values(dashboardRepository)) fn.mockReturnValue(0);
+    dashboardRepository.listActiveAccountCurrencies.mockReturnValue([
+      { currency: 'NPR', accountCount: 1 },
+    ]);
     accountRepository.getAccountById.mockReturnValue({ id: 1, openingBalanceMinor: 10000 });
     accountRepository.getAccounts.mockReturnValue([{ id: 1, openingBalanceMinor: 10000 }]);
     dashboardRepository.getRecentTransactions.mockReturnValue([]);

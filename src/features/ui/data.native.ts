@@ -152,4 +152,8 @@ export {
   previewSell as previewInvestmentSell,
 } from '@/features/investments/trade-preview.service';
 
+// Figures in more than one currency are read one currency at a time.
+export { getPeopleFinancialSummaryByCurrency } from '@/features/transactions/transaction.service';
+export { listReportCurrencies } from '@/features/reports/reports.service';
+
 export const isLocalFinanceDataAvailable = true;

@@ -19,6 +19,10 @@ Once a device is linked, these source records synchronize with that person's own
 - categories, including which are built in
 - people
 - transactions of every type, with their amounts, dates, titles and notes
+- budgets: the planned amount for a month, currency and category — never what was spent
+- recurring templates and what happened to each scheduled date (generated or skipped)
+- investment assets, their trades (quantity, unit price, fee or amount, date, account and note)
+  and manual prices — never a holding, a cost basis, a gain or a value
 - the default-currency setting
 
 Deletions travel too, as tombstones, so a record deleted on one device disappears on the others
@@ -132,15 +136,30 @@ and is removed when the app is uninstalled.
 
 ## Diagnostics
 
-Sync failures are reported through typed status codes. Durable failure metadata is a short
-classification such as `network` or `constraint` — never a response body, a row, or a token. If
-crash reporting is enabled in a build, an unexpected sync exception may be sent with technical
-context only: the operation, the entity type and an error category. Amounts, notes, names, account
-names and email addresses are deliberately excluded.
+The app contains no crash reporter and no analytics, and sends nothing about an error anywhere. Sync
+failures are recorded on the device through typed status codes: durable failure metadata is a short
+classification such as `network` or `constraint` — never a response body, a row, or a token.
+Development builds write errors to the developer console; release builds do not, because a
+database error can quote the values it failed to write.
 
-## Deleting data
+**Settings → About** shows the app version, the database schema, the platform and the Cloud Sync
+state, for a bug report. It shows no amounts, names, notes or account details, and leaves the device
+only if the person copies it into a message themselves.
 
-- **Remove From This Device** clears the local copy and unlinks the device. The cloud account keeps
-  its data and can be downloaded again by signing in.
+## Deleting data, and what each action actually does
+
+- **Sign Out → Keep Data on This Device** ends the cloud session and unlinks the device. Every record
+  stays on the device and keeps working offline. Nothing in the cloud is deleted.
+- **Sign Out → Remove From This Device** clears every financial record on this device — accounts,
+  categories, people, transactions, budgets, recurring schedules and investments — together with the
+  sync queue, and unlinks the device. Built-in categories are re-created. The cloud account keeps
+  its data and can be downloaded again by signing in. App Lock settings are left alone. A receipt
+  draft that was never saved is not a financial record: it stays in the app's private storage until
+  it expires, seven days after it was last opened.
+- **Restore Backup** replaces every financial record on this device with the backup's, after the
+  whole file has been validated — a file that fails validation changes nothing. On a linked device
+  it also unlinks Cloud Sync and asks which copy to keep before anything is uploaded.
+- **Turning Cloud Sync off** is signing out; there is no separate switch, and it deletes nothing in
+  the cloud.
 - Deleting the cloud account itself is not implemented in the app. Signing out is not deletion, and
   the app does not claim it is.

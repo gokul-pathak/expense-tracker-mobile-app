@@ -48,6 +48,9 @@ const MILESTONES = [
   ['M7E, pull', '20260907210000_pull_sync'],
   ['M7F, cloud link', '20260908090000_cloud_link'],
   ['M8A/M8B, budgets', '20260909120000_budgets'],
+  ['M8C, recurring transactions', '20260911120000_recurring_transactions'],
+  ['M9A, receipt drafts', '20260912120000_receipt_drafts'],
+  ['M9B-M9E, receipt draft finalization', '20260913120000_receipt_draft_finalization'],
 ] as const;
 
 function insertLegacyAccount(name: string, withSyncId: boolean) {
