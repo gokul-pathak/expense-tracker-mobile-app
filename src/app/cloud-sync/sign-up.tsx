@@ -58,7 +58,8 @@ export default function SignUpScreen() {
         setNotice('Check your email to confirm your account, then sign in.');
         return;
       }
-      router.replace('/cloud-sync' as never);
+      // Back to the Cloud Sync screen this was opened from, not a second copy of it.
+      router.dismissTo('/cloud-sync' as never);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to create an account.');
     } finally {

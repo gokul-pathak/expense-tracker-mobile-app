@@ -56,3 +56,34 @@ export type HomeBudgetSummary = {
   categoryBudgetedMinor: number;
   hasAnyBudget: boolean;
 };
+
+/**
+ * What people owe the user and what the user owes, in one currency.
+ *
+ * The same totals People shows. Money outstanding in any other currency is only
+ * named in otherCurrencies and added to nothing.
+ */
+export type HomePeopleTotals = {
+  currency: string;
+  /** What others owe the user. */
+  receivableMinor: number;
+  /** What the user owes others. */
+  liabilityMinor: number;
+  otherCurrencies: string[];
+};
+
+/** One day of income and expense, counted the way Reports counts them. */
+export type CashflowDay = {
+  start: Date;
+  label: string;
+  incomeMinor: number;
+  expenseMinor: number;
+};
+
+/** The last seven days, oldest first and ending today, in one currency. */
+export type HomeCashflow = {
+  currency: string;
+  days: CashflowDay[];
+  incomeMinor: number;
+  expenseMinor: number;
+};

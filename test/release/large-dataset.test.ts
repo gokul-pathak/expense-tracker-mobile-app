@@ -16,6 +16,10 @@ import * as budgetService from '@/features/budgets/budget.service';
 import { listExpenseCategories } from '@/features/categories/category.service';
 import { getHomeBudgetSummary } from '@/features/dashboard/dashboard-budget.service';
 import { getDashboardSummary } from '@/features/dashboard/dashboard.service';
+import {
+  getHomeCashflow,
+  getHomePeopleTotals,
+} from '@/features/dashboard/home-quick-stats.service';
 import { buildFinancialContext } from '@/features/insights/financial-context.service';
 import { resolvePresetPeriod } from '@/features/insights/insight-period';
 import { contextPlanFor, routeInsightQuestion } from '@/features/insights/insight-router';
@@ -358,11 +362,14 @@ describe('every main read over a large dataset', () => {
   it('reads Home from aggregates, never a scan per card', () => {
     const { ms, queries, result } = measure('Home', () => ({
       dashboard: getDashboardSummary({ now: NOW }),
+      people: getHomePeopleTotals({ currency: 'NPR' }),
+      cashflow: getHomeCashflow({ now: NOW, currency: 'NPR' }),
       budget: getHomeBudgetSummary(),
       recurring: recurring.getRecurringHomeSummary(),
       portfolio: portfolio.getPortfolioSummary(),
     }));
     expect(result.dashboard.accountCount).toBe(10);
+    expect(result.cashflow.days).toHaveLength(7);
     expect(queries).toBeLessThanOrEqual(40);
     expect(ms).toBeLessThan(15_000);
   });

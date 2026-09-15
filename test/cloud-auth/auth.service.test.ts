@@ -58,6 +58,58 @@ describe('cloud auth service', () => {
     await expect(service.signOut()).resolves.toBeUndefined();
   });
 
+  it('says why an account could not be created', async () => {
+    const cases: [{ message: string; code?: string; status?: number }, string][] = [
+      [
+        { message: 'Email rate limit exceeded', code: 'over_email_send_rate_limit', status: 429 },
+        'Too many confirmation emails were requested. Wait a while, then try again.',
+      ],
+      [
+        { message: 'Error sending confirmation email', code: 'unexpected_failure', status: 500 },
+        'The confirmation email could not be sent. Try again later.',
+      ],
+      [
+        { message: 'Password is known to be weak', code: 'weak_password', status: 422 },
+        'Choose a stronger password: at least 8 characters, and not a common one.',
+      ],
+      [
+        { message: 'Email address "a@b.c" is invalid', code: 'email_address_invalid', status: 400 },
+        'That email address cannot be used. Check it, or use another address.',
+      ],
+      [
+        { message: 'Signups not allowed for this instance', code: 'signup_disabled', status: 422 },
+        'New cloud accounts cannot be created right now.',
+      ],
+      [
+        { message: 'User already registered', code: 'user_already_exists', status: 422 },
+        'Unable to create an account with that email.',
+      ],
+      // An older server with no code still gets the specific sentence.
+      [
+        { message: 'Error sending confirmation email' },
+        'The confirmation email could not be sent.',
+      ],
+    ];
+    for (const [error, expected] of cases) {
+      const mock = client();
+      mock.auth.signUp.mockResolvedValue({ data: { session: null, user: null }, error });
+      await expect(
+        createCloudAuthService(mock as never).signUp('a@example.test', 'password123'),
+      ).rejects.toThrow(expected);
+    }
+  });
+
+  it('never shows the provider’s own text for a failure it does not recognise', async () => {
+    const mock = client();
+    mock.auth.signUp.mockResolvedValue({
+      data: { session: null, user: null },
+      error: { message: 'Database error saving new user', code: 'unexpected_failure', status: 500 },
+    });
+    await expect(
+      createCloudAuthService(mock as never).signUp('a@example.test', 'password123'),
+    ).rejects.toThrow(/^Cloud Account request could not be completed\.$/);
+  });
+
   it('reports the unavailable state without a configured client', async () => {
     const service = createCloudAuthService(null);
     expect(service.isConfigured).toBe(false);

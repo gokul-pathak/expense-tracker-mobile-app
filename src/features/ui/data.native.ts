@@ -36,6 +36,10 @@ export {
   restoreChosenBackup,
 } from '@/features/backup/backup-files.native';
 export { getDashboardSummary } from '@/features/dashboard/dashboard.service';
+export {
+  getHomeCashflow,
+  getHomePeopleTotals,
+} from '@/features/dashboard/home-quick-stats.service';
 export { getHomeBudgetSummary } from '@/features/dashboard/dashboard-budget.service';
 export { getAccountBalance } from '@/features/transactions/account-balance.service';
 export { getBudgetComparisonForMonths } from '@/features/budgets/budget.reporting';

@@ -83,8 +83,19 @@ Only the screens with something non-obvious are noted. For the rest, the canvas 
 ### A1 · Home
 
 The screen that sells the product in three seconds. Greeting → `BalanceCard` → month block (Income /
-Expense / Saved in one card divided by hairlines, **not** three cards) → Spending donut with a
-top-five legend → Recent Transactions (one card of rows, "View All" action).
+Expense / Saved in one card divided by hairlines, **not** three cards) → **People** (You will receive
+/ You need to pay as a `StatTile` pair in one card, the whole card opening People) → **Shortcuts**
+(a 3×2 grid: Expense, Income, Transfer, Lend / Borrow, Add Person, then Scan Receipt on a build that
+reads receipts or Accounts on one that does not) → Budget, Recurring and Investments where they
+apply → **Last 7 Days** (Income and Expense tiles over an `AreaChart`, or one sentence when the week
+is empty) → Spending donut with a top-five legend → Recent Transactions (one card of rows, "View
+All" action).
+
+People, Shortcuts and Last 7 Days are **not on the canvas**. They were added after it was drawn, at
+the owner's request, for quick access modelled on a competing ledger app. What was deliberately not
+taken from that app: coins, a referral banner, and separate floating cards for each figure. The
+shortcut routes come from Quick Add's tiles (`features/dashboard/home-shortcuts.ts`), so the FAB and
+Home cannot disagree.
 
 The balance is the only `hero` figure on the screen. The donut holds the month's total expense in
 its centre.

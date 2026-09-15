@@ -1,8 +1,10 @@
+import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import {
+  AreaChart,
   BalanceCard,
   Card,
   CategoryChip,
@@ -18,6 +20,7 @@ import {
   Screen,
   SectionHeader,
   Skeleton,
+  StatTile,
   Text,
   TransactionRow,
 } from '@/components/ui';
@@ -31,7 +34,13 @@ import {
   isOverBudget,
 } from '@/features/budgets/budget-presentation';
 import type { BudgetProgress } from '@/features/budgets/budget.types';
-import type { DashboardSummary, HomeBudgetSummary } from '@/features/dashboard/dashboard.types';
+import type {
+  DashboardSummary,
+  HomeBudgetSummary,
+  HomeCashflow,
+  HomePeopleTotals,
+} from '@/features/dashboard/dashboard.types';
+import { getHomeShortcuts, type HomeShortcut } from '@/features/dashboard/home-shortcuts';
 import {
   dueLabel,
   formatScheduledShort,
@@ -49,12 +58,15 @@ import {
   getAppSettings,
   getDashboardSummary,
   getHomeBudgetSummary,
+  getHomeCashflow,
+  getHomePeopleTotals,
   getPortfolioSummary,
   getRecurringHomeSummary,
   isLocalFinanceDataAvailable,
+  isReceiptScanningAvailable,
   listActiveAccounts,
 } from '@/features/ui/data';
-import { getCategoryIdentity, useTheme } from '@/theme';
+import { getCategoryIdentity, useTheme, withAlpha } from '@/theme';
 import { formatMinorUnits, splitMinorUnits } from '@/utils/money';
 
 export default function HomeScreen() {
@@ -63,6 +75,8 @@ export default function HomeScreen() {
   const [recurring, setRecurring] = useState<RecurringHomeSummary>();
   const [portfolio, setPortfolio] = useState<PortfolioSummary>();
   const [portfolioFailed, setPortfolioFailed] = useState(false);
+  const [people, setPeople] = useState<HomePeopleTotals>();
+  const [cashflow, setCashflow] = useState<HomeCashflow>();
   const [currency, setCurrency] = useState('NPR');
   const [accountCount, setAccountCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -73,7 +87,12 @@ export default function HomeScreen() {
     setLoading(true);
     setFailed(false);
     try {
-      setSummary(getDashboardSummary());
+      const dashboard = getDashboardSummary();
+      setSummary(dashboard);
+      // Who owes whom and the last week's movement, in the currency of every
+      // figure above. Both are totals the services composed.
+      setPeople(getHomePeopleTotals({ currency: dashboard.currency }));
+      setCashflow(getHomeCashflow({ currency: dashboard.currency }));
       // A planning figure, read from the budget engine rather than recomputed
       // here. Home has no second opinion about what was spent.
       setBudget(getHomeBudgetSummary());
@@ -193,6 +212,12 @@ export default function HomeScreen() {
 
       <MonthCard summary={summary} currency={summary.currency} />
 
+      {people ? <PeopleSection people={people} /> : null}
+
+      <ShortcutsSection
+        shortcuts={getHomeShortcuts({ receiptScanning: isReceiptScanningAvailable() })}
+      />
+
       {budget ? <BudgetSection budget={budget} /> : null}
 
       {recurring && recurring.dueCount > 0 ? <RecurringSection recurring={recurring} /> : null}
@@ -212,6 +237,8 @@ export default function HomeScreen() {
           </Card>
         </View>
       ) : null}
+
+      {cashflow ? <CashflowSection cashflow={cashflow} /> : null}
 
       <View style={styles.section}>
         <SectionHeader
@@ -580,6 +607,192 @@ const investmentStyles = StyleSheet.create({
   figures: { flexShrink: 1, minWidth: 0, alignItems: 'flex-end', gap: 2 },
 });
 
+/**
+ * Who owes whom, at a glance: the same totals People shows, in Home's currency.
+ * The whole card opens People, where each person is listed.
+ */
+function PeopleSection({ people }: { people: HomePeopleTotals }) {
+  const { palette, space, motion } = useTheme();
+  const openPeople = () => router.push('/people' as never);
+  return (
+    <View style={styles.section}>
+      <SectionHeader
+        title="People"
+        action={{ label: 'View all', onPress: openPeople, accessibilityLabel: 'View people' }}
+      />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={
+          'People. You will receive ' +
+          formatMinorUnits(people.receivableMinor, people.currency) +
+          '. You need to pay ' +
+          formatMinorUnits(people.liabilityMinor, people.currency) +
+          '.'
+        }
+        onPress={openPeople}
+        style={({ pressed }) => (pressed ? { transform: [{ scale: motion.press.scale }] } : null)}
+      >
+        <Card style={styles.pair}>
+          <StatTile
+            label="You will receive"
+            minorUnits={people.receivableMinor}
+            currency={people.currency}
+            direction={people.receivableMinor > 0 ? 'income' : undefined}
+            size="row"
+          />
+          <View style={[styles.pairDivider, { backgroundColor: palette.divider }]} />
+          <StatTile
+            label="You need to pay"
+            minorUnits={people.liabilityMinor}
+            currency={people.currency}
+            direction={people.liabilityMinor > 0 ? 'expense' : undefined}
+            size="row"
+            align="right"
+          />
+        </Card>
+      </Pressable>
+      {people.otherCurrencies.length > 0 ? (
+        <Text variant="caption" tone="tertiary" style={{ marginTop: space.sm }}>
+          {'Amounts in ' +
+            people.otherCurrencies.join(', ') +
+            ' are listed on People, each totalled on its own.'}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * The actions reached for most, one tap from Home. The money actions open the
+ * same forms Quick Add opens; nothing here records anything by itself.
+ */
+function ShortcutsSection({ shortcuts }: { shortcuts: HomeShortcut[] }) {
+  const { space } = useTheme();
+  return (
+    <View style={styles.section}>
+      <SectionHeader title="Shortcuts" />
+      <Card padding="sm" style={[styles.shortcuts, { rowGap: space.xs }]}>
+        {shortcuts.map((shortcut) => (
+          <ShortcutTile key={shortcut.route} shortcut={shortcut} />
+        ))}
+      </Card>
+    </View>
+  );
+}
+
+function ShortcutTile({ shortcut }: { shortcut: HomeShortcut }) {
+  const { palette, space, size, radius, motion } = useTheme();
+  const color = {
+    negative: palette.negative,
+    positive: palette.positive,
+    neutral: palette.textSecondary,
+    accent: palette.accent,
+  }[shortcut.tone];
+  const chip = size.buttonSmall;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={shortcut.label}
+      onPress={() => {
+        if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        router.push(shortcut.route as never);
+      }}
+      style={({ pressed }) => [
+        styles.shortcut,
+        {
+          paddingVertical: space.md,
+          paddingHorizontal: space.xs,
+          gap: space.sm,
+          borderRadius: radius.control,
+        },
+        pressed ? { transform: [{ scale: motion.press.scale }] } : null,
+      ]}
+    >
+      <View
+        style={[
+          styles.shortcutChip,
+          {
+            width: chip,
+            height: chip,
+            borderRadius: chip / 3.4,
+            backgroundColor: withAlpha(color, 0.14),
+          },
+        ]}
+      >
+        <Icon name={shortcut.icon} size={20} color={color} />
+      </View>
+      <Text variant="small" align="center" numberOfLines={2}>
+        {shortcut.label}
+      </Text>
+    </Pressable>
+  );
+}
+
+/**
+ * Income against expense for each of the last seven days, ending today. A week
+ * with nothing in it says so in a sentence rather than drawing two flat lines.
+ */
+function CashflowSection({ cashflow }: { cashflow: HomeCashflow }) {
+  const { palette, space } = useTheme();
+  const quiet = cashflow.incomeMinor === 0 && cashflow.expenseMinor === 0;
+  return (
+    <View style={styles.section}>
+      <SectionHeader
+        title="Last 7 Days"
+        action={{
+          label: 'Reports',
+          onPress: () => router.navigate('/reports' as never),
+          accessibilityLabel: 'Open reports',
+        }}
+      />
+      <Card style={{ gap: space.lg }}>
+        <View style={styles.pair}>
+          <StatTile
+            label="Income"
+            minorUnits={cashflow.incomeMinor}
+            currency={cashflow.currency}
+            direction={cashflow.incomeMinor > 0 ? 'income' : undefined}
+            size="row"
+          />
+          <StatTile
+            label="Expense"
+            minorUnits={cashflow.expenseMinor}
+            currency={cashflow.currency}
+            direction={cashflow.expenseMinor > 0 ? 'expense' : undefined}
+            size="row"
+            align="right"
+          />
+        </View>
+        {quiet ? (
+          <Text variant="small" tone="secondary">
+            No income or expenses in the last 7 days.
+          </Text>
+        ) : (
+          <AreaChart
+            labels={cashflow.days.map((day) => day.label)}
+            series={[
+              {
+                key: 'income',
+                label: 'Income',
+                color: palette.positive,
+                values: cashflow.days.map((day) => day.incomeMinor),
+              },
+              {
+                key: 'expense',
+                label: 'Expense',
+                color: palette.negative,
+                values: cashflow.days.map((day) => day.expenseMinor),
+              },
+            ]}
+            formatValue={(value) => splitMinorUnits(value, cashflow.currency).integer}
+            accessibilityLabel="Income against expense for each of the last 7 days. Touch to scrub."
+          />
+        )}
+      </Card>
+    </View>
+  );
+}
+
 /** The month's category split: a donut with the total in its centre and a legend. */
 function SpendingCard({ summary, currency }: { summary: DashboardSummary; currency: string }) {
   const { space } = useTheme();
@@ -665,6 +878,8 @@ function HomeSkeleton() {
       </View>
       <Skeleton height={150} radius={radius.heroCard} />
       <Skeleton height={148} radius={radius.card} />
+      <Skeleton height={76} radius={radius.card} />
+      <Skeleton height={176} radius={radius.card} />
       <View style={{ marginTop: space.md, gap: space.sm }}>
         <Skeleton width={90} height={12} radius="pill" />
         <Skeleton height={140} radius={radius.card} />
@@ -699,6 +914,11 @@ const styles = StyleSheet.create({
   highlight: { flexDirection: 'row', alignItems: 'center' },
   highlightName: { flex: 1, minWidth: 0 },
   swatch: { width: 8, height: 8, borderRadius: 2 },
+  pair: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  pairDivider: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch' },
+  shortcuts: { flexDirection: 'row', flexWrap: 'wrap' },
+  shortcut: { width: '33.333%', alignItems: 'center' },
+  shortcutChip: { alignItems: 'center', justifyContent: 'center' },
   recurringRow: { flexDirection: 'row', alignItems: 'center' },
   recurringText: { flex: 1, minWidth: 0, gap: 2 },
 });

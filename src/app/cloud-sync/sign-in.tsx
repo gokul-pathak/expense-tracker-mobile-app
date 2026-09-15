@@ -54,7 +54,9 @@ export default function SignInScreen() {
     setError('');
     try {
       await cloudAuthService.signIn(email, password);
-      router.replace('/cloud-sync' as never);
+      // Back to the Cloud Sync screen this was opened from. Replacing would stack
+      // a second Cloud Sync on top of it, and Back would land on the first.
+      router.dismissTo('/cloud-sync' as never);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to sign in.');
     } finally {
